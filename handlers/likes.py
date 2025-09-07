@@ -12,6 +12,8 @@ import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
 
+from .basic import edit_text_with_photo
+
 logger = logging.getLogger(__name__)
 router = Router()
 db = Database(settings.DATABASE_PATH)
@@ -38,6 +40,7 @@ async def show_my_likes(callback: CallbackQuery):
         text += "• Быть активнее в поиске"
         
         await callback.message.edit_text(text, reply_markup=kb.back())
+        # await edit_text_with_photo(callback, text, kb.back())
         await callback.answer()
         return
     
@@ -97,10 +100,23 @@ async def like_back(callback: CallbackQuery):
         text = texts.MATCH_CREATED + contact_text
         keyboard = kb.contact(target_user.get('username') if target_user else None)
         
-        await callback.message.edit_text(text, reply_markup=keyboard)
+        # await callback.message.edit_text(text, reply_markup=keyboard)
+
+        # if callback.message.photo:
+        #     await callback.message.edit_caption(
+        #         caption=text,
+        #         reply_markup=keyboard
+        #     )
+        # else:
+        #     await callback.message.edit_text(
+        #         text,
+        #         reply_markup=keyboard
+        #     )
+        await edit_text_with_photo(callback, text, keyboard)
         logger.info(f"Взаимный лайк: {user_id} <-> {target_user_id}")
     else:
         await callback.message.edit_text("❤️ Лайк отправлен!", reply_markup=kb.back())
+        # await edit_text_with_photo(callback, "❤️ Лайк отправлен!", reply_markup=kb.back())
     
     await callback.answer()
 
@@ -112,6 +128,7 @@ async def skip_like(callback: CallbackQuery):
     
     if not user:
         await callback.message.edit_text("❌ Ошибка", reply_markup=kb.back())
+        # await edit_text_with_photo(callback, "❌ Ошибка", reply_markup=kb.back())
         await callback.answer()
         return
     
@@ -120,7 +137,18 @@ async def skip_like(callback: CallbackQuery):
     
     if len(likes) <= 1:
         text = "✅ Все лайки просмотрены!\n\nЗайдите позже, возможно появятся новые."
-        await callback.message.edit_text(text, reply_markup=kb.back())
+        # await callback.message.edit_text(text, reply_markup=kb.back())
+        # if callback.message.photo:
+        #     await callback.message.edit_caption(
+        #         caption=text,
+        #         reply_markup=kb.back()
+        #     )
+        # else:
+        #     await callback.message.edit_text(
+        #         text,
+        #         reply_markup=kb.back()
+        #     )
+        await edit_text_with_photo(callback, "❌ Ошибка", reply_markup=kb.back())
     else:
         # Показываем следующий лайк
         await show_like_profile(callback, likes[1])
@@ -174,7 +202,18 @@ async def show_my_matches(callback: CallbackQuery):
     buttons.append([kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
     keyboard = kb.InlineKeyboardMarkup(inline_keyboard=buttons)
     
-    await callback.message.edit_text(text, reply_markup=keyboard)
+    # await callback.message.edit_text(text, reply_markup=keyboard)
+    # if callback.message.photo:
+    #     await callback.message.edit_caption(
+    #         caption=text,
+    #         reply_markup=keyboard
+    #     )
+    # else:
+    #     await callback.message.edit_text(
+    #         text,
+    #         reply_markup=keyboard
+    #     )
+    await edit_text_with_photo(callback, text, keyboard)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("contact_"))

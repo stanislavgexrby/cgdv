@@ -14,6 +14,8 @@ import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
 
+from .basic import edit_text_with_photo
+
 logger = logging.getLogger(__name__)
 router = Router()
 db = Database(settings.DATABASE_PATH)
@@ -156,7 +158,8 @@ async def begin_search(callback: CallbackQuery, state: FSMContext):
     )
     
     if not profiles:
-        await callback.message.edit_text(texts.NO_PROFILES, reply_markup=kb.back())
+        # await callback.message.edit_text(texts.NO_PROFILES, reply_markup=kb.back())
+        await edit_text_with_photo(callback, texts.NO_PROFILES, kb.back())
         await callback.answer()
         return
     
@@ -173,7 +176,18 @@ async def show_current_profile(callback: CallbackQuery, state: FSMContext):
     index = data['current_index']
     
     if index >= len(profiles):
-        await callback.message.edit_text(texts.NO_PROFILES, reply_markup=kb.back())
+        # await callback.message.edit_text(texts.NO_PROFILES, reply_markup=kb.back())
+        # if callback.message.photo:
+        #     await callback.message.edit_caption(
+        #         caption=texts.NO_PROFILES,
+        #         reply_markup=kb.back()
+        #     )
+        # else:
+        #     await callback.message.edit_text(
+        #         texts.NO_PROFILES,
+        #         reply_markup=kb.back()
+        #     )
+        await edit_text_with_photo(callback, texts.NO_PROFILES, kb.back())
         await callback.answer()
         return
     
@@ -242,20 +256,48 @@ async def like_profile(callback: CallbackQuery, state: FSMContext):
         
         text = texts.MATCH_CREATED + contact_text
         keyboard = kb.contact(target_user.get('username') if target_user else None)
-        
-        await callback.message.edit_text(text, reply_markup=keyboard)
+
+        await callback.message.delete()
+        # await callback.message.answer(text, reply_markup=keyboard)
+        # await callback.message.edit_text(text, reply_markup=keyboard)
+        await edit_text_with_photo(callback, text, keyboard)
         logger.info(f"Матч: {from_user_id} <-> {target_user_id}")
     else:
         # Обычный лайк
-        await callback.message.edit_text(
-            texts.LIKE_SENT,
-            reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
-                [kb.InlineKeyboardButton(text="🔍 Продолжить поиск", callback_data="continue_search")],
-                [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-            ])
+        # await callback.message.edit_text(
+        #     texts.LIKE_SENT,
+        #     reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+        #         [kb.InlineKeyboardButton(text="🔍 Продолжить поиск", callback_data="continue_search")],
+        #         [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        #     ])
+        # )
+        # logger.info(f"Лайк: {from_user_id} -> {target_user_id}")
+        # if callback.message.photo:
+        #     await callback.message.edit_caption(
+        #         caption=texts.LIKE_SENT,
+        #         reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+        #             [kb.InlineKeyboardButton(text="🔍 Продолжить поиск", callback_data="continue_search")],
+        #             [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        #         ])
+        #     )
+        # else:
+        #     await callback.message.edit_text(
+        #         texts.LIKE_SENT,
+        #         reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+        #             [kb.InlineKeyboardButton(text="🔍 Продолжить поиск", callback_data="continue_search")],
+        #             [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        #     ])
+        #     )
+        await edit_text_with_photo(callback, texts.LIKE_SENT,
+            kb.InlineKeyboardMarkup(
+                inline_keyboard=[
+                    [kb.InlineKeyboardButton(text="🔍 Продолжить поиск", callback_data="continue_search")],
+                    [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+                ]
+            )
         )
         logger.info(f"Лайк: {from_user_id} -> {target_user_id}")
-    
+
     await callback.answer()
 
 @router.callback_query(F.data == "continue_search", SearchForm.browsing)

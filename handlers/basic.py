@@ -4,8 +4,9 @@
 """
 
 import logging
+from typing import Optional
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
 from aiogram.filters import Command
 
 from database.database import Database
@@ -91,7 +92,8 @@ async def select_game(callback: CallbackQuery):
     else:
         text += "\n\nСоздайте анкету для начала:"
     
-    await callback.message.edit_text(text, reply_markup=kb.main_menu(has_profile, game))
+    # await callback.message.edit_text(text, reply_markup=kb.main_menu(has_profile, game))
+    await edit_text_with_photo(callback, text, kb.main_menu(has_profile, game))
     await callback.answer()
 
 @router.callback_query(F.data.startswith("switch_"))
@@ -117,7 +119,8 @@ async def switch_game(callback: CallbackQuery):
     else:
         text += "\n\nСоздайте анкету для начала:"
     
-    await callback.message.edit_text(text, reply_markup=kb.main_menu(has_profile, game))
+    # await callback.message.edit_text(text, reply_markup=kb.main_menu(has_profile, game))
+    await edit_text_with_photo(callback, text, kb.main_menu(has_profile, game))
     await callback.answer()
 
 @router.callback_query(F.data == "main_menu")
@@ -127,7 +130,8 @@ async def show_main_menu(callback: CallbackQuery):
     user = db.get_user(user_id)
     
     if not user or not user.get('current_game'):
-        await callback.message.edit_text(texts.WELCOME, reply_markup=kb.game_selection())
+        # await callback.message.edit_text(texts.WELCOME, reply_markup=kb.game_selection())
+        await edit_text_with_photo(callback, texts.WELCOME, kb.game_selection())
         await callback.answer()
         return
     
@@ -141,7 +145,8 @@ async def show_main_menu(callback: CallbackQuery):
     else:
         text += "\n\nСоздайте анкету для начала:"
     
-    await callback.message.edit_text(text, reply_markup=kb.main_menu(has_profile, user['current_game']))
+    # await callback.message.edit_text(text, reply_markup=kb.main_menu(has_profile, user['current_game']))
+    await edit_text_with_photo(callback, text, kb.main_menu(has_profile, user['current_game']))
     await callback.answer()
 
 @router.callback_query(F.data == "view_profile")
@@ -157,7 +162,8 @@ async def view_profile(callback: CallbackQuery):
     profile_text = texts.format_profile(user)
     text = f"👤 Ваша анкета:\n\n{profile_text}"
     
-    await callback.message.edit_text(text, reply_markup=kb.back())
+    # await callback.message.edit_text(text, reply_markup=kb.back())
+    await edit_text_with_photo(callback, text, kb.back())
     await callback.answer()
 
 # Админ команды
@@ -190,3 +196,15 @@ async def cmd_admin(message: Message):
         await message.answer(text)
     except Exception as e:
         await message.answer(f"Ошибка получения статистики: {e}")
+
+async def edit_text_with_photo(callback: CallbackQuery, text: str, reply_markup: Optional[InlineKeyboardMarkup] = None):
+    if callback.message.photo:
+        await callback.message.edit_caption(
+            text,
+            reply_markup=reply_markup
+        )
+    else:
+        await callback.message.edit_text(
+            text,
+            reply_markup=reply_markup
+        )
