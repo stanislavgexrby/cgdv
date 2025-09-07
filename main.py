@@ -1,8 +1,3 @@
-# main.py
-"""
-TeammateBot - Простая и чистая архитектура
-"""
-
 import asyncio
 import logging
 import os
@@ -25,7 +20,7 @@ async def main():
 
     bot_token = os.getenv('BOT_TOKEN')
     if not bot_token or bot_token == 'your_bot_token_here':
-        logger.error("❌ BOT_TOKEN не установлен в .env файле")
+        logger.error("BOT_TOKEN не установлен в .env файле")
         return
 
     bot = Bot(token=bot_token)
@@ -42,7 +37,7 @@ async def main():
             await bot.send_message(int(admin_id), "🤖 TeammateBot запущен!")
         except:
             pass
-    
+
     try:
         await dp.start_polling(bot, skip_updates=True)
     except Exception as e:
