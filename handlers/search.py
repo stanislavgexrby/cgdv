@@ -1,5 +1,5 @@
 import logging
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -9,7 +9,7 @@ import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
 
-from .basic import edit_text_with_photo
+from .basic import safe_edit_message
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -34,7 +34,8 @@ async def start_search(callback: CallbackQuery, state: FSMContext):
         rating_filter=None,
         position_filter=None,
         profiles=[],
-        current_index=0
+        current_index=0,
+        message_with_photo=False  # Флаг для отслеживания сообщений с фото
     )
 
     await state.set_state(SearchForm.filters)
@@ -44,7 +45,7 @@ async def start_search(callback: CallbackQuery, state: FSMContext):
     text += "⚔️ Позиция: любая\n\n"
     text += "Настройте фильтры или начните поиск:"
 
-    await callback.message.edit_text(text, reply_markup=kb.search_filters())
+    await safe_edit_message(callback, text, kb.search_filters())
     await callback.answer()
 
 @router.callback_query(F.data == "filter_rating", SearchForm.filters)
@@ -52,7 +53,7 @@ async def set_rating_filter(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     game = data['game']
 
-    await callback.message.edit_text("🏆 Выберите рейтинг:", reply_markup=kb.ratings(game))
+    await safe_edit_message(callback, "🏆 Выберите рейтинг:", kb.ratings(game))
     await callback.answer()
 
 @router.callback_query(F.data.startswith("rating_"), SearchForm.filters)
@@ -65,10 +66,14 @@ async def save_rating_filter(callback: CallbackQuery, state: FSMContext):
 
     text = "🔍 Фильтры поиска:\n\n"
     text += f"🏆 Рейтинг: {rating_name}\n"
-    text += "⚔️ Позиция: любая\n\n"
+    
+    position_text = "любая"
+    if data.get('position_filter'):
+        position_text = settings.POSITIONS[data['game']].get(data['position_filter'], data['position_filter'])
+    text += f"⚔️ Позиция: {position_text}\n\n"
     text += "Настройте фильтры или начните поиск:"
 
-    await callback.message.edit_text(text, reply_markup=kb.search_filters())
+    await safe_edit_message(callback, text, kb.search_filters())
     await callback.answer()
 
 @router.callback_query(F.data == "filter_position", SearchForm.filters)
@@ -84,7 +89,7 @@ async def set_position_filter(callback: CallbackQuery, state: FSMContext):
 
     keyboard = kb.InlineKeyboardMarkup(inline_keyboard=buttons)
 
-    await callback.message.edit_text("⚔️ Выберите позицию:", reply_markup=keyboard)
+    await safe_edit_message(callback, "⚔️ Выберите позицию:", keyboard)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("pos_filter_"), SearchForm.filters)
@@ -104,7 +109,7 @@ async def save_position_filter(callback: CallbackQuery, state: FSMContext):
     text += f"⚔️ Позиция: {position_text}\n\n"
     text += "Настройте фильтры или начните поиск:"
 
-    await callback.message.edit_text(text, reply_markup=kb.search_filters())
+    await safe_edit_message(callback, text, kb.search_filters())
     await callback.answer()
 
 @router.callback_query(F.data == "cancel_filter", SearchForm.filters)
@@ -124,7 +129,7 @@ async def cancel_filter(callback: CallbackQuery, state: FSMContext):
     text += f"⚔️ Позиция: {position_text}\n\n"
     text += "Настройте фильтры или начните поиск:"
 
-    await callback.message.edit_text(text, reply_markup=kb.search_filters())
+    await safe_edit_message(callback, text, kb.search_filters())
     await callback.answer()
 
 @router.callback_query(F.data == "start_search", SearchForm.filters)
@@ -140,13 +145,12 @@ async def begin_search(callback: CallbackQuery, state: FSMContext):
     )
 
     if not profiles:
-        # await callback.message.edit_text(texts.NO_PROFILES, reply_markup=kb.back())
-        await edit_text_with_photo(callback, texts.NO_PROFILES, kb.back())
+        await safe_edit_message(callback, texts.NO_PROFILES, kb.back())
         await callback.answer()
         return
 
     await state.set_state(SearchForm.browsing)
-    await state.update_data(profiles=profiles, current_index=0)
+    await state.update_data(profiles=profiles, current_index=0, message_with_photo=False)
 
     await show_current_profile(callback, state)
 
@@ -156,18 +160,8 @@ async def show_current_profile(callback: CallbackQuery, state: FSMContext):
     index = data['current_index']
 
     if index >= len(profiles):
-        # await callback.message.edit_text(texts.NO_PROFILES, reply_markup=kb.back())
-        # if callback.message.photo:
-        #     await callback.message.edit_caption(
-        #         caption=texts.NO_PROFILES,
-        #         reply_markup=kb.back()
-        #     )
-        # else:
-        #     await callback.message.edit_text(
-        #         texts.NO_PROFILES,
-        #         reply_markup=kb.back()
-        #     )
-        await edit_text_with_photo(callback, texts.NO_PROFILES, kb.back())
+        await safe_edit_message(callback, texts.NO_PROFILES, kb.back())
+        await state.update_data(message_with_photo=False)
         await callback.answer()
         return
 
@@ -176,17 +170,25 @@ async def show_current_profile(callback: CallbackQuery, state: FSMContext):
 
     try:
         if profile.get('photo_id'):
-            await callback.message.delete()
-            await callback.message.answer_photo(
+            try:
+                await callback.message.delete()
+            except:
+                pass
+
+            sent_message = await callback.message.answer_photo(
                 photo=profile['photo_id'],
                 caption=profile_text,
                 reply_markup=kb.profile_actions(profile['telegram_id'])
             )
+
+            await state.update_data(message_with_photo=True, last_message_id=sent_message.message_id)
         else:
-            await callback.message.edit_text(
+            await safe_edit_message(
+                callback,
                 profile_text,
-                reply_markup=kb.profile_actions(profile['telegram_id'])
+                kb.profile_actions(profile['telegram_id'])
             )
+            await state.update_data(message_with_photo=False)
 
         await callback.answer()
 
@@ -203,12 +205,18 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("skip_"), SearchForm.browsing)
 async def skip_profile(callback: CallbackQuery, state: FSMContext):
-    await show_next_profile(callback, state)
+    if callback.data.startswith("skip_") and callback.data[5:].isdigit():
+        await show_next_profile(callback, state)
 
 @router.callback_query(F.data.startswith("like_"), SearchForm.browsing)
 async def like_profile(callback: CallbackQuery, state: FSMContext):
+    parts = callback.data.split("_")
+    if len(parts) != 2 or not parts[1].isdigit():
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
     try:
-        target_user_id = int(callback.data.split("_")[1])
+        target_user_id = int(parts[1])
     except (ValueError, IndexError):
         await callback.answer("❌ Ошибка", show_alert=True)
         return
@@ -230,37 +238,22 @@ async def like_profile(callback: CallbackQuery, state: FSMContext):
         text = texts.MATCH_CREATED + contact_text
         keyboard = kb.contact(target_user.get('username') if target_user else None)
 
-        await callback.message.delete()
-        # await callback.message.answer(text, reply_markup=keyboard)
-        # await callback.message.edit_text(text, reply_markup=keyboard)
-        await edit_text_with_photo(callback, text, keyboard)
+        if data.get('message_with_photo'):
+            try:
+                await callback.message.delete()
+            except:
+                pass
+            await callback.message.answer(text, reply_markup=keyboard)
+        else:
+            await safe_edit_message(callback, text, keyboard)
+
+        # await notify_about_match(bot, target_user_id, from_user_id)
+
         logger.info(f"Матч: {from_user_id} <-> {target_user_id}")
     else:
-        # await callback.message.edit_text(
-        #     texts.LIKE_SENT,
-        #     reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
-        #         [kb.InlineKeyboardButton(text="🔍 Продолжить поиск", callback_data="continue_search")],
-        #         [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-        #     ])
-        # )
-        # logger.info(f"Лайк: {from_user_id} -> {target_user_id}")
-        # if callback.message.photo:
-        #     await callback.message.edit_caption(
-        #         caption=texts.LIKE_SENT,
-        #         reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
-        #             [kb.InlineKeyboardButton(text="🔍 Продолжить поиск", callback_data="continue_search")],
-        #             [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-        #         ])
-        #     )
-        # else:
-        #     await callback.message.edit_text(
-        #         texts.LIKE_SENT,
-        #         reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
-        #             [kb.InlineKeyboardButton(text="🔍 Продолжить поиск", callback_data="continue_search")],
-        #             [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-        #     ])
-        #     )
-        await edit_text_with_photo(callback, texts.LIKE_SENT,
+        await safe_edit_message(
+            callback, 
+            texts.LIKE_SENT,
             kb.InlineKeyboardMarkup(
                 inline_keyboard=[
                     [kb.InlineKeyboardButton(text="🔍 Продолжить поиск", callback_data="continue_search")],
@@ -268,11 +261,12 @@ async def like_profile(callback: CallbackQuery, state: FSMContext):
                 ]
             )
         )
+
+        # await notify_about_like(bot, target_user_id)
         logger.info(f"Лайк: {from_user_id} -> {target_user_id}")
 
     await callback.answer()
 
 @router.callback_query(F.data == "continue_search", SearchForm.browsing)
 async def continue_search(callback: CallbackQuery, state: FSMContext):
-    """Продолжить поиск"""
     await show_next_profile(callback, state)

@@ -13,6 +13,26 @@ logger = logging.getLogger(__name__)
 router = Router()
 db = Database(settings.DATABASE_PATH)
 
+__all__ = ['safe_edit_message', 'router']
+
+async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Optional[InlineKeyboardMarkup] = None):
+    try:
+        if callback.message.photo:
+            await callback.message.delete()
+            await callback.message.answer(text, reply_markup=reply_markup)
+        else:
+            await callback.message.edit_text(
+                text=text,
+                reply_markup=reply_markup
+            )
+    except Exception as e:
+        logger.error(f"Ошибка редактирования сообщения: {e}")
+        try:
+            await callback.message.delete()
+            await callback.message.answer(text, reply_markup=reply_markup)
+        except:
+            pass
+
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     user_id = message.from_user.id
@@ -79,8 +99,7 @@ async def select_game(callback: CallbackQuery):
     else:
         text += "\n\nСоздайте анкету для начала:"
 
-    # await callback.message.edit_text(text, reply_markup=kb.main_menu(has_profile, game))
-    await edit_text_with_photo(callback, text, kb.main_menu(has_profile, game))
+    await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
     await callback.answer()
 
 @router.callback_query(F.data.startswith("switch_"))
@@ -103,8 +122,7 @@ async def switch_game(callback: CallbackQuery):
     else:
         text += "\n\nСоздайте анкету для начала:"
 
-    # await callback.message.edit_text(text, reply_markup=kb.main_menu(has_profile, game))
-    await edit_text_with_photo(callback, text, kb.main_menu(has_profile, game))
+    await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
     await callback.answer()
 
 @router.callback_query(F.data == "main_menu")
@@ -113,8 +131,7 @@ async def show_main_menu(callback: CallbackQuery):
     user = db.get_user(user_id)
 
     if not user or not user.get('current_game'):
-        # await callback.message.edit_text(texts.WELCOME, reply_markup=kb.game_selection())
-        await edit_text_with_photo(callback, texts.WELCOME, kb.game_selection())
+        await safe_edit_message(callback, texts.WELCOME, kb.game_selection())
         await callback.answer()
         return
 
@@ -128,8 +145,7 @@ async def show_main_menu(callback: CallbackQuery):
     else:
         text += "\n\nСоздайте анкету для начала:"
 
-    # await callback.message.edit_text(text, reply_markup=kb.main_menu(has_profile, user['current_game']))
-    await edit_text_with_photo(callback, text, kb.main_menu(has_profile, user['current_game']))
+    await safe_edit_message(callback, text, kb.main_menu(has_profile, user['current_game']))
     await callback.answer()
 
 @router.callback_query(F.data == "view_profile")
@@ -144,8 +160,7 @@ async def view_profile(callback: CallbackQuery):
     profile_text = texts.format_profile(user)
     text = f"👤 Ваша анкета:\n\n{profile_text}"
 
-    # await callback.message.edit_text(text, reply_markup=kb.back())
-    await edit_text_with_photo(callback, text, kb.back())
+    await safe_edit_message(callback, text, kb.back())
     await callback.answer()
 
 @router.message(Command("admin"))
@@ -156,7 +171,8 @@ async def cmd_admin(message: Message):
         return
 
     try:
-        with db._init_db.__self__._init_db.__globals__['sqlite3'].connect(db.db_path) as conn:
+        import sqlite3
+        with sqlite3.connect(db.db_path) as conn:
             cursor = conn.execute("SELECT COUNT(*) FROM users")
             total_users = cursor.fetchone()[0]
 
@@ -176,15 +192,3 @@ async def cmd_admin(message: Message):
         await message.answer(text)
     except Exception as e:
         await message.answer(f"Ошибка получения статистики: {e}")
-
-async def edit_text_with_photo(callback: CallbackQuery, text: str, reply_markup: Optional[InlineKeyboardMarkup] = None):
-    if callback.message.photo:
-        await callback.message.edit_caption(
-            text,
-            reply_markup=reply_markup
-        )
-    else:
-        await callback.message.edit_text(
-            text,
-            reply_markup=reply_markup
-        )

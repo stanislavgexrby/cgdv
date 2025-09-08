@@ -127,10 +127,8 @@ def main():
 
     if os.name == 'nt':  # Windows
         print("   python main.py")
-        print("   или дважды кликните на run.bat")
     else:  # Linux/macOS
         print("   python main.py")
-        print("   или запустите: ./run.sh")
 
     return True
 
