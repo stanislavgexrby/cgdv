@@ -43,8 +43,9 @@ async def cmd_start(message: Message):
     user = db.get_user(user_id)
 
     if user and user.get('current_game'):
-        game_name = settings.GAMES.get(user['current_game'], user['current_game'])
-        has_profile = bool(user.get('name'))
+        game = user['current_game']
+        game_name = settings.GAMES.get(game, game)
+        has_profile = db.has_profile(user_id, game)
 
         text = f"🏠 Главное меню\n\nТекущая игра: {game_name}"
         if has_profile:
@@ -52,7 +53,7 @@ async def cmd_start(message: Message):
         else:
             text += "\n\nСоздайте анкету для начала:"
 
-        await message.answer(text, reply_markup=kb.main_menu(has_profile, user['current_game']))
+        await message.answer(text, reply_markup=kb.main_menu(has_profile, game))
     else:
         await message.answer(texts.WELCOME, reply_markup=kb.game_selection())
 
@@ -61,13 +62,13 @@ async def cmd_help(message: Message):
     help_text = """🎮 TeammateBot - Помощь
 
 🔍 Функции:
-• Создание анкеты
+• Создание анкеты для каждой игры
 • Поиск сокомандников
 • Система лайков и матчей
 
 📝 Как пользоваться:
 1. Выберите игру (Dota 2 или CS2)
-2. Создайте анкету
+2. Создайте анкету для выбранной игры
 3. Ищите игроков с фильтрами
 4. Лайкайте понравившихся
 5. При взаимном лайке получите контакты
@@ -88,10 +89,9 @@ async def select_game(callback: CallbackQuery):
 
     db.create_user(user_id, username, game)
 
-    user = db.get_user(user_id)
-    has_profile = bool(user.get('name'))
-
+    has_profile = db.has_profile(user_id, game)
     game_name = settings.GAMES.get(game, game)
+    
     text = f"🏠 Главное меню\n\nИгра: {game_name}"
 
     if has_profile:
@@ -111,16 +111,15 @@ async def switch_game(callback: CallbackQuery):
 
     db.switch_game(user_id, game)
 
-    user = db.get_user(user_id)
-    has_profile = bool(user.get('name'))
-
+    has_profile = db.has_profile(user_id, game)
     game_name = settings.GAMES.get(game, game)
+    
     text = f"🏠 Главное меню\n\nИгра: {game_name}"
 
     if has_profile:
         text += "\n\nВыберите действие:"
     else:
-        text += "\n\nСоздайте анкету для начала:"
+        text += f"\n\nУ вас пока нет анкеты для {game_name}.\nСоздайте анкету для начала:"
 
     await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
     await callback.answer()
@@ -135,8 +134,9 @@ async def show_main_menu(callback: CallbackQuery):
         await callback.answer()
         return
 
-    has_profile = bool(user.get('name'))
-    game_name = settings.GAMES.get(user['current_game'], user['current_game'])
+    game = user['current_game']
+    has_profile = db.has_profile(user_id, game)
+    game_name = settings.GAMES.get(game, game)
 
     text = f"🏠 Главное меню\n\nИгра: {game_name}"
 
@@ -145,7 +145,7 @@ async def show_main_menu(callback: CallbackQuery):
     else:
         text += "\n\nСоздайте анкету для начала:"
 
-    await safe_edit_message(callback, text, kb.main_menu(has_profile, user['current_game']))
+    await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
     await callback.answer()
 
 @router.callback_query(F.data == "view_profile")
@@ -153,12 +153,20 @@ async def view_profile(callback: CallbackQuery):
     user_id = callback.from_user.id
     user = db.get_user(user_id)
 
-    if not user or not user.get('name'):
+    if not user or not user.get('current_game'):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    game = user['current_game']
+    profile = db.get_user_profile(user_id, game)
+
+    if not profile:
         await callback.answer("❌ Анкета не найдена", show_alert=True)
         return
 
-    profile_text = texts.format_profile(user)
-    text = f"👤 Ваша анкета:\n\n{profile_text}"
+    profile_text = texts.format_profile(profile)
+    game_name = settings.GAMES.get(game, game)
+    text = f"👤 Ваша анкета в {game_name}:\n\n{profile_text}"
 
     await safe_edit_message(callback, text, kb.back())
     await callback.answer()
@@ -176,8 +184,11 @@ async def cmd_admin(message: Message):
             cursor = conn.execute("SELECT COUNT(*) FROM users")
             total_users = cursor.fetchone()[0]
 
-            cursor = conn.execute("SELECT COUNT(*) FROM users WHERE name IS NOT NULL")
-            with_profiles = cursor.fetchone()[0]
+            cursor = conn.execute("SELECT COUNT(*) FROM profiles")
+            total_profiles = cursor.fetchone()[0]
+
+            cursor = conn.execute("SELECT game, COUNT(*) FROM profiles GROUP BY game")
+            profiles_by_game = cursor.fetchall()
 
             cursor = conn.execute("SELECT COUNT(*) FROM matches")
             total_matches = cursor.fetchone()[0]
@@ -186,8 +197,13 @@ async def cmd_admin(message: Message):
 
 📊 Статистика:
 • Всего пользователей: {total_users}
-• С анкетами: {with_profiles}
-• Матчей: {total_matches}"""
+• Всего анкет: {total_profiles}"""
+
+        for game, count in profiles_by_game:
+            game_name = settings.GAMES.get(game, game)
+            text += f"\n  - {game_name}: {count}"
+
+        text += f"\n• Матчей: {total_matches}"
 
         await message.answer(text)
     except Exception as e:

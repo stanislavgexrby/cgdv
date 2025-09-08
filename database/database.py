@@ -14,15 +14,27 @@ class Database:
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
 
         self._init_db()
+        self._migrate_data()
         logger.info(f"Database инициализирована: {db_path}")
 
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
+            # Таблица пользователей (основная информация)
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     telegram_id INTEGER PRIMARY KEY,
                     username TEXT,
                     current_game TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
+            # Таблица профилей для каждой игры
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS profiles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    telegram_id INTEGER,
+                    game TEXT,
                     name TEXT,
                     nickname TEXT,
                     age INTEGER,
@@ -30,7 +42,8 @@ class Database:
                     positions TEXT,
                     additional_info TEXT,
                     photo_id TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(telegram_id, game)
                 )
             ''')
 
@@ -56,7 +69,57 @@ class Database:
                 )
             ''')
 
+    def _migrate_data(self):
+        """Миграция существующих данных из старой структуры в новую"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Проверяем, есть ли старые данные для миграции
+                cursor = conn.execute("PRAGMA table_info(users)")
+                columns = [column[1] for column in cursor.fetchall()]
+                
+                if 'name' in columns:
+                    # Мигрируем данные из старой структуры
+                    cursor = conn.execute('''
+                        SELECT telegram_id, current_game, name, nickname, age, rating, 
+                               positions, additional_info, photo_id 
+                        FROM users 
+                        WHERE name IS NOT NULL
+                    ''')
+                    
+                    for row in cursor.fetchall():
+                        telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id = row
+                        
+                        # Создаем профиль для игры пользователя
+                        conn.execute('''
+                            INSERT OR REPLACE INTO profiles 
+                            (telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id))
+                    
+                    # Удаляем старые колонки из таблицы users
+                    conn.execute('''
+                        CREATE TABLE users_new (
+                            telegram_id INTEGER PRIMARY KEY,
+                            username TEXT,
+                            current_game TEXT,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                        )
+                    ''')
+                    
+                    conn.execute('''
+                        INSERT INTO users_new (telegram_id, username, current_game)
+                        SELECT telegram_id, username, current_game FROM users
+                    ''')
+                    
+                    conn.execute('DROP TABLE users')
+                    conn.execute('ALTER TABLE users_new RENAME TO users')
+                    
+                    logger.info("Миграция данных завершена")
+        except Exception as e:
+            logger.error(f"Ошибка миграции данных: {e}")
+
     def get_user(self, telegram_id: int) -> Optional[Dict]:
+        """Получить основную информацию о пользователе"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
@@ -64,21 +127,46 @@ class Database:
                 (telegram_id,)
             )
             row = cursor.fetchone()
+            
+            if row:
+                return dict(row)
+            return None
+
+    def get_user_profile(self, telegram_id: int, game: str) -> Optional[Dict]:
+        """Получить профиль пользователя для конкретной игры"""
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                "SELECT * FROM profiles WHERE telegram_id = ? AND game = ?", 
+                (telegram_id, game)
+            )
+            row = cursor.fetchone()
 
             if row:
-                user = dict(row)
-                if user['positions']:
+                profile = dict(row)
+                if profile['positions']:
                     try:
-                        user['positions'] = json.loads(user['positions'])
+                        profile['positions'] = json.loads(profile['positions'])
                     except:
-                        user['positions'] = []
+                        profile['positions'] = []
                 else:
-                    user['positions'] = []
+                    profile['positions'] = []
 
-                user['game'] = user['current_game']
-                return user
+                # Добавляем username из основной таблицы
+                user = self.get_user(telegram_id)
+                if user:
+                    profile['username'] = user.get('username')
+                    profile['current_game'] = game
+                    profile['game'] = game
+
+                return profile
 
             return None
+
+    def has_profile(self, telegram_id: int, game: str) -> bool:
+        """Проверить, есть ли у пользователя профиль для конкретной игры"""
+        profile = self.get_user_profile(telegram_id, game)
+        return profile is not None
 
     def create_user(self, telegram_id: int, username: str, game: str) -> bool:
         try:
@@ -93,7 +181,7 @@ class Database:
             logger.error(f"Ошибка создания пользователя: {e}")
             return False
 
-    def update_user_profile(self, telegram_id: int, name: str, nickname: str,
+    def update_user_profile(self, telegram_id: int, game: str, name: str, nickname: str,
                           age: int, rating: str, positions: List[str],
                           additional_info: str, photo_id: str = None) -> bool:
         try:
@@ -101,14 +189,13 @@ class Database:
 
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute('''
-                    UPDATE users SET
-                    name = ?, nickname = ?, age = ?, rating = ?,
-                    positions = ?, additional_info = ?, photo_id = ?
-                    WHERE telegram_id = ?
-                ''', (name, nickname, age, rating, positions_json,
-                     additional_info, photo_id, telegram_id))
+                    INSERT OR REPLACE INTO profiles 
+                    (telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (telegram_id, game, name, nickname, age, rating, positions_json,
+                     additional_info, photo_id))
 
-            logger.info(f"Профиль обновлен: {telegram_id}")
+            logger.info(f"Профиль обновлен: {telegram_id} для {game}")
             return True
         except Exception as e:
             logger.error(f"Ошибка обновления профиля: {e}")
@@ -133,11 +220,11 @@ class Database:
                             limit: int = 10) -> List[Dict]:
         try:
             query = '''
-                SELECT * FROM users
-                WHERE telegram_id != ?
-                AND current_game = ?
-                AND name IS NOT NULL
-                AND telegram_id NOT IN (
+                SELECT p.*, u.username FROM profiles p
+                JOIN users u ON p.telegram_id = u.telegram_id
+                WHERE p.telegram_id != ?
+                AND p.game = ?
+                AND p.telegram_id NOT IN (
                     SELECT to_user FROM likes
                     WHERE from_user = ? AND game = ?
                 )
@@ -145,11 +232,11 @@ class Database:
             params = [user_id, game, user_id, game]
 
             if rating_filter:
-                query += " AND rating = ?"
+                query += " AND p.rating = ?"
                 params.append(rating_filter)
 
             if position_filter:
-                query += " AND positions LIKE ?"
+                query += " AND p.positions LIKE ?"
                 params.append(f'%"{position_filter}"%')
 
             query += " ORDER BY RANDOM() LIMIT ?"
@@ -162,17 +249,17 @@ class Database:
 
                 results = []
                 for row in rows:
-                    user = dict(row)
-                    if user['positions']:
+                    profile = dict(row)
+                    if profile['positions']:
                         try:
-                            user['positions'] = json.loads(user['positions'])
+                            profile['positions'] = json.loads(profile['positions'])
                         except:
-                            user['positions'] = []
+                            profile['positions'] = []
                     else:
-                        user['positions'] = []
+                        profile['positions'] = []
 
-                    user['game'] = user['current_game']
-                    results.append(user)
+                    profile['current_game'] = profile['game']
+                    results.append(profile)
 
                 return results
 
@@ -215,29 +302,30 @@ class Database:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.execute('''
-                    SELECT u.* FROM users u
-                    JOIN likes l ON u.telegram_id = l.from_user
-                    WHERE l.to_user = ? AND l.game = ?
+                    SELECT p.*, u.username FROM profiles p
+                    JOIN users u ON p.telegram_id = u.telegram_id
+                    JOIN likes l ON p.telegram_id = l.from_user
+                    WHERE l.to_user = ? AND l.game = ? AND p.game = ?
                     AND NOT EXISTS (
                         SELECT 1 FROM likes l2 
-                        WHERE l2.from_user = ? AND l2.to_user = u.telegram_id AND l2.game = ?
+                        WHERE l2.from_user = ? AND l2.to_user = p.telegram_id AND l2.game = ?
                     )
                     ORDER BY l.created_at DESC
-                ''', (user_id, game, user_id, game))
+                ''', (user_id, game, game, user_id, game))
 
                 results = []
                 for row in cursor.fetchall():
-                    user = dict(row)
-                    if user['positions']:
+                    profile = dict(row)
+                    if profile['positions']:
                         try:
-                            user['positions'] = json.loads(user['positions'])
+                            profile['positions'] = json.loads(profile['positions'])
                         except:
-                            user['positions'] = []
+                            profile['positions'] = []
                     else:
-                        user['positions'] = []
+                        profile['positions'] = []
 
-                    user['game'] = user['current_game']
-                    results.append(user)
+                    profile['current_game'] = profile['game']
+                    results.append(profile)
 
                 return results
 
@@ -251,27 +339,28 @@ class Database:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.execute('''
-                    SELECT u.* FROM users u
-                    JOIN matches m ON (u.telegram_id = m.user1 OR u.telegram_id = m.user2)
+                    SELECT p.*, u.username FROM profiles p
+                    JOIN users u ON p.telegram_id = u.telegram_id
+                    JOIN matches m ON (p.telegram_id = m.user1 OR p.telegram_id = m.user2)
                     WHERE (m.user1 = ? OR m.user2 = ?)
-                    AND u.telegram_id != ?
-                    AND m.game = ?
+                    AND p.telegram_id != ?
+                    AND m.game = ? AND p.game = ?
                     ORDER BY m.created_at DESC
-                ''', (user_id, user_id, user_id, game))
+                ''', (user_id, user_id, user_id, game, game))
 
                 results = []
                 for row in cursor.fetchall():
-                    user = dict(row)
-                    if user['positions']:
+                    profile = dict(row)
+                    if profile['positions']:
                         try:
-                            user['positions'] = json.loads(user['positions'])
+                            profile['positions'] = json.loads(profile['positions'])
                         except:
-                            user['positions'] = []
+                            profile['positions'] = []
                     else:
-                        user['positions'] = []
+                        profile['positions'] = []
 
-                    user['game'] = user['current_game']
-                    results.append(user)
+                    profile['current_game'] = profile['game']
+                    results.append(profile)
 
                 return results
 
@@ -279,22 +368,21 @@ class Database:
             logger.error(f"Ошибка получения матчей: {e}")
             return []
 
-    def delete_profile(self, telegram_id: int) -> bool:
+    def delete_profile(self, telegram_id: int, game: str) -> bool:
+        """Удалить профиль для конкретной игры"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                conn.execute("DELETE FROM likes WHERE from_user = ? OR to_user = ?", 
-                           (telegram_id, telegram_id))
-                conn.execute("DELETE FROM matches WHERE user1 = ? OR user2 = ?", 
-                           (telegram_id, telegram_id))
+                # Удаляем лайки и матчи для этой игры
+                conn.execute("DELETE FROM likes WHERE (from_user = ? OR to_user = ?) AND game = ?", 
+                           (telegram_id, telegram_id, game))
+                conn.execute("DELETE FROM matches WHERE (user1 = ? OR user2 = ?) AND game = ?", 
+                           (telegram_id, telegram_id, game))
 
-                conn.execute('''
-                    UPDATE users SET 
-                    name = NULL, nickname = NULL, age = NULL, 
-                    rating = NULL, positions = NULL, additional_info = NULL, photo_id = NULL
-                    WHERE telegram_id = ?
-                ''', (telegram_id,))
+                # Удаляем профиль для этой игры
+                conn.execute('DELETE FROM profiles WHERE telegram_id = ? AND game = ?', 
+                           (telegram_id, game))
 
-            logger.info(f"Профиль удален: {telegram_id}")
+            logger.info(f"Профиль удален: {telegram_id} для {game}")
             return True
         except Exception as e:
             logger.error(f"Ошибка удаления профиля: {e}")

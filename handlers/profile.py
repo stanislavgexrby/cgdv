@@ -27,18 +27,22 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     user = db.get_user(user_id)
 
-    if not user:
+    if not user or not user.get('current_game'):
         await callback.answer("❌ Ошибка", show_alert=True)
         return
 
+    game = user['current_game']
+    game_name = settings.GAMES.get(game, game)
+
     await state.update_data(
         user_id=user_id,
-        game=user['current_game'],
+        game=game,
         positions_selected=[]
     )
 
     await state.set_state(ProfileForm.name)
-    await callback.message.edit_text(texts.QUESTIONS["name"])
+    text = f"📝 Создание анкеты для {game_name}\n\n{texts.QUESTIONS['name']}"
+    await callback.message.edit_text(text)
     await callback.answer()
 
 @router.message(ProfileForm.name)
@@ -187,6 +191,7 @@ async def save_profile(message: Message, state: FSMContext, photo_id: str):
 
     success = db.update_user_profile(
         telegram_id=data['user_id'],
+        game=data['game'],
         name=data['name'],
         nickname=data['nickname'],
         age=data['age'],
@@ -199,8 +204,10 @@ async def save_profile(message: Message, state: FSMContext, photo_id: str):
     await state.clear()
 
     if success:
-        await message.answer(texts.PROFILE_CREATED, reply_markup=kb.back())
-        logger.info(f"Профиль создан для {data['user_id']}")
+        game_name = settings.GAMES.get(data['game'], data['game'])
+        text = f"✅ Анкета для {game_name} создана! Теперь можете искать сокомандников."
+        await message.answer(text, reply_markup=kb.back())
+        logger.info(f"Профиль создан для {data['user_id']} в {data['game']}")
     else:
         await message.answer("❌ Ошибка сохранения", reply_markup=kb.back())
 
@@ -209,6 +216,7 @@ async def save_profile_callback(callback: CallbackQuery, state: FSMContext, phot
 
     success = db.update_user_profile(
         telegram_id=data['user_id'],
+        game=data['game'],
         name=data['name'],
         nickname=data['nickname'],
         age=data['age'],
@@ -221,8 +229,10 @@ async def save_profile_callback(callback: CallbackQuery, state: FSMContext, phot
     await state.clear()
 
     if success:
-        await callback.message.edit_text(texts.PROFILE_CREATED, reply_markup=kb.back())
-        logger.info(f"Профиль создан для {data['user_id']}")
+        game_name = settings.GAMES.get(data['game'], data['game'])
+        text = f"✅ Анкета для {game_name} создана! Теперь можете искать сокомандников."
+        await callback.message.edit_text(text, reply_markup=kb.back())
+        logger.info(f"Профиль создан для {data['user_id']} в {data['game']}")
     else:
         await callback.message.edit_text("❌ Ошибка сохранения", reply_markup=kb.back())
 
@@ -230,8 +240,18 @@ async def save_profile_callback(callback: CallbackQuery, state: FSMContext, phot
 
 @router.callback_query(F.data == "edit_profile")
 async def edit_profile(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user = db.get_user(user_id)
+
+    if not user or not user.get('current_game'):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    game = user['current_game']
+    game_name = settings.GAMES.get(game, game)
+
     await callback.message.edit_text(
-        "✏️ Редактирование профиля\n\n" +
+        f"✏️ Редактирование профиля в {game_name}\n\n" +
         "Пока доступно только полное пересоздание анкеты.\n" +
         "Хотите создать новую анкету?",
         reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
@@ -243,9 +263,19 @@ async def edit_profile(callback: CallbackQuery):
 
 @router.callback_query(F.data == "delete_profile")
 async def confirm_delete_profile(callback: CallbackQuery):
-    text = ("🗑️ Удаление анкеты\n\n" +
+    user_id = callback.from_user.id
+    user = db.get_user(user_id)
+
+    if not user or not user.get('current_game'):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    game = user['current_game']
+    game_name = settings.GAMES.get(game, game)
+
+    text = (f"🗑️ Удаление анкеты в {game_name}\n\n" +
            "Вы уверены? Это действие нельзя отменить.\n" +
-           "Все лайки и матчи будут удалены.")
+           f"Все лайки и матчи в {game_name} будут удалены.")
 
     await callback.message.edit_text(text, reply_markup=kb.confirm_delete())
     await callback.answer()
@@ -253,12 +283,20 @@ async def confirm_delete_profile(callback: CallbackQuery):
 @router.callback_query(F.data == "confirm_delete")
 async def delete_profile(callback: CallbackQuery):
     user_id = callback.from_user.id
+    user = db.get_user(user_id)
 
-    success = db.delete_profile(user_id)
+    if not user or not user.get('current_game'):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    game = user['current_game']
+    success = db.delete_profile(user_id, game)
 
     if success:
-        await callback.message.edit_text(texts.PROFILE_DELETED, reply_markup=kb.back())
-        logger.info(f"Профиль удален для {user_id}")
+        game_name = settings.GAMES.get(game, game)
+        text = f"🗑️ Анкета в {game_name} удалена!"
+        await callback.message.edit_text(text, reply_markup=kb.back())
+        logger.info(f"Профиль удален для {user_id} в {game}")
     else:
         await callback.message.edit_text("❌ Ошибка удаления", reply_markup=kb.back())
 

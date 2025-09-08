@@ -24,23 +24,31 @@ async def start_search(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
     user = db.get_user(user_id)
 
-    if not user or not user.get('name'):
-        await callback.answer("❌ Сначала создайте анкету", show_alert=True)
+    if not user or not user.get('current_game'):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    game = user['current_game']
+    
+    if not db.has_profile(user_id, game):
+        game_name = settings.GAMES.get(game, game)
+        await callback.answer(f"❌ Сначала создайте анкету для {game_name}", show_alert=True)
         return
 
     await state.update_data(
         user_id=user_id,
-        game=user['current_game'],
+        game=game,
         rating_filter=None,
         position_filter=None,
         profiles=[],
         current_index=0,
-        message_with_photo=False  # Флаг для отслеживания сообщений с фото
+        message_with_photo=False
     )
 
     await state.set_state(SearchForm.filters)
 
-    text = "🔍 Фильтры поиска:\n\n"
+    game_name = settings.GAMES.get(game, game)
+    text = f"🔍 Поиск в {game_name}\n\nФильтры:\n\n"
     text += "🏆 Рейтинг: любой\n"
     text += "⚔️ Позиция: любая\n\n"
     text += "Настройте фильтры или начните поиск:"
@@ -62,14 +70,16 @@ async def save_rating_filter(callback: CallbackQuery, state: FSMContext):
     await state.update_data(rating_filter=rating)
 
     data = await state.get_data()
-    rating_name = settings.RATINGS[data['game']].get(rating, rating)
+    game = data['game']
+    game_name = settings.GAMES.get(game, game)
+    rating_name = settings.RATINGS[game].get(rating, rating)
 
-    text = "🔍 Фильтры поиска:\n\n"
+    text = f"🔍 Поиск в {game_name}\n\nФильтры:\n\n"
     text += f"🏆 Рейтинг: {rating_name}\n"
     
     position_text = "любая"
     if data.get('position_filter'):
-        position_text = settings.POSITIONS[data['game']].get(data['position_filter'], data['position_filter'])
+        position_text = settings.POSITIONS[game].get(data['position_filter'], data['position_filter'])
     text += f"⚔️ Позиция: {position_text}\n\n"
     text += "Настройте фильтры или начните поиск:"
 
@@ -98,13 +108,16 @@ async def save_position_filter(callback: CallbackQuery, state: FSMContext):
     await state.update_data(position_filter=position)
 
     data = await state.get_data()
+    game = data['game']
+    game_name = settings.GAMES.get(game, game)
+    
     rating_text = "любой"
     if data.get('rating_filter'):
-        rating_text = settings.RATINGS[data['game']].get(data['rating_filter'], data['rating_filter'])
+        rating_text = settings.RATINGS[game].get(data['rating_filter'], data['rating_filter'])
 
-    position_text = settings.POSITIONS[data['game']].get(position, position)
+    position_text = settings.POSITIONS[game].get(position, position)
 
-    text = "🔍 Фильтры поиска:\n\n"
+    text = f"🔍 Поиск в {game_name}\n\nФильтры:\n\n"
     text += f"🏆 Рейтинг: {rating_text}\n"
     text += f"⚔️ Позиция: {position_text}\n\n"
     text += "Настройте фильтры или начните поиск:"
@@ -115,16 +128,18 @@ async def save_position_filter(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "cancel_filter", SearchForm.filters)
 async def cancel_filter(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
+    game = data['game']
+    game_name = settings.GAMES.get(game, game)
 
     rating_text = "любой"
     if data.get('rating_filter'):
-        rating_text = settings.RATINGS[data['game']].get(data['rating_filter'], data['rating_filter'])
+        rating_text = settings.RATINGS[game].get(data['rating_filter'], data['rating_filter'])
 
     position_text = "любая"
     if data.get('position_filter'):
-        position_text = settings.POSITIONS[data['game']].get(data['position_filter'], data['position_filter'])
+        position_text = settings.POSITIONS[game].get(data['position_filter'], data['position_filter'])
 
-    text = "🔍 Фильтры поиска:\n\n"
+    text = f"🔍 Поиск в {game_name}\n\nФильтры:\n\n"
     text += f"🏆 Рейтинг: {rating_text}\n"
     text += f"⚔️ Позиция: {position_text}\n\n"
     text += "Настройте фильтры или начните поиск:"
@@ -145,7 +160,9 @@ async def begin_search(callback: CallbackQuery, state: FSMContext):
     )
 
     if not profiles:
-        await safe_edit_message(callback, texts.NO_PROFILES, kb.back())
+        game_name = settings.GAMES.get(data['game'], data['game'])
+        text = f"😔 Анкеты в {game_name} не найдены. Попробуйте изменить фильтры или зайти позже."
+        await safe_edit_message(callback, text, kb.back())
         await callback.answer()
         return
 
@@ -160,7 +177,9 @@ async def show_current_profile(callback: CallbackQuery, state: FSMContext):
     index = data['current_index']
 
     if index >= len(profiles):
-        await safe_edit_message(callback, texts.NO_PROFILES, kb.back())
+        game_name = settings.GAMES.get(data['game'], data['game'])
+        text = f"😔 Больше анкет в {game_name} не найдено. Попробуйте изменить фильтры или зайти позже."
+        await safe_edit_message(callback, text, kb.back())
         await state.update_data(message_with_photo=False)
         await callback.answer()
         return
@@ -228,15 +247,15 @@ async def like_profile(callback: CallbackQuery, state: FSMContext):
     is_match = db.add_like(from_user_id, target_user_id, game)
 
     if is_match:
-        target_user = db.get_user(target_user_id)
+        target_profile = db.get_user_profile(target_user_id, game)
 
-        if target_user and target_user.get('username'):
-            contact_text = f"\n\n💬 @{target_user['username']}"
+        if target_profile and target_profile.get('username'):
+            contact_text = f"\n\n💬 @{target_profile['username']}"
         else:
             contact_text = "\n\n(У пользователя нет @username)"
 
         text = texts.MATCH_CREATED + contact_text
-        keyboard = kb.contact(target_user.get('username') if target_user else None)
+        keyboard = kb.contact(target_profile.get('username') if target_profile else None)
 
         if data.get('message_with_photo'):
             try:
@@ -246,8 +265,6 @@ async def like_profile(callback: CallbackQuery, state: FSMContext):
             await callback.message.answer(text, reply_markup=keyboard)
         else:
             await safe_edit_message(callback, text, keyboard)
-
-        # await notify_about_match(bot, target_user_id, from_user_id)
 
         logger.info(f"Матч: {from_user_id} <-> {target_user_id}")
     else:
@@ -262,7 +279,6 @@ async def like_profile(callback: CallbackQuery, state: FSMContext):
             )
         )
 
-        # await notify_about_like(bot, target_user_id)
         logger.info(f"Лайк: {from_user_id} -> {target_user_id}")
 
     await callback.answer()
