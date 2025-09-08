@@ -249,12 +249,17 @@ async def like_profile(callback: CallbackQuery, state: FSMContext):
     if is_match:
         target_profile = db.get_user_profile(target_user_id, game)
 
-        if target_profile and target_profile.get('username'):
-            contact_text = f"\n\n💬 @{target_profile['username']}"
+        # При матче показываем контакты
+        if target_profile:
+            match_text = texts.format_profile(target_profile, show_contact=True)
+            text = f"{texts.MATCH_CREATED}\n\n{match_text}"
         else:
-            contact_text = "\n\n(У пользователя нет @username)"
+            text = texts.MATCH_CREATED
+            if target_profile and target_profile.get('username'):
+                text += f"\n\n💬 @{target_profile['username']}"
+            else:
+                text += "\n\n(У пользователя нет @username)"
 
-        text = texts.MATCH_CREATED + contact_text
         keyboard = kb.contact(target_profile.get('username') if target_profile else None)
 
         if data.get('message_with_photo'):

@@ -239,7 +239,9 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int):
         match_profile = db.get_user_profile(match_user_id, game)
 
         if match_profile and match_profile.get('name'):
-            text = f"🎉 У вас новый матч!\n\n{match_profile['name']} лайкнул вас в ответ!"
+            # При уведомлении о матче показываем контакты
+            profile_text = texts.format_profile(match_profile, show_contact=True)
+            text = f"🎉 У вас новый матч!\n\n{profile_text}"
         else:
             text = "🎉 У вас новый матч!"
 

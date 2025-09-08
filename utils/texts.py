@@ -1,6 +1,13 @@
 import config.settings as settings
 
-def format_profile(user: dict) -> str:
+def format_profile(user: dict, show_contact: bool = False) -> str:
+    """
+    Форматирование профиля пользователя
+    
+    Args:
+        user: данные пользователя
+        show_contact: показывать ли контактную информацию (только для матчей)
+    """
     game = user.get('current_game') or user.get('game', 'dota')
 
     text = f"👤 {user['name']}\n"
@@ -24,7 +31,8 @@ def format_profile(user: dict) -> str:
     if user.get('additional_info'):
         text += f"\n📝 {user['additional_info']}\n"
 
-    if user.get('username'):
+    # Показываем контакты только при матче
+    if show_contact and user.get('username'):
         text += f"\n💬 @{user['username']}"
 
     return text

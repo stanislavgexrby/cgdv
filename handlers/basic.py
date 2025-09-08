@@ -164,11 +164,28 @@ async def view_profile(callback: CallbackQuery):
         await callback.answer("❌ Анкета не найдена", show_alert=True)
         return
 
-    profile_text = texts.format_profile(profile)
+    # Показываем контакты при просмотре своей анкеты
+    profile_text = texts.format_profile(profile, show_contact=True)
     game_name = settings.GAMES.get(game, game)
     text = f"👤 Ваша анкета в {game_name}:\n\n{profile_text}"
 
-    await safe_edit_message(callback, text, kb.back())
+    try:
+        # Если есть фото, показываем с фото
+        if profile.get('photo_id'):
+            await callback.message.delete()
+            await callback.message.answer_photo(
+                photo=profile['photo_id'],
+                caption=text,
+                reply_markup=kb.back()
+            )
+        else:
+            # Если фото нет, показываем текстом
+            await safe_edit_message(callback, text, kb.back())
+    except Exception as e:
+        logger.error(f"Ошибка отображения профиля: {e}")
+        # Fallback на текстовое сообщение
+        await safe_edit_message(callback, text, kb.back())
+
     await callback.answer()
 
 @router.message(Command("admin"))
