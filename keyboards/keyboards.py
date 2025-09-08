@@ -117,3 +117,42 @@ def contact(username: str = None) -> InlineKeyboardMarkup:
     buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+# Клавиатуры для редактирования профиля
+
+def edit_profile_menu() -> InlineKeyboardMarkup:
+    """Основное меню редактирования профиля"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👤 Изменить имя", callback_data="edit_name")],
+        [InlineKeyboardButton(text="🎮 Изменить никнейм", callback_data="edit_nickname")],
+        [InlineKeyboardButton(text="🎂 Изменить возраст", callback_data="edit_age")],
+        [InlineKeyboardButton(text="🏆 Изменить рейтинг", callback_data="edit_rating")],
+        [InlineKeyboardButton(text="⚔️ Изменить позиции", callback_data="edit_positions")],
+        [InlineKeyboardButton(text="📝 Изменить описание", callback_data="edit_info")],
+        [InlineKeyboardButton(text="📸 Изменить фото", callback_data="edit_photo")],
+        [InlineKeyboardButton(text="🔄 Создать заново", callback_data="create_profile")],
+        [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+
+def cancel_edit() -> InlineKeyboardMarkup:
+    """Клавиатура с кнопкой отмены редактирования"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")]
+    ])
+
+def edit_photo_menu() -> InlineKeyboardMarkup:
+    """Клавиатура для редактирования фото"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑️ Удалить фото", callback_data="delete_photo")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")]
+    ])
+
+def position_filter_menu(game: str) -> InlineKeyboardMarkup:
+    """Клавиатура для выбора фильтра по позиции"""
+    buttons = []
+    for key, name in settings.POSITIONS[game].items():
+        buttons.append([InlineKeyboardButton(text=name, callback_data=f"pos_filter_{key}")])
+
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_filter")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
