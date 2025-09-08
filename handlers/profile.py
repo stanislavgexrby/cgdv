@@ -51,7 +51,7 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext):
 
     await state.set_state(ProfileForm.name)
     text = f"📝 Создание анкеты для {game_name}\n\n{texts.QUESTIONS['name']}"
-    await callback.message.edit_text(text)
+    await callback.message.edit_text(text, reply_markup=kb.cancel_profile_creation())
     await callback.answer()
 
 @router.message(ProfileForm.name)
@@ -59,39 +59,68 @@ async def process_name(message: Message, state: FSMContext):
     name = message.text.strip()
 
     if len(name) < 2 or len(name) > settings.MAX_NAME_LENGTH:
-        await message.answer(f"❌ Имя должно быть от 2 до {settings.MAX_NAME_LENGTH} символов")
+        await message.answer(
+            f"❌ Имя должно быть от 2 до {settings.MAX_NAME_LENGTH} символов"
+        )
         return
 
     if len(name.split()) < 2:
-        await message.answer("❌ Введите имя и фамилию")
+        await message.answer(
+            "❌ Введите имя и фамилию"
+        )
         return
 
     await state.update_data(name=name)
     await state.set_state(ProfileForm.nickname)
-    await message.answer(texts.QUESTIONS["nickname"])
+    await message.answer(
+        texts.QUESTIONS["nickname"],
+        reply_markup=kb.cancel_profile_creation()
+    )
+
+# Обработчик неправильного типа сообщения для имени
+@router.message(ProfileForm.name, ~F.text)
+async def wrong_name_format(message: Message, state: FSMContext):
+    await message.answer(
+        "❌ Отправьте текстовое сообщение с именем и фамилией"
+    )
 
 @router.message(ProfileForm.nickname)
 async def process_nickname(message: Message, state: FSMContext):
     nickname = message.text.strip()
 
     if len(nickname) < 2 or len(nickname) > settings.MAX_NICKNAME_LENGTH:
-        await message.answer(f"❌ Никнейм должен быть от 2 до {settings.MAX_NICKNAME_LENGTH} символов")
+        await message.answer(
+            f"❌ Никнейм должен быть от 2 до {settings.MAX_NICKNAME_LENGTH} символов"
+        )
         return
 
     await state.update_data(nickname=nickname)
     await state.set_state(ProfileForm.age)
-    await message.answer(texts.QUESTIONS["age"])
+    await message.answer(
+        texts.QUESTIONS["age"],
+        reply_markup=kb.cancel_profile_creation()
+    )
+
+@router.message(ProfileForm.nickname, ~F.text)
+async def wrong_nickname_format(message: Message, state: FSMContext):
+    await message.answer(
+        "❌ Отправьте текстовое сообщение с игровым никнеймом"
+    )
 
 @router.message(ProfileForm.age)
 async def process_age(message: Message, state: FSMContext):
     try:
         age = int(message.text.strip())
     except ValueError:
-        await message.answer("❌ Введите число")
+        await message.answer(
+            "❌ Введите число"
+        )
         return
 
     if age < settings.MIN_AGE or age > settings.MAX_AGE:
-        await message.answer(f"❌ Возраст должен быть от {settings.MIN_AGE} до {settings.MAX_AGE}")
+        await message.answer(
+            f"❌ Возраст должен быть от {settings.MIN_AGE} до {settings.MAX_AGE}"
+        )
         return
 
     await state.update_data(age=age)
@@ -102,6 +131,13 @@ async def process_age(message: Message, state: FSMContext):
 
     rating_text = "🏆 Выберите рейтинг:"
     await message.answer(rating_text, reply_markup=kb.ratings(game))
+
+# Обработчик неправильного типа сообщения для возраста
+@router.message(ProfileForm.age, ~F.text)
+async def wrong_age_format(message: Message, state: FSMContext):
+    await message.answer(
+        f"❌ Отправьте число от {settings.MIN_AGE} до {settings.MAX_AGE}"
+    )
 
 @router.callback_query(F.data.startswith("rating_"), ProfileForm.rating)
 async def process_rating(callback: CallbackQuery, state: FSMContext):
@@ -159,7 +195,10 @@ async def positions_done(callback: CallbackQuery, state: FSMContext):
     await state.update_data(positions=selected)
     await state.set_state(ProfileForm.additional_info)
 
-    await callback.message.edit_text(texts.QUESTIONS["info"])
+    await callback.message.edit_text(
+        texts.QUESTIONS["info"],
+        reply_markup=kb.cancel_profile_creation()
+    )
     await callback.answer()
 
 @router.callback_query(F.data == "pos_need", ProfileForm.positions)
@@ -174,13 +213,19 @@ async def process_additional_info(message: Message, state: FSMContext):
         info = ""
 
     if len(info) > settings.MAX_INFO_LENGTH:
-        await message.answer(f"❌ Слишком длинный текст (максимум {settings.MAX_INFO_LENGTH} символов)")
+        await message.answer(
+            f"❌ Слишком длинный текст (максимум {settings.MAX_INFO_LENGTH} символов)"
+        )
         return
 
     await state.update_data(additional_info=info)
     await state.set_state(ProfileForm.photo)
 
     await message.answer(texts.QUESTIONS["photo"], reply_markup=kb.skip_photo())
+
+@router.message(ProfileForm.additional_info, ~F.text)
+async def wrong_info_format(message: Message, state: FSMContext):
+    await message.answer("❌ Отправьте текстовое сообщение с описанием или '-' чтобы пропустить")
 
 @router.message(ProfileForm.photo, F.photo)
 async def process_photo(message: Message, state: FSMContext):
@@ -265,7 +310,6 @@ async def edit_profile(callback: CallbackQuery):
 
     game_name = settings.GAMES.get(game, game)
 
-    # Показываем текущую информацию и меню редактирования
     current_info = f"📝 Текущая анкета в {game_name}:\n\n"
     current_info += f"👤 Имя: {profile['name']}\n"
     current_info += f"🎮 Никнейм: {profile['nickname']}\n"
@@ -287,7 +331,6 @@ async def edit_profile(callback: CallbackQuery):
     current_info += f"📸 Фото: {'загружено' if profile.get('photo_id') else 'не загружено'}\n"
     current_info += "\nЧто хотите изменить?"
 
-    # Создаем клавиатуру для выбора поля
     buttons = [
         [kb.InlineKeyboardButton(text="👤 Изменить имя", callback_data="edit_name")],
         [kb.InlineKeyboardButton(text="🎮 Изменить никнейм", callback_data="edit_nickname")],
@@ -304,8 +347,6 @@ async def edit_profile(callback: CallbackQuery):
 
     await callback.message.edit_text(current_info, reply_markup=keyboard)
     await callback.answer()
-
-# Обработчики редактирования отдельных полей
 
 @router.callback_query(F.data == "edit_name")
 async def edit_name(callback: CallbackQuery, state: FSMContext):
@@ -358,6 +399,10 @@ async def process_edit_name(message: Message, state: FSMContext):
         else:
             await message.answer("❌ Ошибка обновления", reply_markup=kb.back())
 
+@router.message(EditProfileForm.edit_name, ~F.text)
+async def wrong_edit_name_format(message: Message, state: FSMContext):
+    await message.answer("❌ Отправьте текстовое сообщение с именем и фамилией")
+
 @router.callback_query(F.data == "edit_nickname")
 async def edit_nickname(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
@@ -404,6 +449,10 @@ async def process_edit_nickname(message: Message, state: FSMContext):
             await message.answer("✅ Никнейм обновлен!", reply_markup=kb.back())
         else:
             await message.answer("❌ Ошибка обновления", reply_markup=kb.back())
+
+@router.message(EditProfileForm.edit_nickname, ~F.text)
+async def wrong_edit_nickname_format(message: Message, state: FSMContext):
+    await message.answer("❌ Отправьте текстовое сообщение с игровым никнеймом")
 
 @router.callback_query(F.data == "edit_age")
 async def edit_age(callback: CallbackQuery, state: FSMContext):
@@ -455,6 +504,10 @@ async def process_edit_age(message: Message, state: FSMContext):
             await message.answer("✅ Возраст обновлен!", reply_markup=kb.back())
         else:
             await message.answer("❌ Ошибка обновления", reply_markup=kb.back())
+
+@router.message(EditProfileForm.edit_age, ~F.text)
+async def wrong_edit_age_format(message: Message, state: FSMContext):
+    await message.answer(f"❌ Отправьте число от {settings.MIN_AGE} до {settings.MAX_AGE}")
 
 @router.callback_query(F.data == "edit_rating")
 async def edit_rating(callback: CallbackQuery, state: FSMContext):
@@ -636,6 +689,11 @@ async def process_edit_info(message: Message, state: FSMContext):
             await message.answer("✅ Описание обновлено!", reply_markup=kb.back())
         else:
             await message.answer("❌ Ошибка обновления", reply_markup=kb.back())
+
+# Обработчик неправильного типа сообщения для редактирования описания
+@router.message(EditProfileForm.edit_info, ~F.text)
+async def wrong_edit_info_format(message: Message, state: FSMContext):
+    await message.answer("❌ Отправьте текстовое сообщение с описанием или '-' чтобы удалить")
 
 @router.callback_query(F.data == "edit_photo")
 async def edit_photo(callback: CallbackQuery, state: FSMContext):

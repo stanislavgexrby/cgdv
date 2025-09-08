@@ -103,17 +103,40 @@ async def like_back(callback: CallbackQuery):
 
     if is_match:
         target_profile = db.get_user_profile(target_user_id, game)
+        await notify_about_match(callback.bot, target_user_id, user_id)
 
-        if target_profile and target_profile.get('username'):
-            contact_text = f"\n\n💬 @{target_profile['username']}"
+        if target_profile:
+            match_text = texts.format_profile(target_profile, show_contact=True)
+            text = f"{texts.MATCH_CREATED}\n\n{match_text}"
         else:
-            contact_text = "\n\n(У пользователя нет @username)"
+            text = texts.MATCH_CREATED
+            if target_profile and target_profile.get('username'):
+                text += f"\n\n💬 @{target_profile['username']}"
+            else:
+                text += "\n\n(У пользователя нет @username)"
 
-        text = texts.MATCH_CREATED + contact_text
         keyboard = kb.contact(target_profile.get('username') if target_profile else None)
 
+        try:
+            # Удаляем текущее сообщение
+            await callback.message.delete()
+            
+            # Если есть фото, показываем с фото
+            if target_profile and target_profile.get('photo_id'):
+                await callback.message.answer_photo(
+                    photo=target_profile['photo_id'],
+                    caption=text,
+                    reply_markup=keyboard
+                )
+            else:
+                # Если фото нет, показываем текстом
+                await callback.message.answer(text, reply_markup=keyboard)
+        except Exception as e:
+            logger.error(f"Ошибка отображения матча: {e}")
+            # Fallback на обычное сообщение
+            await callback.message.answer(text, reply_markup=keyboard)
+
         await safe_edit_message(callback, text, keyboard)
-        await notify_about_match(callback.bot, target_user_id, user_id)
 
         logger.info(f"Взаимный лайк: {user_id} <-> {target_user_id}")
     else:
@@ -219,52 +242,27 @@ async def show_contact(callback: CallbackQuery):
         await callback.answer("❌ Пользователь не найден", show_alert=True)
         return
 
-    profile_text = texts.format_profile(target_profile)
+    # Показываем контакты при просмотре матча
+    profile_text = texts.format_profile(target_profile, show_contact=True)
     text = f"💖 Ваш матч:\n\n{profile_text}"
-
-    if target_profile.get('username'):
-        text += f"\n\n💬 @{target_profile['username']}"
-    else:
-        text += "\n\n(У пользователя нет @username)"
 
     keyboard = kb.contact(target_profile.get('username'))
 
-    await safe_edit_message(callback, text, keyboard)
-    await callback.answer()
-
-async def notify_about_match(bot: Bot, user_id: int, match_user_id: int):
     try:
-        # Получаем текущую игру пользователя
-        user = db.get_user(user_id)
-        if not user:
-            return
-            
-        game = user['current_game']
-        match_profile = db.get_user_profile(match_user_id, game)
-
-        if match_profile and match_profile.get('name'):
-            # При уведомлении о матче показываем контакты
-            profile_text = texts.format_profile(match_profile, show_contact=True)
-            text = f"🎉 У вас новый матч!\n\n{profile_text}"
+        # Если есть фото, показываем с фото
+        if target_profile.get('photo_id'):
+            await callback.message.delete()
+            await callback.message.answer_photo(
+                photo=target_profile['photo_id'],
+                caption=text,
+                reply_markup=keyboard
+            )
         else:
-            text = "🎉 У вас новый матч!"
-
-        await bot.send_message(
-            chat_id=user_id,
-            text=text,
-            reply_markup=kb.back()
-        )
-        logger.info(f"📨 Уведомление о матче отправлено {user_id}")
+            # Если фото нет, показываем текстом
+            await safe_edit_message(callback, text, keyboard)
     except Exception as e:
-        logger.error(f"Ошибка отправки уведомления о матче: {e}")
+        logger.error(f"Ошибка отображения контакта: {e}")
+        # Fallback на текстовое сообщение
+        await safe_edit_message(callback, text, keyboard)
 
-async def notify_about_like(bot: Bot, user_id: int):
-    try:
-        await bot.send_message(
-            chat_id=user_id,
-            text=texts.NEW_LIKE,
-            reply_markup=kb.back()
-        )
-        logger.info(f"📨 Уведомление о лайке отправлено {user_id}")
-    except Exception as e:
-        logger.error(f"Ошибка отправки уведомления о лайке: {e}")
+    await callback.answer()

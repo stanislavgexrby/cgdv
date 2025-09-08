@@ -22,14 +22,30 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int):
             # При уведомлении о матче показываем контакты
             profile_text = texts.format_profile(match_profile, show_contact=True)
             text = f"🎉 У вас новый матч!\n\n{profile_text}"
+
+            # Если есть фото, отправляем с фото
+            if match_profile.get('photo_id'):
+                await bot.send_photo(
+                    chat_id=user_id,
+                    photo=match_profile['photo_id'],
+                    caption=text,
+                    reply_markup=kb.back()
+                )
+            else:
+                # Если фото нет, отправляем текстом
+                await bot.send_message(
+                    chat_id=user_id,
+                    text=text,
+                    reply_markup=kb.back()
+                )
         else:
             text = "🎉 У вас новый матч!"
+            await bot.send_message(
+                chat_id=user_id,
+                text=text,
+                reply_markup=kb.back()
+            )
 
-        await bot.send_message(
-            chat_id=user_id,
-            text=text,
-            reply_markup=kb.back()
-        )
         logger.info(f"📨 Уведомление о матче отправлено {user_id}")
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления о матче: {e}")

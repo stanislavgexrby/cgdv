@@ -65,17 +65,17 @@ def positions(game: str, selected: List[str] = None) -> InlineKeyboardMarkup:
 
 def search_filters() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔍 Начать поиск", callback_data="start_search")],
         [InlineKeyboardButton(text="🏆 Рейтинг", callback_data="filter_rating")],
         [InlineKeyboardButton(text="⚔️ Позиция", callback_data="filter_position")],
-        [InlineKeyboardButton(text="🔍 Начать поиск", callback_data="start_search")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
 def profile_actions(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="👎 Пропустить", callback_data=f"skip_{user_id}"),
-            InlineKeyboardButton(text="❤️ Лайк", callback_data=f"like_{user_id}")
+            InlineKeyboardButton(text="❤️ Лайк", callback_data=f"like_{user_id}"),
+            InlineKeyboardButton(text="👎 Пропустить", callback_data=f"skip_{user_id}")
         ],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
@@ -92,6 +92,11 @@ def like_actions(user_id: int) -> InlineKeyboardMarkup:
 def skip_photo() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="skip_photo")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")]
+    ])
+
+def cancel_profile_creation() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")]
     ])
 
@@ -117,8 +122,6 @@ def contact(username: str = None) -> InlineKeyboardMarkup:
     buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-# Клавиатуры для редактирования профиля
 
 def edit_profile_menu() -> InlineKeyboardMarkup:
     """Основное меню редактирования профиля"""

@@ -251,6 +251,7 @@ async def like_profile(callback: CallbackQuery, state: FSMContext):
     if is_match:
         target_profile = db.get_user_profile(target_user_id, game)
         await notify_about_match(callback.bot, target_user_id, from_user_id)
+        
         # При матче показываем контакты
         if target_profile:
             match_text = texts.format_profile(target_profile, show_contact=True)
@@ -264,14 +265,24 @@ async def like_profile(callback: CallbackQuery, state: FSMContext):
 
         keyboard = kb.contact(target_profile.get('username') if target_profile else None)
 
-        if data.get('message_with_photo'):
-            try:
-                await callback.message.delete()
-            except:
-                pass
+        try:
+            # Удаляем текущее сообщение
+            # await callback.message.delete()
+            
+            # Если есть фото, показываем с фото
+            if target_profile and target_profile.get('photo_id'):
+                await callback.message.answer_photo(
+                    photo=target_profile['photo_id'],
+                    caption=text,
+                    reply_markup=keyboard
+                )
+            else:
+                # Если фото нет, показываем текстом
+                await callback.message.answer(text, reply_markup=keyboard)
+        except Exception as e:
+            logger.error(f"Ошибка отображения матча: {e}")
+            # Fallback на обычное сообщение
             await callback.message.answer(text, reply_markup=keyboard)
-        else:
-            await safe_edit_message(callback, text, keyboard)
 
         logger.info(f"Матч: {from_user_id} <-> {target_user_id}")
     else:
