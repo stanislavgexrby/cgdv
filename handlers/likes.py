@@ -7,6 +7,8 @@ import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
 
+from .notifications import notify_about_match, notify_about_like
+
 logger = logging.getLogger(__name__)
 router = Router()
 db = Database(settings.DATABASE_PATH)
@@ -111,10 +113,12 @@ async def like_back(callback: CallbackQuery):
         keyboard = kb.contact(target_profile.get('username') if target_profile else None)
 
         await safe_edit_message(callback, text, keyboard)
+        await notify_about_match(callback.bot, target_user_id, user_id)
+
         logger.info(f"Взаимный лайк: {user_id} <-> {target_user_id}")
     else:
         await safe_edit_message(callback, "❤️ Лайк отправлен!", kb.back())
-
+        await notify_about_like(callback.bot, target_user_id)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("skip_like_"))

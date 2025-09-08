@@ -9,6 +9,8 @@ import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
 
+from .notifications import notify_about_match, notify_about_like
+
 from .basic import safe_edit_message
 
 logger = logging.getLogger(__name__)
@@ -248,7 +250,7 @@ async def like_profile(callback: CallbackQuery, state: FSMContext):
 
     if is_match:
         target_profile = db.get_user_profile(target_user_id, game)
-
+        await notify_about_match(callback.bot, target_user_id, from_user_id)
         # При матче показываем контакты
         if target_profile:
             match_text = texts.format_profile(target_profile, show_contact=True)
@@ -283,6 +285,8 @@ async def like_profile(callback: CallbackQuery, state: FSMContext):
                 ]
             )
         )
+
+        await notify_about_like(callback.bot, target_user_id)
 
         logger.info(f"Лайк: {from_user_id} -> {target_user_id}")
 
