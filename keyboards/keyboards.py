@@ -52,7 +52,7 @@ def positions(game: str, selected: List[str] = None) -> InlineKeyboardMarkup:
 
         buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
 
-    buttons.append([InlineKeyboardButton(text="──────────", callback_data="separator")])
+    # buttons.append([InlineKeyboardButton(text="──────────", callback_data="separator")])
 
     if selected:
         buttons.append([InlineKeyboardButton(text="✅ Готово", callback_data="pos_done")])
@@ -158,4 +158,31 @@ def position_filter_menu(game: str) -> InlineKeyboardMarkup:
 
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_filter")])
 
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def subscribe_channel_keyboard(game: str, from_switch: bool = False) -> InlineKeyboardMarkup:
+    """Клавиатура с кнопкой подписки на канал для конкретной игры"""
+    if game == "dota":
+        channel = settings.DOTA_CHANNEL
+        button_text = "📢 Подписаться на Dota 2 канал"
+    elif game == "cs":
+        channel = settings.CS_CHANNEL
+        button_text = "📢 Подписаться на CS2 канал"
+    else:
+        return back()
+    
+    # Убираем @ из начала, если есть, для формирования URL
+    channel_username = channel.lstrip('@')
+    
+    buttons = [
+        [InlineKeyboardButton(text=button_text, url=f"https://t.me/{channel_username}")],
+        [InlineKeyboardButton(text="✅ Я подписался", callback_data=f"game_{game}")]
+    ]
+    
+    # Разные callback_data для кнопки "Назад" в зависимости от контекста
+    if from_switch:
+        buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")])
+    else:
+        buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_games")])
+    
     return InlineKeyboardMarkup(inline_keyboard=buttons)

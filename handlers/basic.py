@@ -1,7 +1,7 @@
 import logging
 from typing import Optional
-from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
+from aiogram import Router, F, Bot
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 
 from database.database import Database
@@ -14,6 +14,58 @@ router = Router()
 db = Database(settings.DATABASE_PATH)
 
 __all__ = ['safe_edit_message', 'router']
+
+@router.callback_query(F.data == "back_to_main")
+async def back_to_main_menu(callback: CallbackQuery):
+    """Обработчик кнопки 'Назад' из меню подписки при переключении игры"""
+    user_id = callback.from_user.id
+    user = db.get_user(user_id)
+
+    if not user or not user.get('current_game'):
+        await safe_edit_message(callback, texts.WELCOME, kb.game_selection())
+        await callback.answer()
+        return
+
+    game = user['current_game']
+    has_profile = db.has_profile(user_id, game)
+    game_name = settings.GAMES.get(game, game)
+
+    text = f"🏠 Главное меню\n\nИгра: {game_name}"
+
+    if has_profile:
+        text += "\n\nВыберите действие:"
+    else:
+        text += "\n\nСоздайте анкету для начала:"
+
+    await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
+    await callback.answer()
+
+async def check_subscription(user_id: int, game: str, bot: Bot) -> bool:
+    """Проверка подписки на канал для выбранной игры"""
+    channel = None
+    if game == "dota":
+        channel = settings.DOTA_CHANNEL
+    elif game == "cs":
+        channel = settings.CS_CHANNEL
+    
+    if not channel or not settings.CHECK_SUBSCRIPTION:
+        return True  # Если канал не настроен или проверка отключена, пропускаем проверку
+        
+    try:
+        member = await bot.get_chat_member(chat_id=channel, user_id=user_id)
+        return member.status not in ['left', 'kicked']
+    except Exception as e:
+        logger.error(f"Ошибка проверки подписки: {e}")
+        return False
+
+@router.callback_query(F.data == "back_to_games")
+async def back_to_games(callback: CallbackQuery):
+    """Обработчик кнопки 'Назад' из меню подписки"""
+    await safe_edit_message(callback,
+        texts.WELCOME,
+        reply_markup=kb.game_selection()
+    )
+    await callback.answer()
 
 async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Optional[InlineKeyboardMarkup] = None):
     try:
@@ -85,6 +137,22 @@ async def select_game(callback: CallbackQuery):
     user_id = callback.from_user.id
     username = callback.from_user.username
 
+# Проверяем подписку
+    if settings.CHECK_SUBSCRIPTION and not await check_subscription(user_id, game, callback.bot):
+        game_name = settings.GAMES.get(game, game)
+        channel = settings.DOTA_CHANNEL if game == "dota" else settings.CS_CHANNEL
+        
+        await safe_edit_message(callback, 
+            f"❌ Чтобы использовать {game_name}, нужно подписаться на канал: {channel}\n\n"
+            "1. Нажмите кнопку для перехода в канал\n"
+            "2. Подпишитесь на канал\n"
+            "3. Вернитесь в бота и нажмите '✅ Я подписался'\n\n"
+            "Или нажмите '⬅️ Назад' для выбора другой игры:",
+            kb.subscribe_channel_keyboard(game)
+        )
+        await callback.answer()
+        return
+    
     logger.info(f"Пользователь {user_id} выбрал игру: {game}")
 
     db.create_user(user_id, username, game)
@@ -106,6 +174,21 @@ async def select_game(callback: CallbackQuery):
 async def switch_game(callback: CallbackQuery):
     game = callback.data.split("_")[1]
     user_id = callback.from_user.id
+
+    if settings.CHECK_SUBSCRIPTION and not await check_subscription(user_id, game, callback.bot):
+        game_name = settings.GAMES.get(game, game)
+        channel = settings.DOTA_CHANNEL if game == "dota" else settings.CS_CHANNEL
+        
+        await callback.message.edit_text(
+            f"❌ Чтобы использовать {game_name}, нужно подписаться на канал: {channel}\n\n"
+            "1. Нажмите кнопку для перехода в канал\n"
+            "2. Подпишитесь на канал\n"
+            "3. Вернитесь в бота и нажмите '✅ Я подписался'\n\n"
+            "Или нажмите '⬅️ Назад' для выбора другой игры:",
+            reply_markup=kb.subscribe_channel_keyboard(game)
+        )
+        await callback.answer()
+        return
 
     logger.info(f"Переключение на игру: {game}")
 

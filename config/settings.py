@@ -3,10 +3,9 @@ import os
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "0")) if os.getenv("ADMIN_ID", "").isdigit() else 0
 
-DOTA_CHANNEL = os.getenv("DOTA_CHANNEL", "")
-CS_CHANNEL = os.getenv("CS_CHANNEL", "")
-
-CHECK_SUBSCRIPTION = os.getenv("CHECK_SUBSCRIPTION", "false").lower() == "true"
+DOTA_CHANNEL = os.getenv("DOTA_CHANNEL", "@testbotasdasd")
+CS_CHANNEL = os.getenv("CS_CHANNEL", "@test89898922")
+CHECK_SUBSCRIPTION = os.getenv("CHECK_SUBSCRIPTION", "true").lower() == "true"
 
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/teammates.db")
 
