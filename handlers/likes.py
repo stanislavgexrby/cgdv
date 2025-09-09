@@ -136,14 +136,12 @@ async def like_back(callback: CallbackQuery):
             # Fallback на обычное сообщение
             await callback.message.answer(text, reply_markup=keyboard)
 
-        await safe_edit_message(callback, text, keyboard)
-
         logger.info(f"Взаимный лайк: {user_id} <-> {target_user_id}")
     else:
         await safe_edit_message(callback, "❤️ Лайк отправлен!", kb.back())
         await notify_about_like(callback.bot, target_user_id)
-    await callback.answer()
 
+    await callback.answer()
 @router.callback_query(F.data.startswith("skip_like_"))
 async def skip_like(callback: CallbackQuery):
     user_id = callback.from_user.id

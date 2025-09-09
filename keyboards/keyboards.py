@@ -113,6 +113,16 @@ def back() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
+def back_to_editing() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Редактирование", callback_data="edit_profile")]
+    ])
+
+def back_to_search() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Поиск", callback_data="search")]
+    ])
+
 def contact(username: str = None) -> InlineKeyboardMarkup:
     buttons = []
 

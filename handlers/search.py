@@ -63,12 +63,39 @@ async def set_rating_filter(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     game = data['game']
 
+    # Используем safe_edit_message для правильной обработки
     await safe_edit_message(callback, "🏆 Выберите рейтинг:", kb.ratings(game))
+    await callback.answer()
+
+@router.callback_query(F.data == "filter_position", SearchForm.filters)
+async def set_position_filter(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    game = data['game']
+
+    buttons = []
+    for key, name in settings.POSITIONS[game].items():
+        buttons.append([kb.InlineKeyboardButton(text=name, callback_data=f"pos_filter_{key}")])
+
+    buttons.append([kb.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_filter")])
+
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    # Используем safe_edit_message для правильной обработки
+    await safe_edit_message(callback, "⚔️ Выберите позицию:", keyboard)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("rating_"), SearchForm.filters)
 async def save_rating_filter(callback: CallbackQuery, state: FSMContext):
     rating = callback.data.split("_")[1]
+    
+    data = await state.get_data()
+    current_rating = data.get('rating_filter')
+    
+    # Если выбран тот же рейтинг, просто возвращаемся к фильтрам
+    if current_rating == rating:
+        await callback.answer("Этот рейтинг уже выбран")
+        return
+    
     await state.update_data(rating_filter=rating)
 
     data = await state.get_data()
@@ -86,27 +113,20 @@ async def save_rating_filter(callback: CallbackQuery, state: FSMContext):
     text += "Настройте фильтры или начните поиск:"
 
     await safe_edit_message(callback, text, kb.search_filters())
-    await callback.answer()
-
-@router.callback_query(F.data == "filter_position", SearchForm.filters)
-async def set_position_filter(callback: CallbackQuery, state: FSMContext):
-    data = await state.get_data()
-    game = data['game']
-
-    buttons = []
-    for key, name in settings.POSITIONS[game].items():
-        buttons.append([kb.InlineKeyboardButton(text=name, callback_data=f"pos_filter_{key}")])
-
-    buttons.append([kb.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_filter")])
-
-    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=buttons)
-
-    await safe_edit_message(callback, "⚔️ Выберите позицию:", keyboard)
-    await callback.answer()
+    await callback.answer("✅ Фильтр по рейтингу установлен")
 
 @router.callback_query(F.data.startswith("pos_filter_"), SearchForm.filters)
 async def save_position_filter(callback: CallbackQuery, state: FSMContext):
     position = callback.data.split("_")[2]
+    
+    data = await state.get_data()
+    current_position = data.get('position_filter')
+    
+    # Если выбрана та же позиция, просто возвращаемся к фильтрам
+    if current_position == position:
+        await callback.answer("Эта позиция уже выбрана")
+        return
+        
     await state.update_data(position_filter=position)
 
     data = await state.get_data()
@@ -125,7 +145,7 @@ async def save_position_filter(callback: CallbackQuery, state: FSMContext):
     text += "Настройте фильтры или начните поиск:"
 
     await safe_edit_message(callback, text, kb.search_filters())
-    await callback.answer()
+    await callback.answer("✅ Фильтр по позиции установлен")
 
 @router.callback_query(F.data == "cancel_filter", SearchForm.filters)
 async def cancel_filter(callback: CallbackQuery, state: FSMContext):
@@ -147,7 +167,7 @@ async def cancel_filter(callback: CallbackQuery, state: FSMContext):
     text += "Настройте фильтры или начните поиск:"
 
     await safe_edit_message(callback, text, kb.search_filters())
-    await callback.answer()
+    await callback.answer("❌ Отменено")
 
 @router.callback_query(F.data == "start_search", SearchForm.filters)
 async def begin_search(callback: CallbackQuery, state: FSMContext):
@@ -164,7 +184,7 @@ async def begin_search(callback: CallbackQuery, state: FSMContext):
     if not profiles:
         game_name = settings.GAMES.get(data['game'], data['game'])
         text = f"😔 Анкеты в {game_name} не найдены. Попробуйте изменить фильтры или зайти позже."
-        await safe_edit_message(callback, text, kb.back())
+        await safe_edit_message(callback, text, kb.back_to_search())
         await callback.answer()
         return
 
@@ -181,7 +201,7 @@ async def show_current_profile(callback: CallbackQuery, state: FSMContext):
     if index >= len(profiles):
         game_name = settings.GAMES.get(data['game'], data['game'])
         text = f"😔 Больше анкет в {game_name} не найдено. Попробуйте изменить фильтры или зайти позже."
-        await safe_edit_message(callback, text, kb.back())
+        await safe_edit_message(callback, text, kb.back_to_search())
         await state.update_data(message_with_photo=False)
         await callback.answer()
         return

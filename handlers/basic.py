@@ -69,14 +69,26 @@ async def back_to_games(callback: CallbackQuery):
 
 async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Optional[InlineKeyboardMarkup] = None):
     try:
+        # Проверяем, изменился ли текст или клавиатура
+        current_text = callback.message.text or callback.message.caption or ""
+        current_markup = callback.message.reply_markup
+        
+        text_changed = current_text != text
+        markup_changed = str(current_markup) != str(reply_markup)
+        
         if callback.message.photo:
+            # Если сообщение с фото, всегда удаляем и создаем новое
             await callback.message.delete()
             await callback.message.answer(text, reply_markup=reply_markup)
         else:
-            await callback.message.edit_text(
-                text=text,
-                reply_markup=reply_markup
-            )
+            # Редактируем только если что-то изменилось
+            if text_changed or markup_changed:
+                await callback.message.edit_text(
+                    text=text,
+                    reply_markup=reply_markup
+                )
+            # Если ничего не изменилось, просто отвечаем на callback без изменения сообщения
+            
     except Exception as e:
         logger.error(f"Ошибка редактирования сообщения: {e}")
         try:
