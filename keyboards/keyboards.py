@@ -113,14 +113,21 @@ def back() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
+def edit_info_menu() -> InlineKeyboardMarkup:
+    """Клавиатура для редактирования описания"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🗑️ Удалить описание", callback_data="delete_info")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")]
+    ])
+
 def back_to_editing() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Редактирование", callback_data="edit_profile")]
+        [InlineKeyboardButton(text="📝 Редактирование", callback_data="back_to_editing")]
     ])
 
 def back_to_search() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Поиск", callback_data="search")]
+        [InlineKeyboardButton(text="🔍 Поиск", callback_data="back_to_search")]
     ])
 
 def contact(username: str = None) -> InlineKeyboardMarkup:

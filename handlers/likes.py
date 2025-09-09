@@ -15,7 +15,7 @@ db = Database(settings.DATABASE_PATH)
 
 from handlers.basic import safe_edit_message
 
-likes_index = {}
+# Убираем глобальную переменную likes_index
 
 @router.callback_query(F.data == "my_likes")
 async def show_my_likes(callback: CallbackQuery):
@@ -47,7 +47,7 @@ async def show_my_likes(callback: CallbackQuery):
         await callback.answer()
         return
 
-    likes_index[user_id] = 0
+    # Показываем первый лайк
     await show_like_profile(callback, likes, 0)
 
 async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
@@ -61,6 +61,15 @@ async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
     profile = likes[index]
     profile_text = texts.format_profile(profile)
     text = f"❤️ Этот игрок лайкнул вас:\n\n{profile_text}"
+    
+    # Создаем кнопки с индексом
+    like_keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+        [
+            kb.InlineKeyboardButton(text="❤️ Лайк в ответ", callback_data=f"like_back_{profile['telegram_id']}_{index}"),
+            kb.InlineKeyboardButton(text="👎 Пропустить", callback_data=f"skip_like_{profile['telegram_id']}_{index}")
+        ],
+        [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
 
     try:
         if profile.get('photo_id'):
@@ -72,10 +81,10 @@ async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
             await callback.message.answer_photo(
                 photo=profile['photo_id'],
                 caption=text,
-                reply_markup=kb.like_actions(profile['telegram_id'])
+                reply_markup=like_keyboard
             )
         else:
-            await safe_edit_message(callback, text, kb.like_actions(profile['telegram_id']))
+            await safe_edit_message(callback, text, like_keyboard)
 
         await callback.answer()
 
@@ -86,7 +95,9 @@ async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
 @router.callback_query(F.data.startswith("like_back_"))
 async def like_back(callback: CallbackQuery):
     try:
-        target_user_id = int(callback.data.split("_")[2])
+        parts = callback.data.split("_")
+        target_user_id = int(parts[2])
+        current_index = int(parts[3]) if len(parts) > 3 else 0
     except (ValueError, IndexError):
         await callback.answer("❌ Ошибка", show_alert=True)
         return
@@ -138,12 +149,30 @@ async def like_back(callback: CallbackQuery):
 
         logger.info(f"Взаимный лайк: {user_id} <-> {target_user_id}")
     else:
-        await safe_edit_message(callback, "❤️ Лайк отправлен!", kb.back())
+        # Лайк отправлен, но не матч - показываем следующий лайк или завершаем просмотр
         await notify_about_like(callback.bot, target_user_id)
+        
+        # Получаем актуальный список лайков (без только что обработанного)
+        likes = db.get_likes_for_user(user_id, game)
+        
+        if likes and current_index < len(likes):
+            # Показываем следующий лайк
+            await show_like_profile(callback, likes, current_index)
+        else:
+            # Лайков больше нет
+            text = "✅ Все лайки просмотрены!\n\nЗайдите позже, возможно появятся новые."
+            await safe_edit_message(callback, text, kb.back())
 
     await callback.answer()
+
 @router.callback_query(F.data.startswith("skip_like_"))
 async def skip_like(callback: CallbackQuery):
+    try:
+        parts = callback.data.split("_")
+        current_index = int(parts[3]) if len(parts) > 3 else 0
+    except (ValueError, IndexError):
+        current_index = 0
+
     user_id = callback.from_user.id
     user = db.get_user(user_id)
 
@@ -155,14 +184,13 @@ async def skip_like(callback: CallbackQuery):
     game = user['current_game']
     likes = db.get_likes_for_user(user_id, game)
 
-    current_index = likes_index.get(user_id, 0) + 1
-    likes_index[user_id] = current_index
+    next_index = current_index + 1
 
-    if current_index >= len(likes):
+    if next_index >= len(likes):
         text = "✅ Все лайки просмотрены!\n\nЗайдите позже, возможно появятся новые."
         await safe_edit_message(callback, text, kb.back())
     else:
-        await show_like_profile(callback, likes, current_index)
+        await show_like_profile(callback, likes, next_index)
 
     await callback.answer()
 

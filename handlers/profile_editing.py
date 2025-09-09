@@ -97,9 +97,7 @@ async def edit_name(callback: CallbackQuery, state: FSMContext):
     await safe_edit_or_send(
         callback.message,
         "👤 Введите новое имя и фамилию:",
-        kb.InlineKeyboardMarkup(inline_keyboard=[
-            [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")]
-        ])
+        kb.cancel_edit()
     )
     await callback.answer()
 
@@ -114,9 +112,7 @@ async def edit_nickname(callback: CallbackQuery, state: FSMContext):
     await safe_edit_or_send(
         callback.message,
         "🎮 Введите новый игровой никнейм:",
-        kb.InlineKeyboardMarkup(inline_keyboard=[
-            [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")]
-        ])
+        kb.cancel_edit()
     )
     await callback.answer()
 
@@ -131,9 +127,7 @@ async def edit_age(callback: CallbackQuery, state: FSMContext):
     await safe_edit_or_send(
         callback.message,
         f"🎂 Введите новый возраст ({settings.MIN_AGE}-{settings.MAX_AGE}):",
-        kb.InlineKeyboardMarkup(inline_keyboard=[
-            [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")]
-        ])
+        kb.cancel_edit()
     )
     await callback.answer()
 
@@ -185,10 +179,8 @@ async def edit_info(callback: CallbackQuery, state: FSMContext):
     
     await safe_edit_or_send(
         callback.message,
-        "📝 Введите новое описание (или отправьте '-' чтобы удалить):",
-        kb.InlineKeyboardMarkup(inline_keyboard=[
-            [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")]
-        ])
+        "📝 Введите новое описание или выберите действие:",
+        kb.edit_info_menu()
     )
     await callback.answer()
 
@@ -203,12 +195,11 @@ async def edit_photo(callback: CallbackQuery, state: FSMContext):
     await safe_edit_or_send(
         callback.message,
         "📸 Отправьте новое фото или нажмите 'Удалить фото':",
-        kb.InlineKeyboardMarkup(inline_keyboard=[
-            [kb.InlineKeyboardButton(text="🗑️ Удалить фото", callback_data="delete_photo")],
-            [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")]
-        ])
+        kb.edit_photo_menu()
     )
     await callback.answer()
+
+# Обработчики сообщений для редактирования
 
 @router.message(EditProfileForm.edit_name)
 async def process_edit_name(message: Message, state: FSMContext):
@@ -249,7 +240,6 @@ async def process_edit_name(message: Message, state: FSMContext):
 async def wrong_edit_name_format(message: Message, state: FSMContext):
     await message.answer("❌ Отправьте текстовое сообщение с именем и фамилией")
 
-
 @router.message(EditProfileForm.edit_nickname)
 async def process_edit_nickname(message: Message, state: FSMContext):
     nickname = message.text.strip()
@@ -284,7 +274,6 @@ async def process_edit_nickname(message: Message, state: FSMContext):
 @router.message(EditProfileForm.edit_nickname, ~F.text)
 async def wrong_edit_nickname_format(message: Message, state: FSMContext):
     await message.answer("❌ Отправьте текстовое сообщение с игровым никнеймом")
-
 
 @router.message(EditProfileForm.edit_age)
 async def process_edit_age(message: Message, state: FSMContext):
@@ -325,7 +314,107 @@ async def process_edit_age(message: Message, state: FSMContext):
 async def wrong_edit_age_format(message: Message, state: FSMContext):
     await message.answer(f"❌ Отправьте число от {settings.MIN_AGE} до {settings.MAX_AGE}")
 
+@router.message(EditProfileForm.edit_info)
+async def process_edit_info(message: Message, state: FSMContext):
+    info = message.text.strip()
 
+    if len(info) > settings.MAX_INFO_LENGTH:
+        await message.answer(f"❌ Слишком длинный текст (максимум {settings.MAX_INFO_LENGTH} символов)")
+        return
+
+    data = await state.get_data()
+    profile = db.get_user_profile(data['user_id'], data['game'])
+    
+    if profile:
+        success = db.update_user_profile(
+            telegram_id=data['user_id'],
+            game=data['game'],
+            name=profile['name'],
+            nickname=profile['nickname'],
+            age=profile['age'],
+            rating=profile['rating'],
+            positions=profile['positions'],
+            additional_info=info,
+            photo_id=profile.get('photo_id')
+        )
+        
+        await state.clear()
+        
+        if success:
+            await message.answer("✅ Описание обновлено!", reply_markup=kb.back_to_editing())
+        else:
+            await message.answer("❌ Ошибка обновления", reply_markup=kb.back_to_editing())
+
+@router.message(EditProfileForm.edit_info, ~F.text)
+async def wrong_edit_info_format(message: Message, state: FSMContext):
+    await message.answer("❌ Отправьте текстовое сообщение с описанием")
+
+@router.message(EditProfileForm.edit_photo, F.photo)
+async def process_edit_photo(message: Message, state: FSMContext):
+    photo_id = message.photo[-1].file_id
+    
+    data = await state.get_data()
+    profile = db.get_user_profile(data['user_id'], data['game'])
+    
+    if profile:
+        success = db.update_user_profile(
+            telegram_id=data['user_id'],
+            game=data['game'],
+            name=profile['name'],
+            nickname=profile['nickname'],
+            age=profile['age'],
+            rating=profile['rating'],
+            positions=profile['positions'],
+            additional_info=profile['additional_info'],
+            photo_id=photo_id
+        )
+        
+        await state.clear()
+        
+        if success:
+            await message.answer("✅ Фото обновлено!", reply_markup=kb.back_to_editing())
+        else:
+            await message.answer("❌ Ошибка обновления", reply_markup=kb.back_to_editing())
+
+@router.message(EditProfileForm.edit_photo)
+async def wrong_edit_photo_format(message: Message, state: FSMContext):
+    await message.answer(
+        "❌ Отправьте фотографию или используйте кнопки",
+        reply_markup=kb.edit_photo_menu()
+    )
+
+# Обработчики callback для редактирования
+
+@router.callback_query(F.data.startswith("rating_"), EditProfileForm.edit_rating)
+async def process_edit_rating(callback: CallbackQuery, state: FSMContext):
+    rating = callback.data.split("_")[1]
+    
+    data = await state.get_data()
+    profile = db.get_user_profile(data['user_id'], data['game'])
+    
+    if profile:
+        success = db.update_user_profile(
+            telegram_id=data['user_id'],
+            game=data['game'],
+            name=profile['name'],
+            nickname=profile['nickname'],
+            age=profile['age'],
+            rating=rating,
+            positions=profile['positions'],
+            additional_info=profile['additional_info'],
+            photo_id=profile.get('photo_id')
+        )
+        
+        await state.clear()
+        
+        if success:
+            await safe_edit_or_send(callback.message, "✅ Рейтинг обновлен!", kb.back_to_editing())
+        else:
+            await safe_edit_or_send(callback.message, "❌ Ошибка обновления", kb.back_to_editing())
+    
+    await callback.answer()
+
+# Обработчики позиций
 
 @router.callback_query(F.data.startswith("pos_add_"), EditProfileForm.edit_positions)
 async def edit_add_position(callback: CallbackQuery, state: FSMContext):
@@ -355,117 +444,6 @@ async def edit_remove_position(callback: CallbackQuery, state: FSMContext):
         await state.update_data(positions_selected=selected)
 
     await callback.message.edit_reply_markup(reply_markup=kb.positions(game, selected))
-    await callback.answer()
-
-@router.callback_query(F.data == "pos_need", EditProfileForm.edit_positions)
-async def edit_positions_need(callback: CallbackQuery):
-    await callback.answer("⚠️ Выберите хотя бы одну позицию", show_alert=True)
-
-
-@router.message(EditProfileForm.edit_info)
-async def process_edit_info(message: Message, state: FSMContext):
-    info = message.text.strip()
-
-    if info == "-":
-        info = ""
-
-    if len(info) > settings.MAX_INFO_LENGTH:
-        await message.answer(f"❌ Слишком длинный текст (максимум {settings.MAX_INFO_LENGTH} символов)")
-        return
-
-    data = await state.get_data()
-    profile = db.get_user_profile(data['user_id'], data['game'])
-    
-    if profile:
-        success = db.update_user_profile(
-            telegram_id=data['user_id'],
-            game=data['game'],
-            name=profile['name'],
-            nickname=profile['nickname'],
-            age=profile['age'],
-            rating=profile['rating'],
-            positions=profile['positions'],
-            additional_info=info,
-            photo_id=profile.get('photo_id')
-        )
-        
-        await state.clear()
-        
-        if success:
-            await message.answer("✅ Описание обновлено!", reply_markup=kb.back_to_editing())
-        else:
-            await message.answer("❌ Ошибка обновления", reply_markup=kb.back_to_editing())
-
-# Обработчик неправильного типа сообщения для редактирования описания
-@router.message(EditProfileForm.edit_info, ~F.text)
-async def wrong_edit_info_format(message: Message, state: FSMContext):
-    await message.answer("❌ Отправьте текстовое сообщение с описанием или '-' чтобы удалить")
-
-@router.message(EditProfileForm.edit_photo, F.photo)
-async def process_edit_photo(message: Message, state: FSMContext):
-    photo_id = message.photo[-1].file_id
-    
-    data = await state.get_data()
-    profile = db.get_user_profile(data['user_id'], data['game'])
-    
-    if profile:
-        success = db.update_user_profile(
-            telegram_id=data['user_id'],
-            game=data['game'],
-            name=profile['name'],
-            nickname=profile['nickname'],
-            age=profile['age'],
-            rating=profile['rating'],
-            positions=profile['positions'],
-            additional_info=profile['additional_info'],
-            photo_id=photo_id
-        )
-        
-        await state.clear()
-        
-        if success:
-            await message.answer("✅ Фото обновлено!", reply_markup=kb.back_to_editing())
-        else:
-            await message.answer("❌ Ошибка обновления", reply_markup=kb.back_to_editing())
-
-
-@router.message(EditProfileForm.edit_photo)
-async def wrong_edit_photo_format(message: Message, state: FSMContext):
-    await message.answer(
-        "❌ Отправьте фотографию или используйте кнопки",
-        reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
-            [kb.InlineKeyboardButton(text="🗑️ Удалить фото", callback_data="delete_photo")],
-            [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")]
-        ])
-    )
-
-@router.callback_query(F.data.startswith("rating_"), EditProfileForm.edit_rating)
-async def process_edit_rating(callback: CallbackQuery, state: FSMContext):
-    rating = callback.data.split("_")[1]
-    
-    data = await state.get_data()
-    profile = db.get_user_profile(data['user_id'], data['game'])
-    
-    if profile:
-        success = db.update_user_profile(
-            telegram_id=data['user_id'],
-            game=data['game'],
-            name=profile['name'],
-            nickname=profile['nickname'],
-            age=profile['age'],
-            rating=rating,
-            positions=profile['positions'],
-            additional_info=profile['additional_info'],
-            photo_id=profile.get('photo_id')
-        )
-        
-        await state.clear()
-        
-        if success:
-            await safe_edit_or_send(callback.message, "✅ Рейтинг обновлен!", kb.back_to_editing())
-        else:
-            await safe_edit_or_send(callback.message, "❌ Ошибка обновления", kb.back_to_editing())
-    
     await callback.answer()
 
 @router.callback_query(F.data == "pos_done", EditProfileForm.edit_positions)
@@ -504,6 +482,39 @@ async def edit_positions_done(callback: CallbackQuery, state: FSMContext):
         
         if success:
             await safe_edit_or_send(callback.message, "✅ Позиции обновлены!", kb.back_to_editing())
+        else:
+            await safe_edit_or_send(callback.message, "❌ Ошибка обновления", kb.back_to_editing())
+    
+    await callback.answer()
+
+@router.callback_query(F.data == "pos_need", EditProfileForm.edit_positions)
+async def edit_positions_need(callback: CallbackQuery):
+    await callback.answer("⚠️ Выберите хотя бы одну позицию", show_alert=True)
+
+# Обработчики удаления
+
+@router.callback_query(F.data == "delete_info", EditProfileForm.edit_info)
+async def delete_info(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    profile = db.get_user_profile(data['user_id'], data['game'])
+    
+    if profile:
+        success = db.update_user_profile(
+            telegram_id=data['user_id'],
+            game=data['game'],
+            name=profile['name'],
+            nickname=profile['nickname'],
+            age=profile['age'],
+            rating=profile['rating'],
+            positions=profile['positions'],
+            additional_info="",  # Удаляем описание
+            photo_id=profile.get('photo_id')
+        )
+        
+        await state.clear()
+        
+        if success:
+            await safe_edit_or_send(callback.message, "✅ Описание удалено!", kb.back_to_editing())
         else:
             await safe_edit_or_send(callback.message, "❌ Ошибка обновления", kb.back_to_editing())
     

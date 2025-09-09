@@ -184,7 +184,12 @@ async def begin_search(callback: CallbackQuery, state: FSMContext):
     if not profiles:
         game_name = settings.GAMES.get(data['game'], data['game'])
         text = f"😔 Анкеты в {game_name} не найдены. Попробуйте изменить фильтры или зайти позже."
-        await safe_edit_message(callback, text, kb.back_to_search())
+        # Используем правильную клавиатуру для возврата к поиску
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="🔍 Поиск", callback_data="back_to_search")],
+            [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await safe_edit_message(callback, text, keyboard)
         await callback.answer()
         return
 
@@ -201,7 +206,12 @@ async def show_current_profile(callback: CallbackQuery, state: FSMContext):
     if index >= len(profiles):
         game_name = settings.GAMES.get(data['game'], data['game'])
         text = f"😔 Больше анкет в {game_name} не найдено. Попробуйте изменить фильтры или зайти позже."
-        await safe_edit_message(callback, text, kb.back_to_search())
+        # Используем правильную клавиатуру для возврата к поиску  
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="🔍 Поиск", callback_data="back_to_search")],
+            [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        await safe_edit_message(callback, text, keyboard)
         await state.update_data(message_with_photo=False)
         await callback.answer()
         return

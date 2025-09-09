@@ -69,6 +69,18 @@ class Database:
                 )
             ''')
 
+            # Новая таблица для отслеживания пропущенных лайков
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS skipped_likes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    skipped_user_id INTEGER,
+                    game TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, skipped_user_id, game)
+                )
+            ''')
+
     def _migrate_data(self):
         """Миграция существующих данных из старой структуры в новую"""
         try:
@@ -268,27 +280,44 @@ class Database:
             return []
 
     def add_like(self, from_user: int, to_user: int, game: str) -> bool:
+        """Добавить лайк и проверить на матч"""
         try:
             with sqlite3.connect(self.db_path) as conn:
+                # Проверяем, нет ли уже такого лайка
+                cursor = conn.execute('''
+                    SELECT 1 FROM likes 
+                    WHERE from_user = ? AND to_user = ? AND game = ?
+                ''', (from_user, to_user, game))
+                if cursor.fetchone():
+                    # Лайк уже существует
+                    logger.info(f"Лайк уже существует: {from_user} -> {to_user}")
+                    return False
+                # Добавляем лайк
                 conn.execute('''
-                    INSERT OR IGNORE INTO likes (from_user, to_user, game)
+                    INSERT INTO likes (from_user, to_user, game)
                     VALUES (?, ?, ?)
                 ''', (from_user, to_user, game))
-
+                # Проверяем взаимный лайк
                 cursor = conn.execute('''
                     SELECT 1 FROM likes 
                     WHERE from_user = ? AND to_user = ? AND game = ?
                 ''', (to_user, from_user, game))
-
                 if cursor.fetchone():
+                    # Есть взаимный лайк - создаем матч
                     user1, user2 = min(from_user, to_user), max(from_user, to_user)
-                    conn.execute('''
-                        INSERT OR IGNORE INTO matches (user1, user2, game)
-                        VALUES (?, ?, ?)
+                    # Проверяем, нет ли уже матча
+                    cursor = conn.execute('''
+                        SELECT 1 FROM matches 
+                        WHERE user1 = ? AND user2 = ? AND game = ?
                     ''', (user1, user2, game))
 
-                    logger.info(f"Матч создан: {from_user} <-> {to_user}")
-                    return True
+                    if not cursor.fetchone():
+                        conn.execute('''
+                            INSERT INTO matches (user1, user2, game)
+                            VALUES (?, ?, ?)
+                        ''', (user1, user2, game))
+                        logger.info(f"Матч создан: {from_user} <-> {to_user}")
+                        return True
 
             logger.info(f"Лайк добавлен: {from_user} -> {to_user}")
             return False
@@ -298,40 +327,44 @@ class Database:
             return False
 
     def get_likes_for_user(self, user_id: int, game: str) -> List[Dict]:
-        try:
-            with sqlite3.connect(self.db_path) as conn:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.execute('''
-                    SELECT p.*, u.username FROM profiles p
-                    JOIN users u ON p.telegram_id = u.telegram_id
-                    JOIN likes l ON p.telegram_id = l.from_user
-                    WHERE l.to_user = ? AND l.game = ? AND p.game = ?
-                    AND NOT EXISTS (
-                        SELECT 1 FROM likes l2 
-                        WHERE l2.from_user = ? AND l2.to_user = p.telegram_id AND l2.game = ?
-                    )
-                    ORDER BY l.created_at DESC
-                ''', (user_id, game, game, user_id, game))
+            """Получить лайки для пользователя (исключая уже обработанные)"""
+            try:
+                with sqlite3.connect(self.db_path) as conn:
+                    conn.row_factory = sqlite3.Row
+                    cursor = conn.execute('''
+                        SELECT p.*, u.username FROM profiles p
+                        JOIN users u ON p.telegram_id = u.telegram_id
+                        JOIN likes l ON p.telegram_id = l.from_user
+                        WHERE l.to_user = ? AND l.game = ? AND p.game = ?
+                        AND NOT EXISTS (
+                            -- Исключаем если уже есть матч
+                            SELECT 1 FROM matches m 
+                            WHERE ((m.user1 = ? AND m.user2 = p.telegram_id) OR 
+                                   (m.user1 = p.telegram_id AND m.user2 = ?)) 
+                            AND m.game = ?
+                        )
+                        ORDER BY l.created_at DESC
+                    ''', (user_id, game, game, user_id, user_id, game))
 
-                results = []
-                for row in cursor.fetchall():
-                    profile = dict(row)
-                    if profile['positions']:
-                        try:
-                            profile['positions'] = json.loads(profile['positions'])
-                        except:
+                    results = []
+                    for row in cursor.fetchall():
+                        profile = dict(row)
+                        if profile['positions']:
+                            try:
+                                profile['positions'] = json.loads(profile['positions'])
+                            except:
+                                profile['positions'] = []
+                        else:
                             profile['positions'] = []
-                    else:
-                        profile['positions'] = []
 
-                    profile['current_game'] = profile['game']
-                    results.append(profile)
+                        profile['current_game'] = profile['game']
+                        results.append(profile)
 
-                return results
+                    return results
 
-        except Exception as e:
-            logger.error(f"Ошибка получения лайков: {e}")
-            return []
+            except Exception as e:
+                logger.error(f"Ошибка получения лайков: {e}")
+                return []
 
     def get_matches(self, user_id: int, game: str) -> List[Dict]:
         """Получить матчи пользователя"""
@@ -368,6 +401,21 @@ class Database:
             logger.error(f"Ошибка получения матчей: {e}")
             return []
 
+    def skip_like(self, user_id: int, skipped_user_id: int, game: str) -> bool:
+        """Отметить лайк как пропущенный"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute('''
+                    INSERT OR IGNORE INTO skipped_likes (user_id, skipped_user_id, game)
+                    VALUES (?, ?, ?)
+                ''', (user_id, skipped_user_id, game))
+
+            logger.info(f"Лайк пропущен: {user_id} пропустил {skipped_user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка пропуска лайка: {e}")
+            return False
+
     def delete_profile(self, telegram_id: int, game: str) -> bool:
         """Удалить профиль для конкретной игры"""
         try:
@@ -376,6 +424,10 @@ class Database:
                 conn.execute("DELETE FROM likes WHERE (from_user = ? OR to_user = ?) AND game = ?", 
                            (telegram_id, telegram_id, game))
                 conn.execute("DELETE FROM matches WHERE (user1 = ? OR user2 = ?) AND game = ?", 
+                           (telegram_id, telegram_id, game))
+
+                # Удаляем пропущенные лайки для этой игры
+                conn.execute("DELETE FROM skipped_likes WHERE (user_id = ? OR skipped_user_id = ?) AND game = ?", 
                            (telegram_id, telegram_id, game))
 
                 # Удаляем профиль для этой игры

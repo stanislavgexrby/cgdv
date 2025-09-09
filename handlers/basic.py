@@ -283,6 +283,78 @@ async def view_profile(callback: CallbackQuery):
 
     await callback.answer()
 
+# Добавить эти обработчики в конец handlers/basic.py, перед последней функцией
+
+@router.callback_query(F.data == "back_to_editing")
+async def back_to_editing_handler(callback: CallbackQuery):
+    """Обработчик возврата к редактированию профиля"""
+    user_id = callback.from_user.id
+    user = db.get_user(user_id)
+
+    if not user or not user.get('current_game'):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    game = user['current_game']
+    profile = db.get_user_profile(user_id, game)
+
+    if not profile:
+        await callback.answer("❌ Анкета не найдена", show_alert=True)
+        return
+
+    game_name = settings.GAMES.get(game, game)
+    current_info = f"📝 Текущая анкета в {game_name}:\n\n"
+    current_info += texts.format_profile(profile, show_contact=True)
+    current_info += "\n\nЧто хотите изменить?"
+
+    keyboard = kb.edit_profile_menu()
+
+    try:
+        if profile.get('photo_id'):
+            await callback.message.delete()
+            await callback.message.answer_photo(
+                photo=profile['photo_id'],
+                caption=current_info,
+                reply_markup=keyboard
+            )
+        else:
+            await callback.message.edit_text(current_info, reply_markup=keyboard)
+    except Exception as e:
+        logger.error(f"Ошибка отображения профиля для редактирования: {e}")
+        try:
+            await callback.message.edit_text(current_info, reply_markup=keyboard)
+        except:
+            await callback.message.delete()
+            await callback.message.answer(current_info, reply_markup=keyboard)
+
+    await callback.answer()
+
+@router.callback_query(F.data == "back_to_search")  
+async def back_to_search_handler(callback: CallbackQuery):
+    """Обработчик возврата к поиску"""  
+    user_id = callback.from_user.id
+    user = db.get_user(user_id)
+
+    if not user or not user.get('current_game'):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    game = user['current_game']
+    
+    if not db.has_profile(user_id, game):
+        game_name = settings.GAMES.get(game, game)
+        await callback.answer(f"❌ Сначала создайте анкету для {game_name}", show_alert=True)
+        return
+
+    game_name = settings.GAMES.get(game, game)
+    text = f"🔍 Поиск в {game_name}\n\nФильтры:\n\n"
+    text += "🏆 Рейтинг: любой\n"
+    text += "⚔️ Позиция: любая\n\n"
+    text += "Настройте фильтры или начните поиск:"
+
+    await safe_edit_message(callback, text, kb.search_filters())
+    await callback.answer()
+
 @router.message(Command("admin"))
 async def cmd_admin(message: Message):
     """Админ панель"""
