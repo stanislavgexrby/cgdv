@@ -80,6 +80,18 @@ class Database:
                     UNIQUE(user_id, skipped_user_id, game)
                 )
             ''')
+            
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS search_skipped (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER,
+                    skipped_user_id INTEGER,
+                    game TEXT,
+                    skip_count INTEGER DEFAULT 1,
+                    last_skipped TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(user_id, skipped_user_id, game)
+                )
+            ''')
 
     def _migrate_data(self):
         """Миграция существующих данных из старой структуры в новую"""
@@ -231,8 +243,10 @@ class Database:
                             position_filter: str = None,
                             limit: int = 10) -> List[Dict]:
         try:
-            query = '''
-                SELECT p.*, u.username FROM profiles p
+            # Сначала получаем всех подходящих пользователей
+            base_query = '''
+                SELECT p.*, u.username
+                FROM profiles p
                 JOIN users u ON p.telegram_id = u.telegram_id
                 WHERE p.telegram_id != ?
                 AND p.game = ?
@@ -242,26 +256,74 @@ class Database:
                 )
             '''
             params = [user_id, game, user_id, game]
-
+    
             if rating_filter:
-                query += " AND p.rating = ?"
+                base_query += " AND p.rating = ?"
                 params.append(rating_filter)
-
+    
             if position_filter:
-                query += " AND p.positions LIKE ?"
+                base_query += " AND p.positions LIKE ?"
                 params.append(f'%"{position_filter}"%')
-
-            query += " ORDER BY RANDOM() LIMIT ?"
-            params.append(limit)
-
+    
+            # Получаем информацию о пропусках отдельным запросом
+            skip_query = '''
+                SELECT skipped_user_id, skip_count, last_skipped
+                FROM search_skipped
+                WHERE user_id = ? AND game = ?
+            '''
+    
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
-                cursor = conn.execute(query, params)
-                rows = cursor.fetchall()
-
-                results = []
-                for row in rows:
+                
+                # Получаем всех потенциальных кандидатов
+                cursor = conn.execute(base_query, params)
+                all_profiles = cursor.fetchall()
+                
+                # Получаем информацию о пропусках
+                cursor = conn.execute(skip_query, [user_id, game])
+                skips = {row['skipped_user_id']: row for row in cursor.fetchall()}
+    
+                # Разделяем профили по приоритетам в Python
+                priority_1 = []  # Новые (никогда не пропускались)
+                priority_2 = []  # Пропущенные давно  
+                priority_3 = []  # Пропущенные недавно
+    
+                import random
+                from datetime import datetime, timedelta
+    
+                now = datetime.now()
+                
+                for row in all_profiles:
                     profile = dict(row)
+                    telegram_id = profile['telegram_id']
+                    
+                    if telegram_id in skips:
+                        skip_info = skips[telegram_id]
+                        last_skipped = datetime.fromisoformat(skip_info['last_skipped'].replace('Z', '+00:00'))
+                        days_since_skip = (now - last_skipped).days
+                        
+                        if days_since_skip >= 3:  # Давно пропускали
+                            priority_2.append(profile)
+                        else:  # Недавно пропускали  
+                            priority_3.append(profile)
+                    else:
+                        # Никогда не пропускали
+                        priority_1.append(profile)
+    
+                # Перемешиваем каждую группу
+                random.shuffle(priority_1)
+                random.shuffle(priority_2) 
+                random.shuffle(priority_3)
+    
+                # Объединяем в порядке приоритета
+                final_profiles = priority_1 + priority_2 + priority_3
+                
+                # Ограничиваем результат
+                final_profiles = final_profiles[:limit]
+    
+                # Обрабатываем результаты
+                results = []
+                for profile in final_profiles:
                     if profile['positions']:
                         try:
                             profile['positions'] = json.loads(profile['positions'])
@@ -269,15 +331,36 @@ class Database:
                             profile['positions'] = []
                     else:
                         profile['positions'] = []
-
+    
                     profile['current_game'] = profile['game']
                     results.append(profile)
-
+    
                 return results
-
+    
         except Exception as e:
             logger.error(f"Ошибка поиска совпадений: {e}")
             return []
+
+    def add_search_skip(self, user_id: int, skipped_user_id: int, game: str) -> bool:
+        """Запомнить, что пользователь пропустил анкету в поиске"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Увеличиваем счетчик пропусков или создаем запись
+                conn.execute('''
+                    INSERT INTO search_skipped (user_id, skipped_user_id, game, skip_count, last_skipped)
+                    VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)
+                    ON CONFLICT(user_id, skipped_user_id, game) 
+                    DO UPDATE SET 
+                        skip_count = skip_count + 1,
+                        last_skipped = CURRENT_TIMESTAMP
+                ''', (user_id, skipped_user_id, game))
+
+            logger.info(f"Пропуск в поиске записан: {user_id} пропустил {skipped_user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка записи пропуска в поиске: {e}")
+            return False
+
 
     def add_like(self, from_user: int, to_user: int, game: str) -> bool:
         """Добавить лайк и проверить на матч"""
@@ -350,7 +433,7 @@ class Database:
                     )
                     ORDER BY l.created_at DESC
                 ''', (user_id, game, game, user_id, user_id, game, user_id, game))
-    
+
                 results = []
                 for row in cursor.fetchall():
                     profile = dict(row)
@@ -361,12 +444,12 @@ class Database:
                             profile['positions'] = []
                     else:
                         profile['positions'] = []
-    
+
                     profile['current_game'] = profile['game']
                     results.append(profile)
-    
+
                 return results
-    
+
         except Exception as e:
             logger.error(f"Ошибка получения лайков: {e}")
             return []

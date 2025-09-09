@@ -257,6 +257,23 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("skip_"), SearchForm.browsing)
 async def skip_profile(callback: CallbackQuery, state: FSMContext):
     if callback.data.startswith("skip_") and callback.data[5:].isdigit():
+        try:
+            skipped_user_id = int(callback.data[5:])
+            
+            # Получаем данные из состояния
+            data = await state.get_data()
+            user_id = data['user_id']
+            game = data['game']
+            
+            # Запоминаем пропуск в базе данных
+            db.add_search_skip(user_id, skipped_user_id, game)
+            
+            logger.info(f"Пропуск в поиске: {user_id} пропустил {skipped_user_id}")
+            
+        except (ValueError, KeyError) as e:
+            logger.error(f"Ошибка обработки пропуска: {e}")
+        
+        # Переходим к следующему профилю
         await show_next_profile(callback, state)
 
 @router.callback_query(F.data.startswith("like_"), SearchForm.browsing)
