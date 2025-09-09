@@ -1,6 +1,7 @@
 import logging
 from aiogram import Router, F, Bot
 from aiogram.types import CallbackQuery
+from aiogram.fsm.context import FSMContext
 
 from database.database import Database
 import keyboards.keyboards as kb
@@ -15,10 +16,11 @@ db = Database(settings.DATABASE_PATH)
 
 from handlers.basic import safe_edit_message
 
-# Убираем глобальную переменную likes_index
-
 @router.callback_query(F.data == "my_likes")
-async def show_my_likes(callback: CallbackQuery):
+async def show_my_likes(callback: CallbackQuery, state: FSMContext):
+    # Очищаем любое активное состояние FSM
+    await state.clear()
+    
     user_id = callback.from_user.id
     user = db.get_user(user_id)
 
@@ -62,11 +64,14 @@ async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
     profile_text = texts.format_profile(profile)
     text = f"❤️ Этот игрок лайкнул вас:\n\n{profile_text}"
     
-    # Создаем кнопки с индексом
+    # Используем уникальные префиксы чтобы избежать конфликта с search.py
+    callback_like = f"loves_back_{profile['telegram_id']}_{index}"
+    callback_skip = f"loves_skip_{profile['telegram_id']}_{index}"
+    
     like_keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
         [
-            kb.InlineKeyboardButton(text="❤️ Лайк в ответ", callback_data=f"like_back_{profile['telegram_id']}_{index}"),
-            kb.InlineKeyboardButton(text="👎 Пропустить", callback_data=f"skip_like_{profile['telegram_id']}_{index}")
+            kb.InlineKeyboardButton(text="❤️ Лайк в ответ", callback_data=callback_like),
+            kb.InlineKeyboardButton(text="👎 Пропустить", callback_data=callback_skip)
         ],
         [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
@@ -92,7 +97,7 @@ async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
         logger.error(f"Ошибка показа лайка: {e}")
         await callback.answer("❌ Ошибка загрузки")
 
-@router.callback_query(F.data.startswith("like_back_"))
+@router.callback_query(F.data.startswith("loves_back_"))
 async def like_back(callback: CallbackQuery):
     try:
         parts = callback.data.split("_")
@@ -165,13 +170,15 @@ async def like_back(callback: CallbackQuery):
 
     await callback.answer()
 
-@router.callback_query(F.data.startswith("skip_like_"))
+@router.callback_query(F.data.startswith("loves_skip_"))
 async def skip_like(callback: CallbackQuery):
     try:
         parts = callback.data.split("_")
+        target_user_id = int(parts[2])  # Извлекаем ID пропущенного пользователя
         current_index = int(parts[3]) if len(parts) > 3 else 0
     except (ValueError, IndexError):
-        current_index = 0
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
 
     user_id = callback.from_user.id
     user = db.get_user(user_id)
@@ -182,20 +189,27 @@ async def skip_like(callback: CallbackQuery):
         return
 
     game = user['current_game']
+    
+    # Записываем информацию о пропуске в базу данных
+    db.skip_like(user_id, target_user_id, game)
+    
+    # Получаем актуальный список лайков (без только что пропущенного)
     likes = db.get_likes_for_user(user_id, game)
 
-    next_index = current_index + 1
-
-    if next_index >= len(likes):
+    if likes:
+        # Показываем следующий лайк (начинаем с индекса 0, так как список уже обновлен)
+        await show_like_profile(callback, likes, 0)
+    else:
         text = "✅ Все лайки просмотрены!\n\nЗайдите позже, возможно появятся новые."
         await safe_edit_message(callback, text, kb.back())
-    else:
-        await show_like_profile(callback, likes, next_index)
 
     await callback.answer()
 
 @router.callback_query(F.data == "my_matches")
-async def show_my_matches(callback: CallbackQuery):
+async def show_my_matches(callback: CallbackQuery, state: FSMContext):
+    # Очищаем состояние при заходе в матчи тоже
+    await state.clear()
+    
     user_id = callback.from_user.id
     user = db.get_user(user_id)
 

@@ -327,44 +327,49 @@ class Database:
             return False
 
     def get_likes_for_user(self, user_id: int, game: str) -> List[Dict]:
-            """Получить лайки для пользователя (исключая уже обработанные)"""
-            try:
-                with sqlite3.connect(self.db_path) as conn:
-                    conn.row_factory = sqlite3.Row
-                    cursor = conn.execute('''
-                        SELECT p.*, u.username FROM profiles p
-                        JOIN users u ON p.telegram_id = u.telegram_id
-                        JOIN likes l ON p.telegram_id = l.from_user
-                        WHERE l.to_user = ? AND l.game = ? AND p.game = ?
-                        AND NOT EXISTS (
-                            -- Исключаем если уже есть матч
-                            SELECT 1 FROM matches m 
-                            WHERE ((m.user1 = ? AND m.user2 = p.telegram_id) OR 
-                                   (m.user1 = p.telegram_id AND m.user2 = ?)) 
-                            AND m.game = ?
-                        )
-                        ORDER BY l.created_at DESC
-                    ''', (user_id, game, game, user_id, user_id, game))
-
-                    results = []
-                    for row in cursor.fetchall():
-                        profile = dict(row)
-                        if profile['positions']:
-                            try:
-                                profile['positions'] = json.loads(profile['positions'])
-                            except:
-                                profile['positions'] = []
-                        else:
+        """Получить лайки для пользователя (исключая уже обработанные)"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute('''
+                    SELECT p.*, u.username FROM profiles p
+                    JOIN users u ON p.telegram_id = u.telegram_id
+                    JOIN likes l ON p.telegram_id = l.from_user
+                    WHERE l.to_user = ? AND l.game = ? AND p.game = ?
+                    AND NOT EXISTS (
+                        -- Исключаем если уже есть матч
+                        SELECT 1 FROM matches m 
+                        WHERE ((m.user1 = ? AND m.user2 = p.telegram_id) OR 
+                               (m.user1 = p.telegram_id AND m.user2 = ?)) 
+                        AND m.game = ?
+                    )
+                    AND NOT EXISTS (
+                        -- Исключаем если лайк уже пропущен
+                        SELECT 1 FROM skipped_likes sl
+                        WHERE sl.user_id = ? AND sl.skipped_user_id = p.telegram_id AND sl.game = ?
+                    )
+                    ORDER BY l.created_at DESC
+                ''', (user_id, game, game, user_id, user_id, game, user_id, game))
+    
+                results = []
+                for row in cursor.fetchall():
+                    profile = dict(row)
+                    if profile['positions']:
+                        try:
+                            profile['positions'] = json.loads(profile['positions'])
+                        except:
                             profile['positions'] = []
-
-                        profile['current_game'] = profile['game']
-                        results.append(profile)
-
-                    return results
-
-            except Exception as e:
-                logger.error(f"Ошибка получения лайков: {e}")
-                return []
+                    else:
+                        profile['positions'] = []
+    
+                    profile['current_game'] = profile['game']
+                    results.append(profile)
+    
+                return results
+    
+        except Exception as e:
+            logger.error(f"Ошибка получения лайков: {e}")
+            return []
 
     def get_matches(self, user_id: int, game: str) -> List[Dict]:
         """Получить матчи пользователя"""
