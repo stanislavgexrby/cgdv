@@ -353,3 +353,98 @@ async def like_profile(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "continue_search", SearchForm.browsing)
 async def continue_search(callback: CallbackQuery, state: FSMContext):
     await show_next_profile(callback, state)
+
+# Новый обработчик жалоб
+@router.callback_query(F.data.startswith("report_"), SearchForm.browsing)
+async def report_profile(callback: CallbackQuery, state: FSMContext):
+    parts = callback.data.split("_")
+    if len(parts) != 2 or not parts[1].isdigit():
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    try:
+        reported_user_id = int(parts[1])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    data = await state.get_data()
+    reporter_id = data['user_id']
+    game = data['game']
+
+    # Добавляем жалобу в базу данных
+    success = db.add_report(reporter_id, reported_user_id, game)
+
+    if success:
+        # Показываем сообщение о том, что жалоба отправлена
+        text = "🚩 Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время."
+        
+        keyboard = kb.InlineKeyboardMarkup(
+            inline_keyboard=[
+                [kb.InlineKeyboardButton(text="🔍 Продолжить поиск", callback_data="continue_search")],
+                [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+            ]
+        )
+
+        await safe_edit_message(callback, text, keyboard)
+        
+        logger.info(f"Жалоба добавлена: {reporter_id} пожаловался на {reported_user_id}")
+        await callback.answer("✅ Жалоба отправлена")
+
+        # Уведомляем админа (если указан)
+        if settings.ADMIN_ID and settings.ADMIN_ID != 0:
+            try:
+                await callback.bot.send_message(
+                    settings.ADMIN_ID,
+                    f"🚩 Новая жалоба!\n\nПользователь {reporter_id} пожаловался на анкету {reported_user_id} в игре {settings.GAMES.get(game, game)}"
+                )
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления админу: {e}")
+
+    else:
+        await callback.answer("❌ Вы уже жаловались на эту анкету", show_alert=True)
+
+# Обработчик жалоб вне поиска (если кто-то нажмет на кнопку жалобы вне состояния просмотра)
+@router.callback_query(F.data.startswith("report_"))
+async def report_profile_general(callback: CallbackQuery):
+    parts = callback.data.split("_")
+    if len(parts) != 2 or not parts[1].isdigit():
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    try:
+        reported_user_id = int(parts[1])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    user_id = callback.from_user.id
+    user = db.get_user(user_id)
+
+    if not user or not user.get('current_game'):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    game = user['current_game']
+
+    # Добавляем жалобу в базу данных
+    success = db.add_report(user_id, reported_user_id, game)
+
+    if success:
+        text = "🚩 Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время."
+        await safe_edit_message(callback, text, kb.back())
+        
+        logger.info(f"Жалоба добавлена: {user_id} пожаловался на {reported_user_id}")
+        await callback.answer("✅ Жалоба отправлена")
+
+        # Уведомляем админа
+        if settings.ADMIN_ID and settings.ADMIN_ID != 0:
+            try:
+                await callback.bot.send_message(
+                    settings.ADMIN_ID,
+                    f"🚩 Новая жалоба!\n\nПользователь {user_id} пожаловался на анкету {reported_user_id} в игре {settings.GAMES.get(game, game)}"
+                )
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления админу: {e}")
+    else:
+        await callback.answer("❌ Вы уже жаловались на эту анкету", show_alert=True)

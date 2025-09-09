@@ -92,6 +92,21 @@ class Database:
                     UNIQUE(user_id, skipped_user_id, game)
                 )
             ''')
+            # Новая таблица для жалоб (добавить после таблицы search_skipped)
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    reporter_id INTEGER,
+                    reported_user_id INTEGER,
+                    game TEXT,
+                    report_reason TEXT DEFAULT 'inappropriate_content',
+                    status TEXT DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    reviewed_at TIMESTAMP,
+                    admin_id INTEGER,
+                    UNIQUE(reporter_id, reported_user_id, game)
+                )
+''')
 
     def _migrate_data(self):
         """Миграция существующих данных из старой структуры в новую"""
@@ -256,52 +271,52 @@ class Database:
                 )
             '''
             params = [user_id, game, user_id, game]
-    
+
             if rating_filter:
                 base_query += " AND p.rating = ?"
                 params.append(rating_filter)
-    
+
             if position_filter:
                 base_query += " AND p.positions LIKE ?"
                 params.append(f'%"{position_filter}"%')
-    
+
             # Получаем информацию о пропусках отдельным запросом
             skip_query = '''
                 SELECT skipped_user_id, skip_count, last_skipped
                 FROM search_skipped
                 WHERE user_id = ? AND game = ?
             '''
-    
+
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
-                
+
                 # Получаем всех потенциальных кандидатов
                 cursor = conn.execute(base_query, params)
                 all_profiles = cursor.fetchall()
-                
+
                 # Получаем информацию о пропусках
                 cursor = conn.execute(skip_query, [user_id, game])
                 skips = {row['skipped_user_id']: row for row in cursor.fetchall()}
-    
+
                 # Разделяем профили по приоритетам в Python
                 priority_1 = []  # Новые (никогда не пропускались)
                 priority_2 = []  # Пропущенные давно  
                 priority_3 = []  # Пропущенные недавно
-    
+
                 import random
                 from datetime import datetime, timedelta
-    
+
                 now = datetime.now()
-                
+
                 for row in all_profiles:
                     profile = dict(row)
                     telegram_id = profile['telegram_id']
-                    
+
                     if telegram_id in skips:
                         skip_info = skips[telegram_id]
                         last_skipped = datetime.fromisoformat(skip_info['last_skipped'].replace('Z', '+00:00'))
                         days_since_skip = (now - last_skipped).days
-                        
+
                         if days_since_skip >= 3:  # Давно пропускали
                             priority_2.append(profile)
                         else:  # Недавно пропускали  
@@ -309,18 +324,18 @@ class Database:
                     else:
                         # Никогда не пропускали
                         priority_1.append(profile)
-    
+
                 # Перемешиваем каждую группу
                 random.shuffle(priority_1)
                 random.shuffle(priority_2) 
                 random.shuffle(priority_3)
-    
+
                 # Объединяем в порядке приоритета
                 final_profiles = priority_1 + priority_2 + priority_3
-                
+
                 # Ограничиваем результат
                 final_profiles = final_profiles[:limit]
-    
+
                 # Обрабатываем результаты
                 results = []
                 for profile in final_profiles:
@@ -331,12 +346,12 @@ class Database:
                             profile['positions'] = []
                     else:
                         profile['positions'] = []
-    
+
                     profile['current_game'] = profile['game']
                     results.append(profile)
-    
+
                 return results
-    
+
         except Exception as e:
             logger.error(f"Ошибка поиска совпадений: {e}")
             return []
@@ -522,8 +537,90 @@ class Database:
                 conn.execute('DELETE FROM profiles WHERE telegram_id = ? AND game = ?', 
                            (telegram_id, game))
 
+                # Удаляем жалобы связанные с этой анкетой
+                conn.execute("DELETE FROM reports WHERE reported_user_id = ? AND game = ?", 
+           (telegram_id, game))
+
             logger.info(f"Профиль удален: {telegram_id} для {game}")
             return True
         except Exception as e:
             logger.error(f"Ошибка удаления профиля: {e}")
+            return False
+
+    def add_report(self, reporter_id: int, reported_user_id: int, game: str) -> bool:
+        """Добавить жалобу на пользователя"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute('''
+                    INSERT OR IGNORE INTO reports 
+                    (reporter_id, reported_user_id, game, report_reason, status)
+                    VALUES (?, ?, ?, 'inappropriate_content', 'pending')
+                ''', (reporter_id, reported_user_id, game))
+
+            logger.info(f"Жалоба добавлена: {reporter_id} пожаловался на {reported_user_id}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка добавления жалобы: {e}")
+            return False
+
+    def get_pending_reports(self) -> List[Dict]:
+        """Получить все необработанные жалобы"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute('''
+                    SELECT r.*, p.name, p.nickname, p.photo_id, u.username
+                    FROM reports r
+                    JOIN profiles p ON r.reported_user_id = p.telegram_id AND r.game = p.game
+                    LEFT JOIN users u ON p.telegram_id = u.telegram_id
+                    WHERE r.status = 'pending'
+                    ORDER BY r.created_at DESC
+                ''')
+
+                results = []
+                for row in cursor.fetchall():
+                    report = dict(row)
+                    results.append(report)
+
+                return results
+
+        except Exception as e:
+            logger.error(f"Ошибка получения жалоб: {e}")
+            return []
+
+    def process_report(self, report_id: int, action: str, admin_id: int) -> bool:
+        """Обработать жалобу (approve - удалить профиль, dismiss - отклонить)"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                # Получаем информацию о жалобе
+                cursor = conn.execute('''
+                    SELECT reported_user_id, game FROM reports WHERE id = ?
+                ''', (report_id,))
+                report = cursor.fetchone()
+
+                if not report:
+                    return False
+
+                reported_user_id, game = report
+
+                if action == 'approve':
+                    # Удаляем профиль пользователя
+                    self.delete_profile(reported_user_id, game)
+                    status = 'approved'
+                elif action == 'dismiss':
+                    status = 'dismissed'
+                else:
+                    return False
+
+                # Обновляем статус жалобы
+                conn.execute('''
+                    UPDATE reports 
+                    SET status = ?, reviewed_at = CURRENT_TIMESTAMP, admin_id = ?
+                    WHERE id = ?
+                ''', (status, admin_id, report_id))
+
+            logger.info(f"Жалоба {report_id} обработана админом {admin_id}: {action}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка обработки жалобы: {e}")
             return False

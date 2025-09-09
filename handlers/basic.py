@@ -362,6 +362,15 @@ async def cmd_admin(message: Message):
         await message.answer("❌ Нет прав")
         return
 
+    await message.answer("👑 Админ панель", reply_markup=kb.admin_main_menu())
+
+@router.callback_query(F.data == "admin_stats")
+async def show_admin_stats(callback: CallbackQuery):
+    """Показать статистику бота"""
+    if callback.from_user.id != settings.ADMIN_ID:
+        await callback.answer("❌ Нет прав", show_alert=True)
+        return
+
     try:
         import sqlite3
         with sqlite3.connect(db.db_path) as conn:
@@ -377,18 +386,131 @@ async def cmd_admin(message: Message):
             cursor = conn.execute("SELECT COUNT(*) FROM matches")
             total_matches = cursor.fetchone()[0]
 
-        text = f"""👑 Админ панель
+            cursor = conn.execute("SELECT COUNT(*) FROM reports WHERE status = 'pending'")
+            pending_reports = cursor.fetchone()[0]
 
-📊 Статистика:
-• Всего пользователей: {total_users}
-• Всего анкет: {total_profiles}"""
+        text = f"""📊 Статистика бота
+
+👥 Всего пользователей: {total_users}
+📄 Всего анкет: {total_profiles}"""
 
         for game, count in profiles_by_game:
             game_name = settings.GAMES.get(game, game)
             text += f"\n  - {game_name}: {count}"
 
-        text += f"\n• Матчей: {total_matches}"
+        text += f"\n💖 Матчей: {total_matches}"
+        text += f"\n🚩 Ожидающих жалоб: {pending_reports}"
 
-        await message.answer(text)
+        await safe_edit_message(callback, text, kb.admin_main_menu())
+        await callback.answer()
+
     except Exception as e:
-        await message.answer(f"Ошибка получения статистики: {e}")
+        await callback.message.answer(f"Ошибка получения статистики: {e}")
+        await callback.answer()
+
+@router.callback_query(F.data == "admin_reports")
+async def show_admin_reports(callback: CallbackQuery):
+    """Показать список жалоб"""
+    if callback.from_user.id != settings.ADMIN_ID:
+        await callback.answer("❌ Нет прав", show_alert=True)
+        return
+
+    reports = db.get_pending_reports()
+    
+    if not reports:
+        text = "🚩 Нет ожидающих жалоб"
+        await safe_edit_message(callback, text, kb.admin_main_menu())
+        await callback.answer()
+        return
+
+    # Показываем первую жалобу
+    await show_admin_report(callback, reports, 0)
+
+async def show_admin_report(callback: CallbackQuery, reports: list, index: int):
+    """Показать конкретную жалобу для модерации"""
+    if index >= len(reports):
+        text = "✅ Все жалобы просмотрены!"
+        await safe_edit_message(callback, text, kb.admin_main_menu())
+        await callback.answer()
+        return
+
+    report = reports[index]
+    
+    # Формируем информацию о жалобе
+    game_name = settings.GAMES.get(report['game'], report['game'])
+    report_text = f"""🚩 Жалоба #{report['id']}
+
+🎮 Игра: {game_name}
+👤 Пользователь: {report['name']} (@{report['username'] or 'нет username'})
+🎯 Никнейм: {report['nickname']}
+📅 Дата жалобы: {report['created_at'][:16]}
+
+Что делать с анкетой?"""
+
+    try:
+        # Если есть фото профиля, показываем его
+        if report.get('photo_id'):
+            try:
+                await callback.message.delete()
+            except:
+                pass
+
+            await callback.message.answer_photo(
+                photo=report['photo_id'],
+                caption=report_text,
+                reply_markup=kb.admin_report_actions(report['id'])
+            )
+        else:
+            await safe_edit_message(callback, report_text, kb.admin_report_actions(report['id']))
+
+        await callback.answer()
+
+    except Exception as e:
+        logger.error(f"Ошибка показа жалобы: {e}")
+        await callback.answer("❌ Ошибка загрузки")
+
+@router.callback_query(F.data.startswith("admin_approve_"))
+async def admin_approve_report(callback: CallbackQuery):
+    """Одобрить жалобу и удалить профиль"""
+    if callback.from_user.id != settings.ADMIN_ID:
+        await callback.answer("❌ Нет прав", show_alert=True)
+        return
+
+    try:
+        report_id = int(callback.data.split("_")[2])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    success = db.process_report(report_id, 'approve', settings.ADMIN_ID)
+    
+    if success:
+        text = "✅ Жалоба одобрена, профиль удален!"
+        await safe_edit_message(callback, text, kb.admin_back_to_reports())
+        await callback.answer("✅ Профиль удален")
+        logger.info(f"Админ {settings.ADMIN_ID} удалил профиль по жалобе {report_id}")
+    else:
+        await callback.answer("❌ Ошибка обработки жалобы", show_alert=True)
+
+@router.callback_query(F.data.startswith("admin_dismiss_"))
+async def admin_dismiss_report(callback: CallbackQuery):
+    """Отклонить жалобу"""
+    if callback.from_user.id != settings.ADMIN_ID:
+        await callback.answer("❌ Нет прав", show_alert=True)
+        return
+
+    try:
+        report_id = int(callback.data.split("_")[2])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    success = db.process_report(report_id, 'dismiss', settings.ADMIN_ID)
+    
+    if success:
+        text = "❌ Жалоба отклонена, профиль сохранен"
+        await safe_edit_message(callback, text, kb.admin_back_to_reports())
+        await callback.answer("❌ Жалоба отклонена")
+        logger.info(f"Админ {settings.ADMIN_ID} отклонил жалобу {report_id}")
+    else:
+        await callback.answer("❌ Ошибка обработки жалобы", show_alert=True)

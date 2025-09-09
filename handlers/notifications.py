@@ -52,10 +52,16 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int):
 
 async def notify_about_like(bot: Bot, user_id: int):
     try:
+        # Создаем клавиатуру с кнопками для перехода к лайкам и главному меню
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="❤️ Посмотреть лайки", callback_data="my_likes")],
+            [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
         await bot.send_message(
             chat_id=user_id,
             text=texts.NEW_LIKE,
-            reply_markup=kb.back()
+            reply_markup=keyboard
         )
         logger.info(f"📨 Уведомление о лайке отправлено {user_id}")
     except Exception as e:
