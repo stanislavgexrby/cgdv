@@ -15,6 +15,98 @@ db = Database(settings.DATABASE_PATH)
 
 __all__ = ['safe_edit_message', 'router']
 
+@router.callback_query(F.data == "admin_bans")
+async def show_admin_bans(callback: CallbackQuery):
+    """Показать список активных банов"""
+    if callback.from_user.id != settings.ADMIN_ID:
+        await callback.answer("❌ Нет прав", show_alert=True)
+        return
+
+    bans = db.get_all_bans()
+    
+    if not bans:
+        text = "✅ Нет активных банов"
+        await safe_edit_message(callback, text, kb.admin_main_menu())
+        await callback.answer()
+        return
+
+    # Показываем первый бан
+    await show_admin_ban(callback, bans, 0)
+
+async def show_admin_ban(callback: CallbackQuery, bans: list, index: int):
+    """Показать конкретный бан для управления"""
+    if index >= len(bans):
+        text = "✅ Все баны просмотрены!"
+        await safe_edit_message(callback, text, kb.admin_main_menu())
+        await callback.answer()
+        return
+
+    ban = bans[index]
+    
+    # Формируем информацию о бане
+    ban_text = f"""🚫 Бан #{ban['id']}
+
+👤 Пользователь: {ban.get('name', 'N/A')} (@{ban.get('username', 'нет username')})
+🎯 Никнейм: {ban.get('nickname', 'N/A')}
+📅 Дата бана: {ban['created_at'][:16]}
+⏰ Истекает: {ban['expires_at'][:16]}
+📝 Причина: {ban['reason']}
+
+Что делать с этим баном?"""
+
+    await safe_edit_message(callback, ban_text, kb.admin_ban_actions(ban['user_id']))
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("admin_unban_"))
+async def admin_unban_user(callback: CallbackQuery):
+    """Снять бан с пользователя"""
+    if callback.from_user.id != settings.ADMIN_ID:
+        await callback.answer("❌ Нет прав", show_alert=True)
+        return
+
+    try:
+        user_id = int(callback.data.split("_")[2])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    success = db.unban_user(user_id)
+    
+    if success:
+        text = "✅ Бан снят! Пользователь снова может пользоваться ботом."
+        await safe_edit_message(callback, text, kb.admin_back_to_bans())
+        await callback.answer("✅ Бан снят")
+        logger.info(f"Админ {settings.ADMIN_ID} снял бан с пользователя {user_id}")
+        
+        # Уведомляем пользователя
+        from .notifications import notify_user_unbanned
+        await notify_user_unbanned(callback.bot, user_id)
+    else:
+        await callback.answer("❌ Ошибка снятия бана", show_alert=True)
+
+@router.callback_query(F.data.startswith("admin_ban_"))
+async def admin_ban_user(callback: CallbackQuery):
+    """Забанить пользователя на неделю (из админ-панели жалоб)"""
+    if callback.from_user.id != settings.ADMIN_ID:
+        await callback.answer("❌ Нет прав", show_alert=True)
+        return
+
+    try:
+        report_id = int(callback.data.split("_")[2])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    success = db.process_report(report_id, 'ban', settings.ADMIN_ID)
+    
+    if success:
+        text = "✅ Пользователь забанен на неделю!"
+        await safe_edit_message(callback, text, kb.admin_back_to_reports())
+        await callback.answer("✅ Пользователь забанен")
+        logger.info(f"Админ {settings.ADMIN_ID} забанил пользователя по жалобе {report_id}")
+    else:
+        await callback.answer("❌ Ошибка бана пользователя", show_alert=True)
+        
 @router.callback_query(F.data == "back_to_main")
 async def back_to_main_menu(callback: CallbackQuery):
     """Обработчик кнопки 'Назад' из меню подписки при переключении игры"""

@@ -25,6 +25,16 @@ class ProfileForm(StatesGroup):
 @router.callback_query(F.data == "create_profile")
 async def start_create_profile(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
+    
+    # Проверка на бан
+    if db.is_user_banned(user_id):
+        ban_info = db.get_user_ban(user_id)
+        if ban_info:
+            await callback.answer(f"🚫 Вы заблокированы до {ban_info['expires_at'][:16]}", show_alert=True)
+        else:
+            await callback.answer("🚫 Вы заблокированы", show_alert=True)
+        return
+    
     user = db.get_user(user_id)
 
     if not user or not user.get('current_game'):
@@ -47,6 +57,10 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext):
 
 @router.message(ProfileForm.name)
 async def process_name(message: Message, state: FSMContext):
+    if not message.text:
+        await message.answer("❌ Отправьте текстовое сообщение с именем и фамилией")
+        return
+        
     name = message.text.strip()
 
     if len(name) < 2 or len(name) > settings.MAX_NAME_LENGTH:
@@ -77,6 +91,10 @@ async def wrong_name_format(message: Message, state: FSMContext):
 
 @router.message(ProfileForm.nickname)
 async def process_nickname(message: Message, state: FSMContext):
+    if not message.text:
+        await message.answer("❌ Отправьте текстовое сообщение с игровым никнеймом")
+        return
+        
     nickname = message.text.strip()
 
     if len(nickname) < 2 or len(nickname) > settings.MAX_NICKNAME_LENGTH:
@@ -100,6 +118,10 @@ async def wrong_nickname_format(message: Message, state: FSMContext):
 
 @router.message(ProfileForm.age)
 async def process_age(message: Message, state: FSMContext):
+    if not message.text:
+        await message.answer(f"❌ Отправьте число больше {settings.MIN_AGE}:")
+        return
+        
     try:
         age = int(message.text.strip())
     except ValueError:
@@ -108,9 +130,9 @@ async def process_age(message: Message, state: FSMContext):
         )
         return
 
-    if age < settings.MIN_AGE or age > settings.MAX_AGE:
+    if age < settings.MIN_AGE:
         await message.answer(
-            f"❌ Возраст должен быть от {settings.MIN_AGE} до {settings.MAX_AGE}"
+            f"❌ Возраст должен быть больше {settings.MIN_AGE}:"
         )
         return
 
@@ -127,7 +149,7 @@ async def process_age(message: Message, state: FSMContext):
 @router.message(ProfileForm.age, ~F.text)
 async def wrong_age_format(message: Message, state: FSMContext):
     await message.answer(
-        f"❌ Отправьте число от {settings.MIN_AGE} до {settings.MAX_AGE}"
+        f"❌ Отправьте число большее {settings.MIN_AGE}:"
     )
 
 @router.callback_query(F.data.startswith("rating_"), ProfileForm.rating)
@@ -198,6 +220,10 @@ async def positions_need(callback: CallbackQuery):
 
 @router.message(ProfileForm.additional_info)
 async def process_additional_info(message: Message, state: FSMContext):
+    if not message.text:
+        await message.answer("❌ Отправьте текстовое сообщение с описанием или '-' чтобы пропустить")
+        return
+        
     info = message.text.strip()
 
     if info == "-":

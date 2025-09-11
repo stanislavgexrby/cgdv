@@ -30,6 +30,19 @@ async def show_my_likes(callback: CallbackQuery, state: FSMContext):
 
     game = user['current_game']
     
+    # Проверяем, не забанен ли пользователь
+    if db.is_user_banned(user_id):
+        ban_info = db.get_user_ban(user_id)
+        if ban_info:
+            game_name = settings.GAMES.get(game, game)
+            ban_end = ban_info['expires_at']
+            text = f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}\n\n"
+            text += "Во время блокировки раздел 'Лайки' недоступен."
+            
+            await safe_edit_message(callback, text, kb.back())
+            await callback.answer()
+            return
+    
     if not db.has_profile(user_id, game):
         game_name = settings.GAMES.get(game, game)
         await callback.answer(f"❌ Сначала создайте анкету для {game_name}", show_alert=True)
@@ -115,6 +128,20 @@ async def like_back(callback: CallbackQuery):
         return
 
     game = user['current_game']
+    
+    # Проверяем, не забанен ли пользователь
+    if db.is_user_banned(user_id):
+        game_name = settings.GAMES.get(game, game)
+        ban_info = db.get_user_ban(user_id)
+        if ban_info:
+            ban_end = ban_info['expires_at']
+            text = f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}. Нельзя отправлять лайки."
+        else:
+            text = f"🚫 Вы заблокированы в {game_name}. Нельзя отправлять лайки."
+        await safe_edit_message(callback, text, kb.back())
+        await callback.answer()
+        return
+
     is_match = db.add_like(user_id, target_user_id, game)
 
     if is_match:
@@ -155,7 +182,7 @@ async def like_back(callback: CallbackQuery):
         logger.info(f"Взаимный лайк: {user_id} <-> {target_user_id}")
     else:
         # Лайк отправлен, но не матч - показываем следующий лайк или завершаем просмотр
-        await notify_about_like(callback.bot, target_user_id)
+        await notify_about_like(callback.bot, target_user_id, game)
         
         # Получаем актуальный список лайков (без только что обработанного)
         likes = db.get_likes_for_user(user_id, game)
@@ -190,6 +217,19 @@ async def skip_like(callback: CallbackQuery):
 
     game = user['current_game']
     
+    # Проверяем, не забанен ли пользователь (хотя для пропуска это не критично)
+    if db.is_user_banned(user_id):
+        game_name = settings.GAMES.get(game, game)
+        ban_info = db.get_user_ban(user_id)
+        if ban_info:
+            ban_end = ban_info['expires_at']
+            text = f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}."
+        else:
+            text = f"🚫 Вы заблокированы в {game_name}."
+        await safe_edit_message(callback, text, kb.back())
+        await callback.answer()
+        return
+    
     # Записываем информацию о пропуске в базу данных
     db.skip_like(user_id, target_user_id, game)
     
@@ -218,6 +258,19 @@ async def show_my_matches(callback: CallbackQuery, state: FSMContext):
         return
 
     game = user['current_game']
+    
+    # Проверяем, не забанен ли пользователь
+    if db.is_user_banned(user_id):
+        ban_info = db.get_user_ban(user_id)
+        if ban_info:
+            game_name = settings.GAMES.get(game, game)
+            ban_end = ban_info['expires_at']
+            text = f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}\n\n"
+            text += "Во время блокировки раздел 'Матчи' недоступен."
+            
+            await safe_edit_message(callback, text, kb.back())
+            await callback.answer()
+            return
     
     if not db.has_profile(user_id, game):
         game_name = settings.GAMES.get(game, game)
@@ -276,6 +329,18 @@ async def show_contact(callback: CallbackQuery):
         return
 
     game = user['current_game']
+    
+    # Проверяем, не забанен ли пользователь
+    if db.is_user_banned(user_id):
+        game_name = settings.GAMES.get(game, game)
+        ban_info = db.get_user_ban(user_id)
+        if ban_info:
+            ban_end = ban_info['expires_at']
+            await callback.answer(f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}", show_alert=True)
+        else:
+            await callback.answer(f"🚫 Вы заблокированы в {game_name}", show_alert=True)
+        return
+    
     target_profile = db.get_user_profile(target_user_id, game)
 
     if not target_profile:

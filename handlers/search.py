@@ -32,6 +32,19 @@ async def start_search(callback: CallbackQuery, state: FSMContext):
 
     game = user['current_game']
     
+    # Проверяем, не забанен ли пользователь
+    if db.is_user_banned(user_id):
+        ban_info = db.get_user_ban(user_id)
+        if ban_info:
+            game_name = settings.GAMES.get(game, game)
+            ban_end = ban_info['expires_at']
+            text = f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}\n\n"
+            text += "Во время блокировки вы не можете участвовать в поиске."
+            
+            await safe_edit_message(callback, text, kb.back())
+            await callback.answer()
+            return
+    
     if not db.has_profile(user_id, game):
         game_name = settings.GAMES.get(game, game)
         await callback.answer(f"❌ Сначала создайте анкету для {game_name}", show_alert=True)
@@ -173,6 +186,20 @@ async def cancel_filter(callback: CallbackQuery, state: FSMContext):
 async def begin_search(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
 
+    # Дополнительная проверка бана перед началом поиска
+    if db.is_user_banned(data['user_id']):
+        await state.clear()
+        game_name = settings.GAMES.get(data['game'], data['game'])
+        ban_info = db.get_user_ban(data['user_id'])
+        if ban_info:
+            ban_end = ban_info['expires_at']
+            text = f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}. Поиск недоступен."
+        else:
+            text = f"🚫 Вы заблокированы в {game_name}. Поиск недоступен."
+        await safe_edit_message(callback, text, kb.back())
+        await callback.answer()
+        return
+
     profiles = db.get_potential_matches(
         user_id=data['user_id'],
         game=data['game'],
@@ -265,6 +292,20 @@ async def skip_profile(callback: CallbackQuery, state: FSMContext):
             user_id = data['user_id']
             game = data['game']
             
+            # Проверяем, не забанен ли пользователь
+            if db.is_user_banned(user_id):
+                await state.clear()
+                game_name = settings.GAMES.get(game, game)
+                ban_info = db.get_user_ban(user_id)
+                if ban_info:
+                    ban_end = ban_info['expires_at']
+                    text = f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}."
+                else:
+                    text = f"🚫 Вы заблокированы в {game_name}."
+                await safe_edit_message(callback, text, kb.back())
+                await callback.answer()
+                return
+            
             # Запоминаем пропуск в базе данных
             db.add_search_skip(user_id, skipped_user_id, game)
             
@@ -292,6 +333,20 @@ async def like_profile(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     from_user_id = data['user_id']
     game = data['game']
+
+    # Проверяем, не забанен ли пользователь
+    if db.is_user_banned(from_user_id):
+        await state.clear()
+        game_name = settings.GAMES.get(game, game)
+        ban_info = db.get_user_ban(from_user_id)
+        if ban_info:
+            ban_end = ban_info['expires_at']
+            text = f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}. Нельзя отправлять лайки."
+        else:
+            text = f"🚫 Вы заблокированы в {game_name}. Нельзя отправлять лайки."
+        await safe_edit_message(callback, text, kb.back())
+        await callback.answer()
+        return
 
     is_match = db.add_like(from_user_id, target_user_id, game)
 
@@ -344,7 +399,7 @@ async def like_profile(callback: CallbackQuery, state: FSMContext):
             )
         )
 
-        await notify_about_like(callback.bot, target_user_id)
+        await notify_about_like(callback.bot, target_user_id, game)
 
         logger.info(f"Лайк: {from_user_id} -> {target_user_id}")
 
@@ -371,6 +426,20 @@ async def report_profile(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     reporter_id = data['user_id']
     game = data['game']
+
+    # Проверяем, не забанен ли пользователь
+    if db.is_user_banned(reporter_id):
+        await state.clear()
+        game_name = settings.GAMES.get(game, game)
+        ban_info = db.get_user_ban(reporter_id)
+        if ban_info:
+            ban_end = ban_info['expires_at']
+            text = f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}."
+        else:
+            text = f"🚫 Вы заблокированы в {game_name}."
+        await safe_edit_message(callback, text, kb.back())
+        await callback.answer()
+        return
 
     # Добавляем жалобу в базу данных
     success = db.add_report(reporter_id, reported_user_id, game)
@@ -426,6 +495,17 @@ async def report_profile_general(callback: CallbackQuery):
         return
 
     game = user['current_game']
+
+    # Проверяем, не забанен ли пользователь
+    if db.is_user_banned(user_id):
+        game_name = settings.GAMES.get(game, game)
+        ban_info = db.get_user_ban(user_id)
+        if ban_info:
+            ban_end = ban_info['expires_at']
+            await callback.answer(f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}", show_alert=True)
+        else:
+            await callback.answer(f"🚫 Вы заблокированы в {game_name}", show_alert=True)
+        return
 
     # Добавляем жалобу в базу данных
     success = db.add_report(user_id, reported_user_id, game)

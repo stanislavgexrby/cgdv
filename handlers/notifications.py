@@ -21,7 +21,8 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int):
         if match_profile and match_profile.get('name'):
             # При уведомлении о матче показываем контакты
             profile_text = texts.format_profile(match_profile, show_contact=True)
-            text = f"🎉 У вас новый матч!\n\n{profile_text}"
+            game_name = settings.GAMES.get(game, game)
+            text = f"🎉 У вас новый матч в {game_name}!\n\n{profile_text}"
 
             # Если есть фото, отправляем с фото
             if match_profile.get('photo_id'):
@@ -39,7 +40,8 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int):
                     reply_markup=kb.back()
                 )
         else:
-            text = "🎉 У вас новый матч!"
+            game_name = settings.GAMES.get(game, game)
+            text = f"🎉 У вас новый матч в {game_name}!"
             await bot.send_message(
                 chat_id=user_id,
                 text=text,
@@ -50,19 +52,87 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int):
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления о матче: {e}")
 
-async def notify_about_like(bot: Bot, user_id: int):
+async def notify_about_like(bot: Bot, user_id: int, game: str = None):
     try:
+        # Получаем информацию об игре
+        if not game:
+            user = db.get_user(user_id)
+            if user:
+                game = user.get('current_game', 'dota')
+            else:
+                game = 'dota'
+        
+        game_name = settings.GAMES.get(game, game)
+        
         # Создаем клавиатуру с кнопками для перехода к лайкам и главному меню
         keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
             [kb.InlineKeyboardButton(text="❤️ Посмотреть лайки", callback_data="my_likes")],
             [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
         ])
         
+        text = f"❤️ Кто-то лайкнул вашу анкету в {game_name}! Зайдите в 'Лайки' чтобы посмотреть."
+        
         await bot.send_message(
             chat_id=user_id,
-            text=texts.NEW_LIKE,
+            text=text,
             reply_markup=keyboard
         )
-        logger.info(f"📨 Уведомление о лайке отправлено {user_id}")
+        logger.info(f"📨 Уведомление о лайке отправлено {user_id} для игры {game}")
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления о лайке: {e}")
+
+async def notify_profile_deleted(bot: Bot, user_id: int, game: str):
+    """Уведомление об удалении профиля админом"""
+    try:
+        game_name = settings.GAMES.get(game, game)
+        text = f"⚠️ Ваша анкета в {game_name} была удалена модератором из-за нарушения правил сообщества.\n\n" \
+               f"Вы можете создать новую анкету, соблюдая правила."
+        
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
+        await bot.send_message(
+            chat_id=user_id,
+            text=text,
+            reply_markup=keyboard
+        )
+        logger.info(f"📨 Уведомление об удалении профиля отправлено {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка отправки уведомления об удалении профиля: {e}")
+
+async def notify_user_banned(bot: Bot, user_id: int, expires_at: str):
+    """Уведомление о бане пользователя"""
+    try:
+        text = f"🚫 Вы заблокированы до {expires_at[:16]} за нарушение правил сообщества.\n\n" \
+               f"Во время блокировки вы не можете:\n" \
+               f"• Создавать анкеты\n" \
+               f"• Искать игроков\n" \
+               f"• Ставить лайки\n" \
+               f"• Просматривать лайки и матчи"
+        
+        await bot.send_message(
+            chat_id=user_id,
+            text=text
+        )
+        logger.info(f"📨 Уведомление о бане отправлено {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка отправки уведомления о бане: {e}")
+
+async def notify_user_unbanned(bot: Bot, user_id: int):
+    """Уведомление о снятии бана"""
+    try:
+        text = "✅ Блокировка снята! Теперь вы можете снова пользоваться ботом."
+        
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
+        
+        await bot.send_message(
+            chat_id=user_id,
+            text=text,
+            reply_markup=keyboard
+        )
+        logger.info(f"📨 Уведомление о снятии бана отправлено {user_id}")
+    except Exception as e:
+        logger.error(f"Ошибка отправки уведомления о снятии бана: {e}")

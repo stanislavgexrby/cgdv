@@ -25,6 +25,16 @@ class EditProfileForm(StatesGroup):
 @router.callback_query(F.data == "edit_profile")
 async def edit_profile(callback: CallbackQuery):
     user_id = callback.from_user.id
+    
+    # Проверка на бан
+    if db.is_user_banned(user_id):
+        ban_info = db.get_user_ban(user_id)
+        if ban_info:
+            await callback.answer(f"🚫 Вы заблокированы до {ban_info['expires_at'][:16]}", show_alert=True)
+        else:
+            await callback.answer("🚫 Вы заблокированы", show_alert=True)
+        return
+        
     user = db.get_user(user_id)
 
     if not user or not user.get('current_game'):
@@ -126,7 +136,7 @@ async def edit_age(callback: CallbackQuery, state: FSMContext):
     
     await safe_edit_or_send(
         callback.message,
-        f"🎂 Введите новый возраст ({settings.MIN_AGE}-{settings.MAX_AGE}):",
+        f"🎂 Введите новый возраст:",
         kb.cancel_edit()
     )
     await callback.answer()
@@ -203,6 +213,10 @@ async def edit_photo(callback: CallbackQuery, state: FSMContext):
 
 @router.message(EditProfileForm.edit_name)
 async def process_edit_name(message: Message, state: FSMContext):
+    if not message.text:
+        await message.answer("❌ Отправьте текстовое сообщение с именем и фамилией")
+        return
+        
     name = message.text.strip()
 
     if len(name) < 2 or len(name) > settings.MAX_NAME_LENGTH:
@@ -242,6 +256,10 @@ async def wrong_edit_name_format(message: Message, state: FSMContext):
 
 @router.message(EditProfileForm.edit_nickname)
 async def process_edit_nickname(message: Message, state: FSMContext):
+    if not message.text:
+        await message.answer("❌ Отправьте текстовое сообщение с игровым никнеймом")
+        return
+        
     nickname = message.text.strip()
 
     if len(nickname) < 2 or len(nickname) > settings.MAX_NICKNAME_LENGTH:
@@ -277,14 +295,18 @@ async def wrong_edit_nickname_format(message: Message, state: FSMContext):
 
 @router.message(EditProfileForm.edit_age)
 async def process_edit_age(message: Message, state: FSMContext):
+    if not message.text:
+        await message.answer(f"❌ Отправьте число большее {settings.MIN_AGE}:")
+        return
+        
     try:
         age = int(message.text.strip())
     except ValueError:
         await message.answer("❌ Введите число")
         return
 
-    if age < settings.MIN_AGE or age > settings.MAX_AGE:
-        await message.answer(f"❌ Возраст должен быть от {settings.MIN_AGE} до {settings.MAX_AGE}")
+    if age < settings.MIN_AGE:
+        await message.answer(f"❌ Возраст должен быть большее {settings.MIN_AGE}:")
         return
 
     data = await state.get_data()
@@ -312,10 +334,14 @@ async def process_edit_age(message: Message, state: FSMContext):
 
 @router.message(EditProfileForm.edit_age, ~F.text)
 async def wrong_edit_age_format(message: Message, state: FSMContext):
-    await message.answer(f"❌ Отправьте число от {settings.MIN_AGE} до {settings.MAX_AGE}")
+    await message.answer(f"❌ Отправьте число большее {settings.MIN_AGE}:")
 
 @router.message(EditProfileForm.edit_info)
 async def process_edit_info(message: Message, state: FSMContext):
+    if not message.text:
+        await message.answer("❌ Отправьте текстовое сообщение с описанием")
+        return
+        
     info = message.text.strip()
 
     if len(info) > settings.MAX_INFO_LENGTH:

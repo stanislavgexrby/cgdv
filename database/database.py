@@ -8,6 +8,82 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 class Database:
+    def is_user_banned(self, user_id: int) -> bool:
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute('''
+                    SELECT 1 FROM bans 
+                    WHERE user_id = ? AND expires_at > CURRENT_TIMESTAMP
+                ''', (user_id,))
+                return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Ошибка проверки бана: {e}")
+            return False
+
+    def get_user_ban(self, user_id: int) -> Optional[Dict]:
+        """Получить информацию о бане пользователя"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute('''
+                    SELECT * FROM bans 
+                    WHERE user_id = ? AND expires_at > CURRENT_TIMESTAMP
+                ''', (user_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Ошибка получения бана: {e}")
+            return None
+
+    def get_all_bans(self) -> List[Dict]:
+        """Получить все активные баны"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute('''
+                    SELECT b.*, u.username, p.name, p.nickname 
+                    FROM bans b
+                    LEFT JOIN users u ON b.user_id = u.telegram_id
+                    LEFT JOIN profiles p ON b.user_id = p.telegram_id
+                    WHERE b.expires_at > CURRENT_TIMESTAMP
+                    ORDER BY b.created_at DESC
+                ''')
+                return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Ошибка получения банов: {e}")
+            return []
+
+    def add_ban(self, user_id: int, reason: str, duration_days: int = 7) -> bool:
+        """Добавить бан пользователю"""
+        try:
+            from datetime import datetime, timedelta
+            expires_at = datetime.now() + timedelta(days=duration_days)
+            
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute('''
+                    INSERT OR REPLACE INTO bans (user_id, reason, expires_at)
+                    VALUES (?, ?, ?)
+                ''', (user_id, reason, expires_at))
+                
+            logger.info(f"Пользователь {user_id} забанен до {expires_at}")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка добавления бана: {e}")
+            return False
+
+    def unban_user(self, user_id: int) -> bool:
+        """Разбанить пользователя"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute('DELETE FROM bans WHERE user_id = ?', (user_id,))
+                
+            logger.info(f"Пользователь {user_id} разбанен")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка разбанивания: {e}")
+            return False
+    
     def __init__(self, db_path: str = "data/teammates.db"):
         self.db_path = db_path
 
@@ -92,7 +168,7 @@ class Database:
                     UNIQUE(user_id, skipped_user_id, game)
                 )
             ''')
-            # Новая таблица для жалоб (добавить после таблицы search_skipped)
+            # Новая таблица для жалоб
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS reports (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -106,56 +182,81 @@ class Database:
                     admin_id INTEGER,
                     UNIQUE(reporter_id, reported_user_id, game)
                 )
-''')
+            ''')
+            # Новая таблица для банов
+            conn.execute('''
+            CREATE TABLE IF NOT EXISTS bans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER UNIQUE,
+                reason TEXT DEFAULT 'нарушение правил',
+                expires_at TIMESTAMP,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
 
+    
     def _migrate_data(self):
-        """Миграция существующих данных из старой структуры в новую"""
+        """Безопасная миграция существующих данных из старой структуры в новую"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 # Проверяем, есть ли старые данные для миграции
                 cursor = conn.execute("PRAGMA table_info(users)")
                 columns = [column[1] for column in cursor.fetchall()]
                 
-                if 'name' in columns:
-                    # Мигрируем данные из старой структуры
-                    cursor = conn.execute('''
-                        SELECT telegram_id, current_game, name, nickname, age, rating, 
-                               positions, additional_info, photo_id 
-                        FROM users 
-                        WHERE name IS NOT NULL
-                    ''')
-                    
-                    for row in cursor.fetchall():
-                        telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id = row
+                # Проверяем наличие всех необходимых колонок для миграции
+                required_columns = ['name', 'nickname', 'age', 'rating', 'positions', 'additional_info', 'photo_id']
+                missing_columns = [col for col in required_columns if col not in columns]
+                
+                if 'name' in columns and not missing_columns:
+                    # Безопасно мигрируем данные из старой структуры
+                    try:
+                        cursor = conn.execute('''
+                            SELECT telegram_id, current_game, name, nickname, age, rating, 
+                                   positions, additional_info, photo_id 
+                            FROM users 
+                            WHERE name IS NOT NULL AND current_game IS NOT NULL
+                        ''')
                         
-                        # Создаем профиль для игры пользователя
+                        for row in cursor.fetchall():
+                            telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id = row
+                            
+                            if game:  # Проверяем что game не NULL
+                                # Создаем профиль для игры пользователя
+                                conn.execute('''
+                                    INSERT OR REPLACE INTO profiles 
+                                    (telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                ''', (telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id))
+                        
+                        # Создаем новую таблицу users с правильной структурой
                         conn.execute('''
-                            INSERT OR REPLACE INTO profiles 
-                            (telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                        ''', (telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id))
-                    
-                    # Удаляем старые колонки из таблицы users
-                    conn.execute('''
-                        CREATE TABLE users_new (
-                            telegram_id INTEGER PRIMARY KEY,
-                            username TEXT,
-                            current_game TEXT,
-                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                        )
-                    ''')
-                    
-                    conn.execute('''
-                        INSERT INTO users_new (telegram_id, username, current_game)
-                        SELECT telegram_id, username, current_game FROM users
-                    ''')
-                    
-                    conn.execute('DROP TABLE users')
-                    conn.execute('ALTER TABLE users_new RENAME TO users')
-                    
-                    logger.info("Миграция данных завершена")
+                            CREATE TABLE IF NOT EXISTS users_new (
+                                telegram_id INTEGER PRIMARY KEY,
+                                username TEXT,
+                                current_game TEXT,
+                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                            )
+                        ''')
+                        
+                        # Копируем только нужные данные
+                        conn.execute('''
+                            INSERT OR IGNORE INTO users_new (telegram_id, username, current_game)
+                            SELECT telegram_id, username, current_game FROM users
+                        ''')
+                        
+                        # Переименовываем таблицы
+                        conn.execute('DROP TABLE users')
+                        conn.execute('ALTER TABLE users_new RENAME TO users')
+                        
+                        logger.info("Миграция данных завершена успешно")
+                    except sqlite3.Error as e:
+                        logger.error(f"Ошибка SQL при миграции: {e}")
+                        # В случае ошибки просто продолжаем без миграции
+                        pass
+                        
         except Exception as e:
             logger.error(f"Ошибка миграции данных: {e}")
+            # В случае любой ошибки продолжаем работу
 
     def get_user(self, telegram_id: int) -> Optional[Dict]:
         """Получить основную информацию о пользователе"""
@@ -376,7 +477,6 @@ class Database:
             logger.error(f"Ошибка записи пропуска в поиске: {e}")
             return False
 
-
     def add_like(self, from_user: int, to_user: int, game: str) -> bool:
         """Добавить лайк и проверить на матч"""
         try:
@@ -589,7 +689,6 @@ class Database:
             return []
 
     def process_report(self, report_id: int, action: str, admin_id: int) -> bool:
-        """Обработать жалобу (approve - удалить профиль, dismiss - отклонить)"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 # Получаем информацию о жалобе
@@ -607,6 +706,11 @@ class Database:
                     # Удаляем профиль пользователя
                     self.delete_profile(reported_user_id, game)
                     status = 'approved'
+                elif action == 'ban':
+                    # Удаляем профиль и баним пользователя
+                    self.delete_profile(reported_user_id, game)
+                    self.add_ban(reported_user_id, 'нарушение правил')
+                    status = 'banned'
                 elif action == 'dismiss':
                     status = 'dismissed'
                 else:

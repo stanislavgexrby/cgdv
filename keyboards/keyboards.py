@@ -204,12 +204,13 @@ def subscribe_channel_keyboard(game: str, from_switch: bool = False) -> InlineKe
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# Новые клавиатуры для админ-панели работы с жалобами
+# Клавиатуры для админ-панели работы с жалобами и банами
 def admin_main_menu() -> InlineKeyboardMarkup:
     """Главное меню админ-панели"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="🚩 Жалобы", callback_data="admin_reports")],
+        [InlineKeyboardButton(text="🚫 Баны", callback_data="admin_bans")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
@@ -218,8 +219,9 @@ def admin_report_actions(report_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="🗑️ Удалить профиль", callback_data=f"admin_approve_{report_id}"),
-            InlineKeyboardButton(text="❌ Отклонить", callback_data=f"admin_dismiss_{report_id}")
+            InlineKeyboardButton(text="🚫 Забанить на неделю", callback_data=f"admin_ban_{report_id}")
         ],
+        [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"admin_dismiss_{report_id}")],
         [InlineKeyboardButton(text="⬅️ Назад к жалобам", callback_data="admin_reports")]
     ])
 
@@ -227,4 +229,17 @@ def admin_back_to_reports() -> InlineKeyboardMarkup:
     """Клавиатура для возврата к списку жалоб"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="⬅️ Назад к жалобам", callback_data="admin_reports")]
+    ])
+
+def admin_back_to_bans() -> InlineKeyboardMarkup:
+    """Клавиатура для возврата к списку банов"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Назад к банам", callback_data="admin_bans")]
+    ])
+
+def admin_ban_actions(user_id: int) -> InlineKeyboardMarkup:
+    """Клавиатура для действий с баном"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Снять бан", callback_data=f"admin_unban_{user_id}")],
+        [InlineKeyboardButton(text="⬅️ Назад к банам", callback_data="admin_bans")]
     ])
