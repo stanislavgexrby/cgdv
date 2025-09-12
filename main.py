@@ -23,7 +23,7 @@ async def main():
 
     try:
         from dotenv import load_dotenv
-        load_dotenv()
+        load_dotenv(override=True)
 
         bot_token = os.getenv('BOT_TOKEN')
         if not bot_token or bot_token == 'your_bot_token_here':
