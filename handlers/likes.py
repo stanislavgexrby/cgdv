@@ -1,5 +1,5 @@
 import logging
-from aiogram import Router, F, Bot
+from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 
@@ -7,62 +7,94 @@ from database.database import Database
 import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
-
-from .notifications import notify_about_match, notify_about_like
+from handlers.basic import check_ban_and_profile, safe_edit_message
+from handlers.notifications import notify_about_match, notify_about_like
 
 logger = logging.getLogger(__name__)
 router = Router()
 db = Database(settings.DATABASE_PATH)
 
-from handlers.basic import safe_edit_message
+# ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
-@router.callback_query(F.data == "my_likes")
-async def show_my_likes(callback: CallbackQuery, state: FSMContext):
-    await state.clear()
+async def show_profile_with_photo(callback: CallbackQuery, profile: dict, text: str, keyboard):
+    """Универсальная функция показа профиля с фото или без"""
+    try:
+        if profile.get('photo_id'):
+            try:
+                await callback.message.delete()
+            except:
+                pass
+            await callback.message.answer_photo(
+                photo=profile['photo_id'],
+                caption=text,
+                reply_markup=keyboard
+            )
+        else:
+            await safe_edit_message(callback, text, keyboard)
+        await callback.answer()
+    except Exception as e:
+        logger.error(f"Ошибка показа профиля: {e}")
+        await callback.answer("❌ Ошибка загрузки")
 
+async def show_empty_state(callback: CallbackQuery, message: str):
+    """Показ пустого состояния (нет лайков/матчей)"""
+    await safe_edit_message(callback, message, kb.back())
+    await callback.answer()
+
+async def process_like_action(callback: CallbackQuery, target_user_id: int, action: str, current_index: int = 0):
+    """Универсальная обработка действий с лайками"""
     user_id = callback.from_user.id
     user = db.get_user(user_id)
-
-    if not user or not user.get('current_game'):
-        await callback.answer("❌ Ошибка", show_alert=True)
-        return
-
     game = user['current_game']
 
-    if db.is_user_banned(user_id):
-        ban_info = db.get_user_ban(user_id)
-        if ban_info:
-            game_name = settings.GAMES.get(game, game)
-            ban_end = ban_info['expires_at']
-            text = f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}\n\n"
-            text += "Во время блокировки раздел 'Лайки' недоступен."
+    if action == "like":
+        is_match = db.add_like(user_id, target_user_id, game)
+        
+        if is_match:
+            await handle_match_created(callback, target_user_id, game)
+        else:
+            await notify_about_like(callback.bot, target_user_id, game)
+            await show_next_like_or_finish(callback, user_id, game)
+    
+    elif action == "skip":
+        db.skip_like(user_id, target_user_id, game)
+        await show_next_like_or_finish(callback, user_id, game)
 
-            await safe_edit_message(callback, text, kb.back())
-            await callback.answer()
-            return
+async def handle_match_created(callback: CallbackQuery, target_user_id: int, game: str):
+    """Обработка создания матча"""
+    target_profile = db.get_user_profile(target_user_id, game)
+    await notify_about_match(callback.bot, target_user_id, callback.from_user.id, game)
 
-    if not db.has_profile(user_id, game):
-        game_name = settings.GAMES.get(game, game)
-        await callback.answer(f"❌ Сначала создайте анкету для {game_name}", show_alert=True)
-        return
+    if target_profile:
+        match_text = texts.format_profile(target_profile, show_contact=True)
+        text = f"{texts.MATCH_CREATED}\n\n{match_text}"
+    else:
+        text = texts.MATCH_CREATED
+        if target_profile and target_profile.get('username'):
+            text += f"\n\n💬 @{target_profile['username']}"
+        else:
+            text += "\n\n(У пользователя нет @username)"
 
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+        [kb.InlineKeyboardButton(text="❤️ Другие лайки", callback_data="my_likes")],
+        [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+    ])
+
+    await safe_edit_message(callback, text, keyboard)
+    logger.info(f"Взаимный лайк: {callback.from_user.id} <-> {target_user_id}")
+
+async def show_next_like_or_finish(callback: CallbackQuery, user_id: int, game: str):
+    """Показ следующего лайка или завершение просмотра"""
     likes = db.get_likes_for_user(user_id, game)
-
-    if not likes:
-        game_name = settings.GAMES.get(game, game)
-        text = f"❤️ Пока никто не лайкнул вашу анкету в {game_name}\n\n"
-        text += "Попробуйте:\n"
-        text += "• Улучшить анкету\n"
-        text += "• Добавить фото\n"
-        text += "• Быть активнее в поиске"
-
+    
+    if likes:
+        await show_like_profile(callback, likes, 0)
+    else:
+        text = "✅ Все лайки просмотрены!\n\nЗайдите позже, возможно появятся новые."
         await safe_edit_message(callback, text, kb.back())
-        await callback.answer()
-        return
-
-    await show_like_profile(callback, likes, 0)
 
 async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
+    """Показ профиля в лайках"""
     if index >= len(likes):
         text = "✅ Все лайки просмотрены!\n\nЗайдите позже, возможно появятся новые."
         await safe_edit_message(callback, text, kb.back())
@@ -73,179 +105,52 @@ async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
     profile_text = texts.format_profile(profile)
     text = f"❤️ Этот игрок лайкнул вас:\n\n{profile_text}"
 
-    callback_like = f"loves_back_{profile['telegram_id']}_{index}"
-    callback_skip = f"loves_skip_{profile['telegram_id']}_{index}"
-
-    like_keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
         [
-            kb.InlineKeyboardButton(text="❤️ Лайк в ответ", callback_data=callback_like),
-            kb.InlineKeyboardButton(text="👎 Пропустить", callback_data=callback_skip)
+            kb.InlineKeyboardButton(text="❤️ Лайк в ответ", callback_data=f"loves_back_{profile['telegram_id']}_{index}"),
+            kb.InlineKeyboardButton(text="👎 Пропустить", callback_data=f"loves_skip_{profile['telegram_id']}_{index}")
         ],
         [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
-    try:
-        if profile.get('photo_id'):
-            try:
-                await callback.message.delete()
-            except:
-                pass
+    await show_profile_with_photo(callback, profile, text, keyboard)
 
-            await callback.message.answer_photo(
-                photo=profile['photo_id'],
-                caption=text,
-                reply_markup=like_keyboard
-            )
-        else:
-            await safe_edit_message(callback, text, like_keyboard)
+# ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ ====================
 
-        await callback.answer()
-
-    except Exception as e:
-        logger.error(f"Ошибка показа лайка: {e}")
-        await callback.answer("❌ Ошибка загрузки")
-
-@router.callback_query(F.data.startswith("loves_back_"))
-async def like_back(callback: CallbackQuery):
-    try:
-        parts = callback.data.split("_")
-        target_user_id = int(parts[2])
-        current_index = int(parts[3]) if len(parts) > 3 else 0
-    except (ValueError, IndexError):
-        await callback.answer("❌ Ошибка", show_alert=True)
-        return
-
-    user_id = callback.from_user.id
-    user = db.get_user(user_id)
-
-    if not user or not user.get('current_game'):
-        await callback.answer("❌ Ошибка", show_alert=True)
-        return
-
-    game = user['current_game']
-
-    if db.is_user_banned(user_id):
-        game_name = settings.GAMES.get(game, game)
-        ban_info = db.get_user_ban(user_id)
-        if ban_info:
-            ban_end = ban_info['expires_at']
-            text = f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}. Нельзя отправлять лайки."
-        else:
-            text = f"🚫 Вы заблокированы в {game_name}. Нельзя отправлять лайки."
-        await safe_edit_message(callback, text, kb.back())
-        await callback.answer()
-        return
-
-    is_match = db.add_like(user_id, target_user_id, game)
-
-    if is_match:
-        target_profile = db.get_user_profile(target_user_id, game)
-        await notify_about_match(callback.bot, target_user_id, user_id, game)
-
-        if target_profile:
-            match_text = texts.format_profile(target_profile, show_contact=True)
-            text = f"{texts.MATCH_CREATED}\n\n{match_text}"
-        else:
-            text = texts.MATCH_CREATED
-            if target_profile and target_profile.get('username'):
-                text += f"\n\n💬 @{target_profile['username']}"
-            else:
-                text += "\n\n(У пользователя нет @username)"
-
-        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
-            [kb.InlineKeyboardButton(text="❤️ Другие лайки", callback_data="my_likes")],
-            [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-        ])
-
-        await safe_edit_message(callback, text, keyboard)
-
-        logger.info(f"Взаимный лайк: {user_id} <-> {target_user_id}")
-    else:
-        await notify_about_like(callback.bot, target_user_id, game)
-
-        likes = db.get_likes_for_user(user_id, game)
-
-        if likes and current_index < len(likes):
-            await show_like_profile(callback, likes, current_index)
-        else:
-            text = "✅ Все лайки просмотрены!\n\nЗайдите позже, возможно появятся новые."
-            await safe_edit_message(callback, text, kb.back())
-
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("loves_skip_"))
-async def skip_like(callback: CallbackQuery):
-    try:
-        parts = callback.data.split("_")
-        target_user_id = int(parts[2])
-        current_index = int(parts[3]) if len(parts) > 3 else 0
-    except (ValueError, IndexError):
-        await callback.answer("❌ Ошибка", show_alert=True)
-        return
-
-    user_id = callback.from_user.id
-    user = db.get_user(user_id)
-
-    if not user or not user.get('current_game'):
-        await safe_edit_message(callback, "❌ Ошибка", kb.back())
-        await callback.answer()
-        return
-
-    game = user['current_game']
-
-    if db.is_user_banned(user_id):
-        game_name = settings.GAMES.get(game, game)
-        ban_info = db.get_user_ban(user_id)
-        if ban_info:
-            ban_end = ban_info['expires_at']
-            text = f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}."
-        else:
-            text = f"🚫 Вы заблокированы в {game_name}."
-        await safe_edit_message(callback, text, kb.back())
-        await callback.answer()
-        return
-
-    db.skip_like(user_id, target_user_id, game)
-
-    likes = db.get_likes_for_user(user_id, game)
-
-    if likes:
-        await show_like_profile(callback, likes, 0)
-    else:
-        text = "✅ Все лайки просмотрены!\n\nЗайдите позже, возможно появятся новые."
-        await safe_edit_message(callback, text, kb.back())
-
-    await callback.answer()
-
-@router.callback_query(F.data == "my_matches")
-async def show_my_matches(callback: CallbackQuery, state: FSMContext):
+@router.callback_query(F.data == "my_likes")
+@check_ban_and_profile()
+async def show_my_likes(callback: CallbackQuery, state: FSMContext):
+    """Показ входящих лайков"""
     await state.clear()
 
     user_id = callback.from_user.id
     user = db.get_user(user_id)
-
-    if not user or not user.get('current_game'):
-        await callback.answer("❌ Ошибка", show_alert=True)
-        return
-
     game = user['current_game']
 
-    if db.is_user_banned(user_id):
-        ban_info = db.get_user_ban(user_id)
-        if ban_info:
-            game_name = settings.GAMES.get(game, game)
-            ban_end = ban_info['expires_at']
-            text = f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}\n\n"
-            text += "Во время блокировки раздел 'Матчи' недоступен."
+    likes = db.get_likes_for_user(user_id, game)
 
-            await safe_edit_message(callback, text, kb.back())
-            await callback.answer()
-            return
-
-    if not db.has_profile(user_id, game):
+    if not likes:
         game_name = settings.GAMES.get(game, game)
-        await callback.answer(f"❌ Сначала создайте анкету для {game_name}", show_alert=True)
+        text = f"❤️ Пока никто не лайкнул вашу анкету в {game_name}\n\n"
+        text += "Попробуйте:\n"
+        text += "• Улучшить анкету\n"
+        text += "• Добавить фото\n"
+        text += "• Быть активнее в поиске"
+        
+        await show_empty_state(callback, text)
         return
+
+    await show_like_profile(callback, likes, 0)
+
+@router.callback_query(F.data == "my_matches")
+@check_ban_and_profile()
+async def show_my_matches(callback: CallbackQuery, state: FSMContext):
+    """Показ матчей пользователя"""
+    await state.clear()
+
+    user_id = callback.from_user.id
+    user = db.get_user(user_id)
+    game = user['current_game']
 
     matches = db.get_matches(user_id, game)
     game_name = settings.GAMES.get(game, game)
@@ -255,13 +160,12 @@ async def show_my_matches(callback: CallbackQuery, state: FSMContext):
         text += "Чтобы получить матчи:\n"
         text += "• Лайкайте анкеты в поиске\n"
         text += "• Отвечайте на лайки других игроков"
-
-        await safe_edit_message(callback, text, kb.back())
-        await callback.answer()
+        
+        await show_empty_state(callback, text)
         return
 
+    # Формируем список матчей
     text = f"💖 Ваши матчи в {game_name} ({len(matches)}):\n\n"
-
     for i, match in enumerate(matches, 1):
         name = match['name']
         username = match.get('username', 'нет username')
@@ -269,8 +173,9 @@ async def show_my_matches(callback: CallbackQuery, state: FSMContext):
 
     text += "\n💬 Вы можете связаться с любым из них!"
 
+    # Создаем кнопки для контакта (максимум 5)
     buttons = []
-    for i, match in enumerate(matches[:5]):
+    for match in matches[:5]:
         name = match['name'][:15] + "..." if len(match['name']) > 15 else match['name']
         buttons.append([kb.InlineKeyboardButton(
             text=f"💬 {name}", 
@@ -283,8 +188,88 @@ async def show_my_matches(callback: CallbackQuery, state: FSMContext):
     await safe_edit_message(callback, text, keyboard)
     await callback.answer()
 
+# ==================== ОБРАБОТЧИКИ ДЕЙСТВИЙ С ЛАЙКАМИ ====================
+
+@router.callback_query(F.data.startswith("loves_back_"))
+async def like_back(callback: CallbackQuery):
+    """Лайк в ответ"""
+    try:
+        parts = callback.data.split("_")
+        target_user_id = int(parts[2])
+        current_index = int(parts[3]) if len(parts) > 3 else 0
+    except (ValueError, IndexError):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    # Проверяем состояние пользователя
+    user_id = callback.from_user.id
+    user = db.get_user(user_id)
+
+    if not user or not user.get('current_game'):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    # Проверяем бан
+    if db.is_user_banned(user_id):
+        game_name = settings.GAMES.get(user['current_game'], user['current_game'])
+        ban_info = db.get_user_ban(user_id)
+        
+        if ban_info:
+            ban_end = ban_info['expires_at'][:16]
+            text = f"🚫 Вы заблокированы в {game_name} до {ban_end}. Нельзя отправлять лайки."
+        else:
+            text = f"🚫 Вы заблокированы в {game_name}. Нельзя отправлять лайки."
+        
+        await safe_edit_message(callback, text, kb.back())
+        await callback.answer()
+        return
+
+    await process_like_action(callback, target_user_id, "like", current_index)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("loves_skip_"))
+async def skip_like(callback: CallbackQuery):
+    """Пропуск лайка"""
+    try:
+        parts = callback.data.split("_")
+        target_user_id = int(parts[2])
+        current_index = int(parts[3]) if len(parts) > 3 else 0
+    except (ValueError, IndexError):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    # Проверяем состояние пользователя
+    user_id = callback.from_user.id
+    user = db.get_user(user_id)
+
+    if not user or not user.get('current_game'):
+        await safe_edit_message(callback, "❌ Ошибка", kb.back())
+        await callback.answer()
+        return
+
+    # Проверяем бан
+    if db.is_user_banned(user_id):
+        game_name = settings.GAMES.get(user['current_game'], user['current_game'])
+        ban_info = db.get_user_ban(user_id)
+        
+        if ban_info:
+            ban_end = ban_info['expires_at'][:16]
+            text = f"🚫 Вы заблокированы в {game_name} до {ban_end}."
+        else:
+            text = f"🚫 Вы заблокированы в {game_name}."
+        
+        await safe_edit_message(callback, text, kb.back())
+        await callback.answer()
+        return
+
+    await process_like_action(callback, target_user_id, "skip", current_index)
+    await callback.answer()
+
+# ==================== ПОКАЗ КОНТАКТОВ ====================
+
 @router.callback_query(F.data.startswith("contact_"))
 async def show_contact(callback: CallbackQuery):
+    """Показ контактной информации матча"""
     try:
         target_user_id = int(callback.data.split("_")[1])
     except (ValueError, IndexError):
@@ -300,16 +285,19 @@ async def show_contact(callback: CallbackQuery):
 
     game = user['current_game']
 
+    # Проверяем бан
     if db.is_user_banned(user_id):
         game_name = settings.GAMES.get(game, game)
         ban_info = db.get_user_ban(user_id)
+        
         if ban_info:
-            ban_end = ban_info['expires_at']
-            await callback.answer(f"🚫 Вы заблокированы в {game_name} до {ban_end[:16]}", show_alert=True)
+            ban_end = ban_info['expires_at'][:16]
+            await callback.answer(f"🚫 Вы заблокированы в {game_name} до {ban_end}", show_alert=True)
         else:
             await callback.answer(f"🚫 Вы заблокированы в {game_name}", show_alert=True)
         return
 
+    # Получаем профиль
     target_profile = db.get_user_profile(target_user_id, game)
 
     if not target_profile:
@@ -321,18 +309,4 @@ async def show_contact(callback: CallbackQuery):
 
     keyboard = kb.contact(target_profile.get('username'))
 
-    try:
-        if target_profile.get('photo_id'):
-            await callback.message.delete()
-            await callback.message.answer_photo(
-                photo=target_profile['photo_id'],
-                caption=text,
-                reply_markup=keyboard
-            )
-        else:
-            await safe_edit_message(callback, text, keyboard)
-    except Exception as e:
-        logger.error(f"Ошибка отображения контакта: {e}")
-        await safe_edit_message(callback, text, keyboard)
-
-    await callback.answer()
+    await show_profile_with_photo(callback, target_profile, text, keyboard)
