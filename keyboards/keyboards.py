@@ -28,7 +28,7 @@ def main_menu(has_profile: bool = False, current_game: str = None) -> InlineKeyb
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def ratings(game: str, for_profile: bool = True) -> InlineKeyboardMarkup:
+def ratings(game: str, for_profile: bool = True, with_cancel: bool = False) -> InlineKeyboardMarkup:
     buttons = []
 
     for key, name in settings.RATINGS[game].items():
@@ -37,16 +37,22 @@ def ratings(game: str, for_profile: bool = True) -> InlineKeyboardMarkup:
     if for_profile:
         buttons.append([InlineKeyboardButton(text="Любой рейтинг", callback_data="rating_any")])
 
+    if with_cancel:
+        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def regions(for_profile: bool = True) -> InlineKeyboardMarkup:
+def regions(for_profile: bool = True, with_cancel: bool = False) -> InlineKeyboardMarkup:
     buttons = []
 
     for key, name in settings.REGIONS.items():
         buttons.append([InlineKeyboardButton(text=name, callback_data=f"region_{key}")])
 
     if for_profile:
-            buttons.append([InlineKeyboardButton(text="Любой регион", callback_data="region_any")])
+        buttons.append([InlineKeyboardButton(text="Любой регион", callback_data="region_any")])
+
+    if with_cancel:
+        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 

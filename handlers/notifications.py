@@ -8,13 +8,8 @@ import config.settings as settings
 logger = logging.getLogger(__name__)
 db = Database(settings.DATABASE_PATH)
 
-async def notify_about_match(bot: Bot, user_id: int, match_user_id: int):
+async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: str):
     try:
-        user = db.get_user(user_id)
-        if not user:
-            return
-
-        game = user['current_game']
         match_profile = db.get_user_profile(match_user_id, game)
 
         if match_profile and match_profile.get('name'):
@@ -22,18 +17,39 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int):
             game_name = settings.GAMES.get(game, game)
             text = f"🎉 У вас новый матч в {game_name}!\n\n{profile_text}"
 
+            current_user = db.get_user(user_id)
+            keyboard_buttons = []
+
+            if current_user and current_user.get('current_game') != game:
+                keyboard_buttons.append([kb.InlineKeyboardButton(
+                    text=f"💖 Перейти к матчам в {game_name}",
+                    callback_data=f"switch_and_matches_{game}"
+                )])
+            else:
+                keyboard_buttons.append([kb.InlineKeyboardButton(
+                    text="💖 Мои матчи",
+                    callback_data="my_matches"
+                )])
+
+            keyboard_buttons.append([kb.InlineKeyboardButton(
+                text="🏠 Главное меню",
+                callback_data="main_menu"
+            )])
+
+            keyboard = kb.InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+
             if match_profile.get('photo_id'):
                 await bot.send_photo(
                     chat_id=user_id,
                     photo=match_profile['photo_id'],
                     caption=text,
-                    reply_markup=kb.back()
+                    reply_markup=keyboard
                 )
             else:
                 await bot.send_message(
                     chat_id=user_id,
                     text=text,
-                    reply_markup=kb.back()
+                    reply_markup=keyboard
                 )
         else:
             game_name = settings.GAMES.get(game, game)

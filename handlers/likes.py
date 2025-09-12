@@ -140,7 +140,7 @@ async def like_back(callback: CallbackQuery):
 
     if is_match:
         target_profile = db.get_user_profile(target_user_id, game)
-        await notify_about_match(callback.bot, target_user_id, user_id)
+        await notify_about_match(callback.bot, target_user_id, user_id, game)
 
         if target_profile:
             match_text = texts.format_profile(target_profile, show_contact=True)

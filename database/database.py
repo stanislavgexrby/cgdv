@@ -24,6 +24,10 @@ class Database:
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self._init_db()
         self._migrate_data()
+
+        if not self._verify_database_integrity():
+            logger.error("База данных не прошла проверку целостности")
+
         Database._initialized = True
         logger.info(f"Database инициализирована: {db_path}")
 
@@ -32,7 +36,7 @@ class Database:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.execute('''
-                    SELECT 1 FROM bans 
+                    SELECT 1 FROM bans
                     WHERE user_id = ? AND expires_at > CURRENT_TIMESTAMP
                 ''', (user_id,))
                 return cursor.fetchone() is not None
@@ -45,7 +49,7 @@ class Database:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.execute('''
-                    SELECT * FROM bans 
+                    SELECT * FROM bans
                     WHERE user_id = ? AND expires_at > CURRENT_TIMESTAMP
                 ''', (user_id,))
                 row = cursor.fetchone()
@@ -59,7 +63,7 @@ class Database:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
                 cursor = conn.execute('''
-                    SELECT b.*, u.username, p.name, p.nickname 
+                    SELECT b.*, u.username, p.name, p.nickname
                     FROM bans b
                     LEFT JOIN users u ON b.user_id = u.telegram_id
                     LEFT JOIN profiles p ON b.user_id = p.telegram_id
@@ -189,6 +193,7 @@ class Database:
                     UNIQUE(user_id, skipped_user_id, game)
                 )
             ''')
+
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS reports (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -203,6 +208,7 @@ class Database:
                     UNIQUE(reporter_id, reported_user_id, game)
                 )
             ''')
+
             conn.execute('''
             CREATE TABLE IF NOT EXISTS bans (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -213,65 +219,135 @@ class Database:
                 )
             ''')
 
+            conn.execute('''
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            ''')
+
     def _migrate_data(self):
-        """Безопасная миграция существующих данных из старой структуры в новую"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                cursor = conn.execute("PRAGMA table_info(users)")
-                columns = [column[1] for column in cursor.fetchall()]
+                cursor = conn.execute("SELECT MAX(version) FROM schema_migrations")
+                current_version = cursor.fetchone()[0] or 0
 
-                required_columns = ['name', 'nickname', 'age', 'rating', 'positions', 'additional_info', 'photo_id']
-                missing_columns = [col for col in required_columns if col not in columns]
+                migrations = [
+                    (1, self._migration_001_separate_profiles),
+                    (2, self._migration_002_add_region_column),
+                ]
 
-                if 'name' in columns and not missing_columns:
-                    try:
-                        cursor = conn.execute('''
-                            SELECT telegram_id, current_game, name, nickname, age, rating, 
-                                   positions, additional_info, photo_id 
-                            FROM users 
-                            WHERE name IS NOT NULL AND current_game IS NOT NULL
-                        ''')
-
-                        for row in cursor.fetchall():
-                            telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id = row
-
-                            if game:
-                                conn.execute('''
-                                    INSERT OR REPLACE INTO profiles 
-                                    (telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                ''', (telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id))
-
-                        conn.execute('''
-                            CREATE TABLE IF NOT EXISTS users_new (
-                                telegram_id INTEGER PRIMARY KEY,
-                                username TEXT,
-                                current_game TEXT,
-                                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                            )
-                        ''')
-
-                        conn.execute('''
-                            INSERT OR IGNORE INTO users_new (telegram_id, username, current_game)
-                            SELECT telegram_id, username, current_game FROM users
-                        ''')
-
-                        conn.execute('DROP TABLE users')
-                        conn.execute('ALTER TABLE users_new RENAME TO users')
-
-                        logger.info("Миграция данных завершена успешно")
-                    except sqlite3.Error as e:
-                        logger.error(f"Ошибка SQL при миграции: {e}")
-                        pass
+                for version, migration_func in migrations:
+                    if version > current_version:
+                        logger.info(f"Применение миграции версии {version}")
+                        if migration_func(conn):
+                            conn.execute("INSERT INTO schema_migrations (version) VALUES (?)", (version,))
+                            logger.info(f"Миграция версии {version} применена успешно")
+                        else:
+                            logger.error(f"Ошибка применения миграции версии {version}")
+                            break
 
         except Exception as e:
-            logger.error(f"Ошибка миграции данных: {e}")
+            logger.error(f"Ошибка системы миграций: {e}")
+
+    def _migration_001_separate_profiles(self, conn):
+        try:
+            cursor = conn.execute("PRAGMA table_info(users)")
+            columns = [column[1] for column in cursor.fetchall()]
+
+            profile_columns = ['name', 'nickname', 'age', 'rating', 'positions', 'additional_info', 'photo_id']
+
+            if any(col in columns for col in profile_columns):
+                cursor = conn.execute(f'''
+                    SELECT telegram_id, username, current_game,
+                           {', '.join([col for col in profile_columns if col in columns])}
+                    FROM users
+                    WHERE current_game IS NOT NULL
+                ''')
+
+                for row in cursor.fetchall():
+                    values = dict(zip(['telegram_id', 'username', 'current_game'] +
+                                    [col for col in profile_columns if col in columns], row))
+
+                    if values.get('name'):
+                        conn.execute('''
+                            INSERT OR REPLACE INTO profiles
+                            (telegram_id, game, name, nickname, age, rating, region, positions, additional_info, photo_id)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            values['telegram_id'],
+                            values['current_game'],
+                            values.get('name', ''),
+                            values.get('nickname', ''),
+                            values.get('age', 18),
+                            values.get('rating', 'any'),
+                            'eeu',
+                            values.get('positions', '[]'),
+                            values.get('additional_info', ''),
+                            values.get('photo_id')
+                        ))
+
+                conn.execute('''
+                    CREATE TABLE users_new (
+                        telegram_id INTEGER PRIMARY KEY,
+                        username TEXT,
+                        current_game TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+
+                conn.execute('''
+                    INSERT INTO users_new (telegram_id, username, current_game)
+                    SELECT telegram_id, username, current_game FROM users
+                ''')
+
+                conn.execute('DROP TABLE users')
+                conn.execute('ALTER TABLE users_new RENAME TO users')
+
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка в миграции 001: {e}")
+            return False
+
+    def _migration_002_add_region_column(self, conn):
+        try:
+            cursor = conn.execute("PRAGMA table_info(profiles)")
+            columns = [column[1] for column in cursor.fetchall()]
+
+            if 'region' not in columns:
+                conn.execute('ALTER TABLE profiles ADD COLUMN region TEXT DEFAULT "eeu"')
+                conn.execute('UPDATE profiles SET region = "eeu" WHERE region IS NULL')
+
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка в миграции 002: {e}")
+            return False
+
+    def _verify_database_integrity(self):
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                required_tables = ['users', 'profiles', 'likes', 'matches', 'reports', 'bans', 'schema_migrations']
+
+                cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                existing_tables = [row[0] for row in cursor.fetchall()]
+
+                for table in required_tables:
+                    if table not in existing_tables:
+                        logger.error(f"Отсутствует обязательная таблица: {table}")
+                        return False
+
+                logger.info("Проверка целостности базы данных пройдена")
+                return True
+
+        except Exception as e:
+            logger.error(f"Ошибка проверки целостности БД: {e}")
+            return False
 
     def get_user(self, telegram_id: int) -> Optional[Dict]:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
-                "SELECT * FROM users WHERE telegram_id = ?", 
+                "SELECT * FROM users WHERE telegram_id = ?",
                 (telegram_id,)
             )
             row = cursor.fetchone()
@@ -284,7 +360,7 @@ class Database:
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
-                "SELECT * FROM profiles WHERE telegram_id = ? AND game = ?", 
+                "SELECT * FROM profiles WHERE telegram_id = ? AND game = ?",
                 (telegram_id, game)
             )
             row = cursor.fetchone()
@@ -334,7 +410,7 @@ class Database:
 
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute('''
-                    INSERT OR REPLACE INTO profiles 
+                    INSERT OR REPLACE INTO profiles
                     (telegram_id, game, name, nickname, age, rating, region, positions, additional_info, photo_id)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ''', (telegram_id, game, name, nickname, age, rating, region, positions_json,
@@ -467,8 +543,8 @@ class Database:
                 conn.execute('''
                     INSERT INTO search_skipped (user_id, skipped_user_id, game, skip_count, last_skipped)
                     VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)
-                    ON CONFLICT(user_id, skipped_user_id, game) 
-                    DO UPDATE SET 
+                    ON CONFLICT(user_id, skipped_user_id, game)
+                    DO UPDATE SET
                         skip_count = skip_count + 1,
                         last_skipped = CURRENT_TIMESTAMP
                 ''', (user_id, skipped_user_id, game))
@@ -483,7 +559,7 @@ class Database:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 cursor = conn.execute('''
-                    SELECT 1 FROM likes 
+                    SELECT 1 FROM likes
                     WHERE from_user = ? AND to_user = ? AND game = ?
                 ''', (from_user, to_user, game))
                 if cursor.fetchone():
@@ -494,13 +570,13 @@ class Database:
                     VALUES (?, ?, ?)
                 ''', (from_user, to_user, game))
                 cursor = conn.execute('''
-                    SELECT 1 FROM likes 
+                    SELECT 1 FROM likes
                     WHERE from_user = ? AND to_user = ? AND game = ?
                 ''', (to_user, from_user, game))
                 if cursor.fetchone():
                     user1, user2 = min(from_user, to_user), max(from_user, to_user)
                     cursor = conn.execute('''
-                        SELECT 1 FROM matches 
+                        SELECT 1 FROM matches
                         WHERE user1 = ? AND user2 = ? AND game = ?
                     ''', (user1, user2, game))
 
@@ -530,9 +606,9 @@ class Database:
                     WHERE l.to_user = ? AND l.game = ? AND p.game = ?
                     AND NOT EXISTS (
                         -- Исключаем если уже есть матч
-                        SELECT 1 FROM matches m 
-                        WHERE ((m.user1 = ? AND m.user2 = p.telegram_id) OR 
-                               (m.user1 = p.telegram_id AND m.user2 = ?)) 
+                        SELECT 1 FROM matches m
+                        WHERE ((m.user1 = ? AND m.user2 = p.telegram_id) OR
+                               (m.user1 = p.telegram_id AND m.user2 = ?))
                         AND m.game = ?
                     )
                     AND NOT EXISTS (
@@ -638,7 +714,7 @@ class Database:
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute('''
-                    INSERT OR IGNORE INTO reports 
+                    INSERT OR IGNORE INTO reports
                     (reporter_id, reported_user_id, game, report_reason, status)
                     VALUES (?, ?, ?, 'inappropriate_content', 'pending')
                 ''', (reporter_id, reported_user_id, game))
@@ -699,7 +775,7 @@ class Database:
                     return False
 
                 conn.execute('''
-                    UPDATE reports 
+                    UPDATE reports
                     SET status = ?, reviewed_at = CURRENT_TIMESTAMP, admin_id = ?
                     WHERE id = ?
                 ''', (status, admin_id, report_id))

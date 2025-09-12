@@ -142,7 +142,7 @@ async def process_age(message: Message, state: FSMContext):
     game = data['game']
 
     rating_text = "🏆 Выберите рейтинг:"
-    await message.answer(rating_text, reply_markup=kb.ratings(game))
+    await message.answer(rating_text, reply_markup=kb.ratings(game, with_cancel=True))
 
 @router.message(ProfileForm.age, ~F.text)
 async def wrong_age_format(message: Message, state: FSMContext):
@@ -158,7 +158,7 @@ async def process_rating(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ProfileForm.region)
 
     region_text = "🌍 Выберите регион:"
-    await callback.message.edit_text(region_text, reply_markup=kb.regions())
+    await callback.message.edit_text(region_text, reply_markup=kb.regions(with_cancel=True))
     await callback.answer()
 
 @router.callback_query(F.data.startswith("region_"), ProfileForm.region)
@@ -181,7 +181,7 @@ async def process_any_rating(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ProfileForm.region)
 
     region_text = "🌍 Выберите регион:"
-    await callback.message.edit_text(region_text, reply_markup=kb.regions())
+    await callback.message.edit_text(region_text, reply_markup=kb.regions(with_cancel=True))
     await callback.answer()
 
 @router.callback_query(F.data == "region_any", ProfileForm.region)
