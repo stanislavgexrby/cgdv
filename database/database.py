@@ -459,16 +459,31 @@ class Database:
             params = [user_id, game, user_id, game, user_id, game]
 
             if rating_filter:
-                base_query += " AND (p.rating = ? OR p.rating = 'any')"
-                params.append(rating_filter)
+                if rating_filter == 'any':
+                    # Если ищем "любой", показываем всех (не добавляем фильтр)
+                    pass
+                else:
+                    # Если ищем конкретный рейтинг, показываем только его (без "any")
+                    base_query += " AND p.rating = ?"
+                    params.append(rating_filter)
 
             if position_filter:
-                base_query += " AND (p.positions LIKE ? OR p.positions LIKE '%\"any\"%')"
-                params.append(f'%"{position_filter}"%')
+                if position_filter == 'any':
+                    # Если ищем "любую", показываем всех
+                    pass
+                else:
+                    # Если ищем конкретную позицию, показываем только её (без "any")
+                    base_query += " AND p.positions LIKE ?"
+                    params.append(f'%"{position_filter}"%')
 
             if region_filter:
-                base_query += " AND (p.region = ? OR p.region = 'any')"
-                params.append(region_filter)
+                if region_filter == 'any':
+                    # Если ищем "любой", показываем всех
+                    pass
+                else:
+                    # Если ищем конкретный регион, показываем только его (без "any")
+                    base_query += " AND p.region = ?"
+                    params.append(region_filter)
 
             skip_query = '''
                 SELECT skipped_user_id, skip_count, last_skipped

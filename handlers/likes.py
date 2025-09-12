@@ -152,22 +152,12 @@ async def like_back(callback: CallbackQuery):
             else:
                 text += "\n\n(У пользователя нет @username)"
 
-        keyboard = kb.contact(target_profile.get('username') if target_profile else None)
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="❤️ Другие лайки", callback_data="my_likes")],
+            [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
 
-        try:
-            await callback.message.delete()
-
-            if target_profile and target_profile.get('photo_id'):
-                await callback.message.answer_photo(
-                    photo=target_profile['photo_id'],
-                    caption=text,
-                    reply_markup=keyboard
-                )
-            else:
-                await callback.message.answer(text, reply_markup=keyboard)
-        except Exception as e:
-            logger.error(f"Ошибка отображения матча: {e}")
-            await callback.message.answer(text, reply_markup=keyboard)
+        await safe_edit_message(callback, text, keyboard)
 
         logger.info(f"Взаимный лайк: {user_id} <-> {target_user_id}")
     else:
