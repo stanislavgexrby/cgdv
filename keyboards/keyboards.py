@@ -16,8 +16,8 @@ def main_menu(has_profile: bool = False, current_game: str = None) -> InlineKeyb
             [InlineKeyboardButton(text="🔍 Поиск", callback_data="search")],
             [InlineKeyboardButton(text="👤 Моя анкета", callback_data="edit_profile")],
             [InlineKeyboardButton(text="❤️ Лайки", callback_data="my_likes")],
-            [InlineKeyboardButton(text="💖 Матчи", callback_data="my_matches")],
-            [InlineKeyboardButton(text="🗑️ Удалить анкету", callback_data="delete_profile")]
+            [InlineKeyboardButton(text="💖 Матчи", callback_data="my_matches")]
+            # Убрали кнопку "Удалить анкету" отсюда
         ])
     else:
         buttons.append([InlineKeyboardButton(text="📝 Создать анкету", callback_data="create_profile")])
@@ -95,6 +95,12 @@ def skip_photo() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")]
     ])
 
+def skip_info() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="skip_info")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")]
+    ])
+
 def cancel_profile_creation() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")]
@@ -151,6 +157,7 @@ def edit_profile_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📝 Изменить описание", callback_data="edit_info")],
         [InlineKeyboardButton(text="📸 Изменить фото", callback_data="edit_photo")],
         [InlineKeyboardButton(text="🔄 Создать заново", callback_data="create_profile")],
+        [InlineKeyboardButton(text="🗑️ Удалить анкету", callback_data="delete_profile")],  # Добавили сюда
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 

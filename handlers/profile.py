@@ -209,8 +209,8 @@ async def positions_done(callback: CallbackQuery, state: FSMContext):
     await state.set_state(ProfileForm.additional_info)
 
     await callback.message.edit_text(
-        texts.QUESTIONS["info"],
-        reply_markup=kb.cancel_profile_creation()
+        "📝 Расскажите о себе:",
+        reply_markup=kb.skip_info()
     )
     await callback.answer()
 
@@ -221,13 +221,10 @@ async def positions_need(callback: CallbackQuery):
 @router.message(ProfileForm.additional_info)
 async def process_additional_info(message: Message, state: FSMContext):
     if not message.text:
-        await message.answer("❌ Отправьте текстовое сообщение с описанием или '-' чтобы пропустить")
+        await message.answer("❌ Отправьте текстовое сообщение с описанием или нажмите 'Пропустить'")
         return
         
     info = message.text.strip()
-
-    if info == "-":
-        info = ""
 
     if len(info) > settings.MAX_INFO_LENGTH:
         await message.answer(
@@ -242,7 +239,7 @@ async def process_additional_info(message: Message, state: FSMContext):
 
 @router.message(ProfileForm.additional_info, ~F.text)
 async def wrong_info_format(message: Message, state: FSMContext):
-    await message.answer("❌ Отправьте текстовое сообщение с описанием или '-' чтобы пропустить")
+    await message.answer("❌ Отправьте текстовое сообщение с описанием или нажмите 'Пропустить'")
 
 @router.message(ProfileForm.photo, F.photo)
 async def process_photo(message: Message, state: FSMContext):
@@ -252,6 +249,17 @@ async def process_photo(message: Message, state: FSMContext):
 @router.callback_query(F.data == "skip_photo", ProfileForm.photo)
 async def skip_photo(callback: CallbackQuery, state: FSMContext):
     await save_profile_callback(callback, state, None)
+
+@router.callback_query(F.data == "skip_info", ProfileForm.additional_info)
+async def skip_info(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(additional_info="")
+    await state.set_state(ProfileForm.photo)
+
+    await callback.message.edit_text(
+        texts.QUESTIONS["photo"],
+        reply_markup=kb.skip_photo()
+    )
+    await callback.answer()
 
 @router.message(ProfileForm.photo)
 async def wrong_photo_format(message: Message, state: FSMContext):
@@ -307,65 +315,6 @@ async def save_profile_callback(callback: CallbackQuery, state: FSMContext, phot
     else:
         await callback.message.edit_text("❌ Ошибка сохранения", reply_markup=kb.back())
 
-    await callback.answer()
-
-@router.callback_query(F.data == "delete_profile")
-async def confirm_delete_profile(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    user = db.get_user(user_id)
-
-    if not user or not user.get('current_game'):
-        await callback.answer("❌ Ошибка", show_alert=True)
-        return
-
-    game = user['current_game']
-    game_name = settings.GAMES.get(game, game)
-
-    text = (f"🗑️ Удаление анкеты в {game_name}\n\n" +
-           "Вы уверены? Это действие нельзя отменить.\n" +
-           f"Все лайки и матчи в {game_name} будут удалены.")
-
-    await callback.message.edit_text(text, reply_markup=kb.confirm_delete())
-    await callback.answer()
-
-@router.callback_query(F.data == "confirm_delete")
-async def delete_profile(callback: CallbackQuery):
-    user_id = callback.from_user.id
-    user = db.get_user(user_id)
-
-    if not user or not user.get('current_game'):
-        await callback.answer("❌ Ошибка", show_alert=True)
-        return
-
-    game = user['current_game']
-    success = db.delete_profile(user_id, game)
-
-    if success:
-        game_name = settings.GAMES.get(game, game)
-        
-        # Простое, но информативное сообщение
-        text = f"✅ Анкета в {game_name} успешно удалена!\n\n"
-        text += f"Все связанные данные (лайки и матчи) также удалены.\n\n"
-        text += f"Вы можете создать новую анкету в любое время."
-        
-        # Простая, но полезная клавиатура
-        buttons = [
-            [kb.InlineKeyboardButton(text="📝 Создать новую анкету", callback_data="create_profile")],
-            [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-        ]
-        
-        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=buttons)
-        
-        await callback.message.edit_text(text, reply_markup=keyboard)
-        logger.info(f"Профиль удален для {user_id} в {game}")
-    else:
-        text = "❌ Произошла ошибка при удалении анкеты.\n\nПопробуйте еще раз."
-        await callback.message.edit_text(text, reply_markup=kb.back())
-
-    await callback.answer()
-
-@router.callback_query(F.data == "separator")
-async def separator_handler(callback: CallbackQuery):
     await callback.answer()
 
 @router.callback_query(F.data == "cancel")

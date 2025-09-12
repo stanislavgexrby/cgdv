@@ -9,6 +9,8 @@ import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
 
+from handlers.basic import safe_edit_message
+
 logger = logging.getLogger(__name__)
 router = Router()
 db = Database(settings.DATABASE_PATH)
@@ -577,4 +579,65 @@ async def delete_photo(callback: CallbackQuery, state: FSMContext):
 async def cancel_edit(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await safe_edit_or_send(callback.message, "❌ Редактирование отменено", kb.back_to_editing())
+    await callback.answer()
+
+@router.callback_query(F.data == "delete_profile")
+async def confirm_delete_profile(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user = db.get_user(user_id)
+
+    if not user or not user.get('current_game'):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    game = user['current_game']
+    game_name = settings.GAMES.get(game, game)
+
+    text = (f"🗑️ Удаление анкеты в {game_name}\n\n" +
+           "Вы уверены? Это действие нельзя отменить.\n" +
+           f"Все лайки и матчи в {game_name} будут удалены.")
+
+    try:
+        if callback.message.photo:
+            await callback.message.delete()
+            await callback.message.answer(text, reply_markup=kb.confirm_delete())
+        else:
+            await callback.message.edit_text(text, reply_markup=kb.confirm_delete())
+    except Exception as e:
+        await callback.message.delete()
+        await callback.message.answer(text, reply_markup=kb.confirm_delete())
+        await callback.answer()
+
+@router.callback_query(F.data == "confirm_delete")
+async def delete_profile(callback: CallbackQuery):
+    user_id = callback.from_user.id
+    user = db.get_user(user_id)
+
+    if not user or not user.get('current_game'):
+        await callback.answer("❌ Ошибка", show_alert=True)
+        return
+
+    game = user['current_game']
+    success = db.delete_profile(user_id, game)
+
+    if success:
+        game_name = settings.GAMES.get(game, game)
+        
+        text = f"✅ Анкета в {game_name} успешно удалена!\n\n"
+        text += f"Все связанные данные (лайки и матчи) также удалены.\n\n"
+        text += f"Вы можете создать новую анкету в любое время."
+        
+        buttons = [
+            [kb.InlineKeyboardButton(text="📝 Создать новую анкету", callback_data="create_profile")],
+            [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ]
+        
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=buttons)
+        
+        await callback.message.edit_text(text, reply_markup=keyboard)
+        logger.info(f"Профиль удален для {user_id} в {game}")
+    else:
+        text = "❌ Произошла ошибка при удалении анкеты.\n\nПопробуйте еще раз."
+        await callback.message.edit_text(text, reply_markup=kb.back())
+
     await callback.answer()
