@@ -8,6 +8,28 @@ from datetime import datetime
 logger = logging.getLogger(__name__)
 
 class Database:
+    _instance = None
+    _initialized = False
+
+    def __new__(cls, db_path: str = "data/teammates.db"):
+        if cls._instance is None:
+            cls._instance = super(Database, cls).__new__(cls)
+        return cls._instance
+
+    def __init__(self, db_path: str = "data/teammates.db"):
+        # Если уже инициализирована, не делаем ничего
+        if Database._initialized:
+            return
+        
+        self.db_path = db_path
+        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+        self._init_db()
+        self._migrate_data()
+        Database._initialized = True
+        logger.info(f"Database инициализирована: {db_path}")
+
+    # ===== МЕТОДЫ ДЛЯ РАБОТЫ С БАНАМИ (ВОССТАНАВЛИВАЕМ) =====
+    
     def is_user_banned(self, user_id: int) -> bool:
         try:
             with sqlite3.connect(self.db_path) as conn:
@@ -83,15 +105,26 @@ class Database:
         except Exception as e:
             logger.error(f"Ошибка разбанивания: {e}")
             return False
-    
-    def __init__(self, db_path: str = "data/teammates.db"):
-        self.db_path = db_path
 
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    def get_report_info(self, report_id: int) -> Optional[Dict]:
+        """Получить информацию о жалобе по ID"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute('''
+                    SELECT r.*, p.name, p.nickname, u.username
+                    FROM reports r
+                    LEFT JOIN profiles p ON r.reported_user_id = p.telegram_id AND r.game = p.game
+                    LEFT JOIN users u ON p.telegram_id = u.telegram_id
+                    WHERE r.id = ?
+                ''', (report_id,))
+                row = cursor.fetchone()
+                return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Ошибка получения информации о жалобе: {e}")
+            return None
 
-        self._init_db()
-        self._migrate_data()
-        logger.info(f"Database инициализирована: {db_path}")
+    # ===== ВСЕ ОСТАЛЬНЫЕ МЕТОДЫ (ОСТАВЛЯЕМ КАК БЫЛИ) =====
 
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
@@ -194,7 +227,6 @@ class Database:
                 )
             ''')
 
-    
     def _migrate_data(self):
         """Безопасная миграция существующих данных из старой структуры в новую"""
         try:
@@ -256,8 +288,7 @@ class Database:
                         
         except Exception as e:
             logger.error(f"Ошибка миграции данных: {e}")
-            # В случае любой ошибки продолжаем работу
-
+            
     def get_user(self, telegram_id: int) -> Optional[Dict]:
         """Получить основную информацию о пользователе"""
         with sqlite3.connect(self.db_path) as conn:
@@ -355,11 +386,11 @@ class Database:
             return False
 
     def get_potential_matches(self, user_id: int, game: str,
-                            rating_filter: str = None,
-                            position_filter: str = None,
-                            limit: int = 10) -> List[Dict]:
+                        rating_filter: str = None,
+                        position_filter: str = None,
+                        limit: int = 10) -> List[Dict]:
         try:
-            # Сначала получаем всех подходящих пользователей
+            # Обновленный базовый запрос с исключением жалоб
             base_query = '''
                 SELECT p.*, u.username
                 FROM profiles p
@@ -370,8 +401,12 @@ class Database:
                     SELECT to_user FROM likes
                     WHERE from_user = ? AND game = ?
                 )
+                AND p.telegram_id NOT IN (
+                    SELECT reported_user_id FROM reports
+                    WHERE reporter_id = ? AND game = ?
+                )
             '''
-            params = [user_id, game, user_id, game]
+            params = [user_id, game, user_id, game, user_id, game]
 
             if rating_filter:
                 base_query += " AND p.rating = ?"

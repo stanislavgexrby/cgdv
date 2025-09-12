@@ -62,9 +62,15 @@ async def notify_about_like(bot: Bot, user_id: int, game: str = None):
             else:
                 game = 'dota'
         
+        # КЛЮЧЕВОЕ ИЗМЕНЕНИЕ: переключаем пользователя на игру где пришел лайк
+        current_user = db.get_user(user_id)
+        if current_user and current_user.get('current_game') != game:
+            db.switch_game(user_id, game)
+            logger.info(f"Переключили пользователя {user_id} на {game} из-за лайка")
+        
         game_name = settings.GAMES.get(game, game)
         
-        # Создаем клавиатуру с кнопками для перехода к лайкам и главному меню
+        # Теперь обычная кнопка "Посмотреть лайки" будет работать корректно
         keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
             [kb.InlineKeyboardButton(text="❤️ Посмотреть лайки", callback_data="my_likes")],
             [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
@@ -85,10 +91,15 @@ async def notify_profile_deleted(bot: Bot, user_id: int, game: str):
     """Уведомление об удалении профиля админом"""
     try:
         game_name = settings.GAMES.get(game, game)
-        text = f"⚠️ Ваша анкета в {game_name} была удалена модератором из-за нарушения правил сообщества.\n\n" \
-               f"Вы можете создать новую анкету, соблюдая правила."
+        text = f"⚠️ Ваша анкета в {game_name} была удалена модератором\n\n"
+        text += f"📋 Причина: нарушение правил сообщества\n\n"
+        text += f"✅ Что можно сделать:\n"
+        text += f"• Создать новую анкету\n"
+        text += f"• Соблюдать правила сообщества\n"
+        text += f"• Быть вежливыми с другими игроками"
         
         keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="📝 Создать новую анкету", callback_data="create_profile")],
             [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
         ])
         
@@ -97,7 +108,7 @@ async def notify_profile_deleted(bot: Bot, user_id: int, game: str):
             text=text,
             reply_markup=keyboard
         )
-        logger.info(f"📨 Уведомление об удалении профиля отправлено {user_id}")
+        logger.info(f"📨 Уведомление об удалении профиля отправлено {user_id} для игры {game}")
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления об удалении профиля: {e}")
 

@@ -342,11 +342,25 @@ async def delete_profile(callback: CallbackQuery):
 
     if success:
         game_name = settings.GAMES.get(game, game)
-        text = f"🗑️ Анкета в {game_name} удалена!"
-        await callback.message.edit_text(text, reply_markup=kb.back())
+        
+        # Простое, но информативное сообщение
+        text = f"✅ Анкета в {game_name} успешно удалена!\n\n"
+        text += f"Все связанные данные (лайки и матчи) также удалены.\n\n"
+        text += f"Вы можете создать новую анкету в любое время."
+        
+        # Простая, но полезная клавиатура
+        buttons = [
+            [kb.InlineKeyboardButton(text="📝 Создать новую анкету", callback_data="create_profile")],
+            [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ]
+        
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=buttons)
+        
+        await callback.message.edit_text(text, reply_markup=keyboard)
         logger.info(f"Профиль удален для {user_id} в {game}")
     else:
-        await callback.message.edit_text("❌ Ошибка удаления", reply_markup=kb.back())
+        text = "❌ Произошла ошибка при удалении анкеты.\n\nПопробуйте еще раз."
+        await callback.message.edit_text(text, reply_markup=kb.back())
 
     await callback.answer()
 

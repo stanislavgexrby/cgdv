@@ -243,3 +243,73 @@ def admin_ban_actions(user_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="✅ Снять бан", callback_data=f"admin_unban_{user_id}")],
         [InlineKeyboardButton(text="⬅️ Назад к банам", callback_data="admin_bans")]
     ])
+def admin_ban_actions_with_nav(user_id: int, current_index: int, total_count: int) -> InlineKeyboardMarkup:
+    """Клавиатура для действий с баном с навигацией"""
+    buttons = []
+    
+    # Основные действия
+    buttons.append([InlineKeyboardButton(text="✅ Снять бан", callback_data=f"admin_unban_{user_id}")])
+    
+    # Навигация (если банов больше одного)
+    if total_count > 1:
+        nav_buttons = []
+        
+        # Кнопка "Предыдущий" (если не первый)
+        if current_index > 0:
+            nav_buttons.append(InlineKeyboardButton(
+                text="◀️ Предыдущий", 
+                callback_data=f"admin_ban_prev_{current_index}"
+            ))
+        
+        # Кнопка "Следующий" (если не последний)
+        if current_index < total_count - 1:
+            nav_buttons.append(InlineKeyboardButton(
+                text="Следующий ▶️", 
+                callback_data=f"admin_ban_next_{current_index}"
+            ))
+        
+        # Добавляем кнопки навигации только если они есть
+        if nav_buttons:
+            buttons.append(nav_buttons)
+    
+    # Кнопка возврата в админ меню (используем существующий callback)
+    buttons.append([InlineKeyboardButton(text="⬅️ Админ меню", callback_data="admin_stats")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def admin_report_actions_with_nav(report_id: int, current_index: int, total_count: int) -> InlineKeyboardMarkup:
+    """Клавиатура для действий с жалобой с навигацией"""
+    buttons = []
+    
+    # Основные действия
+    buttons.append([
+        InlineKeyboardButton(text="🗑️ Удалить профиль", callback_data=f"admin_approve_{report_id}"),
+        InlineKeyboardButton(text="🚫 Забанить", callback_data=f"admin_ban_{report_id}")
+    ])
+    buttons.append([InlineKeyboardButton(text="❌ Отклонить", callback_data=f"admin_dismiss_{report_id}")])
+    
+    # Навигация (если жалоб больше одной)
+    if total_count > 1:
+        nav_buttons = []
+        
+        # Кнопка "Предыдущая" (если не первая)
+        if current_index > 0:
+            nav_buttons.append(InlineKeyboardButton(
+                text="◀️ Предыдущая", 
+                callback_data=f"admin_report_prev_{current_index}"
+            ))
+        
+        # Кнопка "Следующая" (если не последняя)
+        if current_index < total_count - 1:
+            nav_buttons.append(InlineKeyboardButton(
+                text="Следующая ▶️", 
+                callback_data=f"admin_report_next_{current_index}"
+            ))
+        
+        if nav_buttons:
+            buttons.append(nav_buttons)
+    
+    # Кнопка возврата в админ меню
+    buttons.append([InlineKeyboardButton(text="⬅️ Админ меню", callback_data="admin_stats")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)

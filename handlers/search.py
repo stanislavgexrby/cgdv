@@ -9,17 +9,12 @@ import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
 
-from .notifications import notify_about_match, notify_about_like
-
-from .basic import safe_edit_message
+from handlers.notifications import notify_about_match, notify_about_like
+from handlers.basic import safe_edit_message, SearchForm
 
 logger = logging.getLogger(__name__)
 router = Router()
 db = Database(settings.DATABASE_PATH)
-
-class SearchForm(StatesGroup):
-    filters = State()
-    browsing = State()
 
 @router.callback_query(F.data == "search")
 async def start_search(callback: CallbackQuery, state: FSMContext):
@@ -50,6 +45,9 @@ async def start_search(callback: CallbackQuery, state: FSMContext):
         await callback.answer(f"❌ Сначала создайте анкету для {game_name}", show_alert=True)
         return
 
+    # ВАЖНО: всегда очищаем состояние перед началом нового поиска
+    await state.clear()
+    
     await state.update_data(
         user_id=user_id,
         game=game,
@@ -74,7 +72,12 @@ async def start_search(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "filter_rating", SearchForm.filters)
 async def set_rating_filter(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    game = data['game']
+    game = data.get('game')
+    
+    if not game:
+        logger.error("Нет данных об игре в состоянии FSM")
+        await callback.answer("❌ Ошибка состояния", show_alert=True)
+        return
 
     # Используем safe_edit_message для правильной обработки
     await safe_edit_message(callback, "🏆 Выберите рейтинг:", kb.ratings(game))
@@ -83,7 +86,12 @@ async def set_rating_filter(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "filter_position", SearchForm.filters)
 async def set_position_filter(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
-    game = data['game']
+    game = data.get('game')
+    
+    if not game:
+        logger.error("Нет данных об игре в состоянии FSM")
+        await callback.answer("❌ Ошибка состояния", show_alert=True)
+        return
 
     buttons = []
     for key, name in settings.POSITIONS[game].items():
@@ -102,6 +110,13 @@ async def save_rating_filter(callback: CallbackQuery, state: FSMContext):
     rating = callback.data.split("_")[1]
     
     data = await state.get_data()
+    
+    # Проверка корректности состояния
+    if not data or 'game' not in data:
+        logger.error("Некорректное состояние FSM в save_rating_filter")
+        await callback.answer("❌ Ошибка состояния. Попробуйте начать поиск заново.", show_alert=True)
+        return
+    
     current_rating = data.get('rating_filter')
     
     # Если выбран тот же рейтинг, просто возвращаемся к фильтрам
@@ -111,7 +126,7 @@ async def save_rating_filter(callback: CallbackQuery, state: FSMContext):
     
     await state.update_data(rating_filter=rating)
 
-    data = await state.get_data()
+    data = await state.get_data()  # Получаем обновленные данные
     game = data['game']
     game_name = settings.GAMES.get(game, game)
     rating_name = settings.RATINGS[game].get(rating, rating)
@@ -133,6 +148,13 @@ async def save_position_filter(callback: CallbackQuery, state: FSMContext):
     position = callback.data.split("_")[2]
     
     data = await state.get_data()
+    
+    # Проверка корректности состояния
+    if not data or 'game' not in data:
+        logger.error("Некорректное состояние FSM в save_position_filter")
+        await callback.answer("❌ Ошибка состояния. Попробуйте начать поиск заново.", show_alert=True)
+        return
+    
     current_position = data.get('position_filter')
     
     # Если выбрана та же позиция, просто возвращаемся к фильтрам
@@ -142,7 +164,7 @@ async def save_position_filter(callback: CallbackQuery, state: FSMContext):
         
     await state.update_data(position_filter=position)
 
-    data = await state.get_data()
+    data = await state.get_data()  # Получаем обновленные данные
     game = data['game']
     game_name = settings.GAMES.get(game, game)
     
@@ -188,7 +210,7 @@ async def begin_search(callback: CallbackQuery, state: FSMContext):
 
     # Дополнительная проверка бана перед началом поиска
     if db.is_user_banned(data['user_id']):
-        await state.clear()
+        await state.clear()  # ВАЖНО: очищаем состояние
         game_name = settings.GAMES.get(data['game'], data['game'])
         ban_info = db.get_user_ban(data['user_id'])
         if ban_info:
@@ -209,8 +231,12 @@ async def begin_search(callback: CallbackQuery, state: FSMContext):
     )
 
     if not profiles:
+        # ВАЖНО: очищаем состояние FSM когда анкеты не найдены
+        await state.clear()
+        
         game_name = settings.GAMES.get(data['game'], data['game'])
         text = f"😔 Анкеты в {game_name} не найдены. Попробуйте изменить фильтры или зайти позже."
+        
         # Используем правильную клавиатуру для возврата к поиску
         keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
             [kb.InlineKeyboardButton(text="🔍 Поиск", callback_data="back_to_search")],
@@ -227,12 +253,23 @@ async def begin_search(callback: CallbackQuery, state: FSMContext):
 
 async def show_current_profile(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
+    
+    # Проверка корректности состояния
+    if not data or 'profiles' not in data:
+        logger.error("Некорректное состояние FSM в show_current_profile")
+        await state.clear()
+        await callback.answer("❌ Ошибка поиска. Попробуйте начать заново.", show_alert=True)
+        return
+    
     profiles = data['profiles']
     index = data['current_index']
 
     if index >= len(profiles):
-        game_name = settings.GAMES.get(data['game'], data['game'])
+        await state.clear()  # Очищаем состояние
+        
+        game_name = settings.GAMES.get(data.get('game', 'dota'), data.get('game', 'dota'))
         text = f"😔 Больше анкет в {game_name} не найдено. Попробуйте изменить фильтры или зайти позже."
+        
         # Используем правильную клавиатуру для возврата к поиску  
         keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
             [kb.InlineKeyboardButton(text="🔍 Поиск", callback_data="back_to_search")],
@@ -273,6 +310,19 @@ async def show_current_profile(callback: CallbackQuery, state: FSMContext):
     except Exception as e:
         logger.error(f"Ошибка показа анкеты: {e}")
         await show_next_profile(callback, state)
+
+@router.callback_query(F.data.in_(["filter_rating", "filter_position", "start_search"]))
+async def handle_search_outside_state(callback: CallbackQuery, state: FSMContext):
+    """Обработчик для кнопок поиска вне состояния FSM"""
+    logger.warning(f"Обработчик поиска вызван вне состояния FSM: {callback.data}")
+    
+    # Очищаем состояние и перенаправляем к началу поиска
+    await state.clear()
+    await callback.answer("🔄 Перезапуск поиска...", show_alert=False)
+    
+    # Эмулируем нажатие кнопки "Поиск"
+    callback.data = "search"
+    await start_search(callback, state)
 
 async def show_next_profile(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
