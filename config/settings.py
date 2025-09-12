@@ -12,8 +12,7 @@ DATABASE_PATH = os.getenv("DATABASE_PATH", "data/teammates.db")
 MAX_NAME_LENGTH = 50
 MAX_NICKNAME_LENGTH = 30
 MAX_INFO_LENGTH = 500
-MIN_AGE = 16
-MAX_AGE = 50
+MIN_AGE = 0
 
 GAMES = {
     "dota": "🎮 Dota 2",
