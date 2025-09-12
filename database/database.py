@@ -17,10 +17,9 @@ class Database:
         return cls._instance
 
     def __init__(self, db_path: str = "data/teammates.db"):
-        # Если уже инициализирована, не делаем ничего
         if Database._initialized:
             return
-        
+
         self.db_path = db_path
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
         self._init_db()
@@ -28,8 +27,6 @@ class Database:
         Database._initialized = True
         logger.info(f"Database инициализирована: {db_path}")
 
-    # ===== МЕТОДЫ ДЛЯ РАБОТЫ С БАНАМИ (ВОССТАНАВЛИВАЕМ) =====
-    
     def is_user_banned(self, user_id: int) -> bool:
         try:
             with sqlite3.connect(self.db_path) as conn:
@@ -44,7 +41,6 @@ class Database:
             return False
 
     def get_user_ban(self, user_id: int) -> Optional[Dict]:
-        """Получить информацию о бане пользователя"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -59,7 +55,6 @@ class Database:
             return None
 
     def get_all_bans(self) -> List[Dict]:
-        """Получить все активные баны"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -77,17 +72,16 @@ class Database:
             return []
 
     def add_ban(self, user_id: int, reason: str, duration_days: int = 7) -> bool:
-        """Добавить бан пользователю"""
         try:
             from datetime import datetime, timedelta
             expires_at = datetime.now() + timedelta(days=duration_days)
-            
+
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute('''
                     INSERT OR REPLACE INTO bans (user_id, reason, expires_at)
                     VALUES (?, ?, ?)
                 ''', (user_id, reason, expires_at))
-                
+
             logger.info(f"Пользователь {user_id} забанен до {expires_at}")
             return True
         except Exception as e:
@@ -95,11 +89,10 @@ class Database:
             return False
 
     def unban_user(self, user_id: int) -> bool:
-        """Разбанить пользователя"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute('DELETE FROM bans WHERE user_id = ?', (user_id,))
-                
+
             logger.info(f"Пользователь {user_id} разбанен")
             return True
         except Exception as e:
@@ -107,7 +100,6 @@ class Database:
             return False
 
     def get_report_info(self, report_id: int) -> Optional[Dict]:
-        """Получить информацию о жалобе по ID"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -124,11 +116,8 @@ class Database:
             logger.error(f"Ошибка получения информации о жалобе: {e}")
             return None
 
-    # ===== ВСЕ ОСТАЛЬНЫЕ МЕТОДЫ (ОСТАВЛЯЕМ КАК БЫЛИ) =====
-
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
-            # Таблица пользователей (основная информация)
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     telegram_id INTEGER PRIMARY KEY,
@@ -178,7 +167,6 @@ class Database:
                 )
             ''')
 
-            # Новая таблица для отслеживания пропущенных лайков
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS skipped_likes (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -189,7 +177,7 @@ class Database:
                     UNIQUE(user_id, skipped_user_id, game)
                 )
             ''')
-            
+
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS search_skipped (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -201,7 +189,6 @@ class Database:
                     UNIQUE(user_id, skipped_user_id, game)
                 )
             ''')
-            # Новая таблица для жалоб
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS reports (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -216,7 +203,6 @@ class Database:
                     UNIQUE(reporter_id, reported_user_id, game)
                 )
             ''')
-            # Новая таблица для банов
             conn.execute('''
             CREATE TABLE IF NOT EXISTS bans (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -231,16 +217,13 @@ class Database:
         """Безопасная миграция существующих данных из старой структуры в новую"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                # Проверяем, есть ли старые данные для миграции
                 cursor = conn.execute("PRAGMA table_info(users)")
                 columns = [column[1] for column in cursor.fetchall()]
-                
-                # Проверяем наличие всех необходимых колонок для миграции
+
                 required_columns = ['name', 'nickname', 'age', 'rating', 'positions', 'additional_info', 'photo_id']
                 missing_columns = [col for col in required_columns if col not in columns]
-                
+
                 if 'name' in columns and not missing_columns:
-                    # Безопасно мигрируем данные из старой структуры
                     try:
                         cursor = conn.execute('''
                             SELECT telegram_id, current_game, name, nickname, age, rating, 
@@ -248,19 +231,17 @@ class Database:
                             FROM users 
                             WHERE name IS NOT NULL AND current_game IS NOT NULL
                         ''')
-                        
+
                         for row in cursor.fetchall():
                             telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id = row
-                            
-                            if game:  # Проверяем что game не NULL
-                                # Создаем профиль для игры пользователя
+
+                            if game:
                                 conn.execute('''
                                     INSERT OR REPLACE INTO profiles 
                                     (telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 ''', (telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id))
-                        
-                        # Создаем новую таблицу users с правильной структурой
+
                         conn.execute('''
                             CREATE TABLE IF NOT EXISTS users_new (
                                 telegram_id INTEGER PRIMARY KEY,
@@ -269,28 +250,24 @@ class Database:
                                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                             )
                         ''')
-                        
-                        # Копируем только нужные данные
+
                         conn.execute('''
                             INSERT OR IGNORE INTO users_new (telegram_id, username, current_game)
                             SELECT telegram_id, username, current_game FROM users
                         ''')
-                        
-                        # Переименовываем таблицы
+
                         conn.execute('DROP TABLE users')
                         conn.execute('ALTER TABLE users_new RENAME TO users')
-                        
+
                         logger.info("Миграция данных завершена успешно")
                     except sqlite3.Error as e:
                         logger.error(f"Ошибка SQL при миграции: {e}")
-                        # В случае ошибки просто продолжаем без миграции
                         pass
-                        
+
         except Exception as e:
             logger.error(f"Ошибка миграции данных: {e}")
-            
+
     def get_user(self, telegram_id: int) -> Optional[Dict]:
-        """Получить основную информацию о пользователе"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
@@ -298,13 +275,12 @@ class Database:
                 (telegram_id,)
             )
             row = cursor.fetchone()
-            
+
             if row:
                 return dict(row)
             return None
 
     def get_user_profile(self, telegram_id: int, game: str) -> Optional[Dict]:
-        """Получить профиль пользователя для конкретной игры"""
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
@@ -323,7 +299,6 @@ class Database:
                 else:
                     profile['positions'] = []
 
-                # Добавляем username из основной таблицы
                 user = self.get_user(telegram_id)
                 if user:
                     profile['username'] = user.get('username')
@@ -335,7 +310,6 @@ class Database:
             return None
 
     def has_profile(self, telegram_id: int, game: str) -> bool:
-        """Проверить, есть ли у пользователя профиль для конкретной игры"""
         profile = self.get_user_profile(telegram_id, game)
         return profile is not None
 
@@ -391,7 +365,6 @@ class Database:
                         region_filter: str = None,
                         limit: int = 10) -> List[Dict]:
         try:
-            # Обновленный базовый запрос с исключением жалоб
             base_query = '''
                 SELECT p.*, u.username
                 FROM profiles p
@@ -407,22 +380,20 @@ class Database:
                     WHERE reporter_id = ? AND game = ?
                 )
             '''
-
             params = [user_id, game, user_id, game, user_id, game]
 
             if rating_filter:
-                base_query += " AND p.rating = ?"
+                base_query += " AND (p.rating = ? OR p.rating = 'any')"
                 params.append(rating_filter)
 
             if position_filter:
-                base_query += " AND p.positions LIKE ?"
+                base_query += " AND (p.positions LIKE ? OR p.positions LIKE '%\"any\"%')"
                 params.append(f'%"{position_filter}"%')
 
             if region_filter:
-                base_query += " AND p.region = ?"
+                base_query += " AND (p.region = ? OR p.region = 'any')"
                 params.append(region_filter)
 
-            # Получаем информацию о пропусках отдельным запросом
             skip_query = '''
                 SELECT skipped_user_id, skip_count, last_skipped
                 FROM search_skipped
@@ -432,18 +403,15 @@ class Database:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
 
-                # Получаем всех потенциальных кандидатов
                 cursor = conn.execute(base_query, params)
                 all_profiles = cursor.fetchall()
 
-                # Получаем информацию о пропусках
                 cursor = conn.execute(skip_query, [user_id, game])
                 skips = {row['skipped_user_id']: row for row in cursor.fetchall()}
 
-                # Разделяем профили по приоритетам в Python
-                priority_1 = []  # Новые (никогда не пропускались)
-                priority_2 = []  # Пропущенные давно  
-                priority_3 = []  # Пропущенные недавно
+                priority_1 = []
+                priority_2 = []
+                priority_3 = []
 
                 import random
                 from datetime import datetime, timedelta
@@ -459,26 +427,21 @@ class Database:
                         last_skipped = datetime.fromisoformat(skip_info['last_skipped'].replace('Z', '+00:00'))
                         days_since_skip = (now - last_skipped).days
 
-                        if days_since_skip >= 3:  # Давно пропускали
+                        if days_since_skip >= 3:
                             priority_2.append(profile)
-                        else:  # Недавно пропускали  
+                        else:
                             priority_3.append(profile)
                     else:
-                        # Никогда не пропускали
                         priority_1.append(profile)
 
-                # Перемешиваем каждую группу
                 random.shuffle(priority_1)
-                random.shuffle(priority_2) 
+                random.shuffle(priority_2)
                 random.shuffle(priority_3)
 
-                # Объединяем в порядке приоритета
                 final_profiles = priority_1 + priority_2 + priority_3
 
-                # Ограничиваем результат
                 final_profiles = final_profiles[:limit]
 
-                # Обрабатываем результаты
                 results = []
                 for profile in final_profiles:
                     if profile['positions']:
@@ -499,10 +462,8 @@ class Database:
             return []
 
     def add_search_skip(self, user_id: int, skipped_user_id: int, game: str) -> bool:
-        """Запомнить, что пользователь пропустил анкету в поиске"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                # Увеличиваем счетчик пропусков или создаем запись
                 conn.execute('''
                     INSERT INTO search_skipped (user_id, skipped_user_id, game, skip_count, last_skipped)
                     VALUES (?, ?, ?, 1, CURRENT_TIMESTAMP)
@@ -519,32 +480,25 @@ class Database:
             return False
 
     def add_like(self, from_user: int, to_user: int, game: str) -> bool:
-        """Добавить лайк и проверить на матч"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                # Проверяем, нет ли уже такого лайка
                 cursor = conn.execute('''
                     SELECT 1 FROM likes 
                     WHERE from_user = ? AND to_user = ? AND game = ?
                 ''', (from_user, to_user, game))
                 if cursor.fetchone():
-                    # Лайк уже существует
                     logger.info(f"Лайк уже существует: {from_user} -> {to_user}")
                     return False
-                # Добавляем лайк
                 conn.execute('''
                     INSERT INTO likes (from_user, to_user, game)
                     VALUES (?, ?, ?)
                 ''', (from_user, to_user, game))
-                # Проверяем взаимный лайк
                 cursor = conn.execute('''
                     SELECT 1 FROM likes 
                     WHERE from_user = ? AND to_user = ? AND game = ?
                 ''', (to_user, from_user, game))
                 if cursor.fetchone():
-                    # Есть взаимный лайк - создаем матч
                     user1, user2 = min(from_user, to_user), max(from_user, to_user)
-                    # Проверяем, нет ли уже матча
                     cursor = conn.execute('''
                         SELECT 1 FROM matches 
                         WHERE user1 = ? AND user2 = ? AND game = ?
@@ -566,7 +520,6 @@ class Database:
             return False
 
     def get_likes_for_user(self, user_id: int, game: str) -> List[Dict]:
-        """Получить лайки для пользователя (исключая уже обработанные)"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -611,7 +564,6 @@ class Database:
             return []
 
     def get_matches(self, user_id: int, game: str) -> List[Dict]:
-        """Получить матчи пользователя"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -646,7 +598,6 @@ class Database:
             return []
 
     def skip_like(self, user_id: int, skipped_user_id: int, game: str) -> bool:
-        """Отметить лайк как пропущенный"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute('''
@@ -661,24 +612,19 @@ class Database:
             return False
 
     def delete_profile(self, telegram_id: int, game: str) -> bool:
-        """Удалить профиль для конкретной игры"""
         try:
             with sqlite3.connect(self.db_path) as conn:
-                # Удаляем лайки и матчи для этой игры
                 conn.execute("DELETE FROM likes WHERE (from_user = ? OR to_user = ?) AND game = ?", 
                            (telegram_id, telegram_id, game))
                 conn.execute("DELETE FROM matches WHERE (user1 = ? OR user2 = ?) AND game = ?", 
                            (telegram_id, telegram_id, game))
 
-                # Удаляем пропущенные лайки для этой игры
                 conn.execute("DELETE FROM skipped_likes WHERE (user_id = ? OR skipped_user_id = ?) AND game = ?", 
                            (telegram_id, telegram_id, game))
 
-                # Удаляем профиль для этой игры
                 conn.execute('DELETE FROM profiles WHERE telegram_id = ? AND game = ?', 
                            (telegram_id, game))
 
-                # Удаляем жалобы связанные с этой анкетой
                 conn.execute("DELETE FROM reports WHERE reported_user_id = ? AND game = ?", 
            (telegram_id, game))
 
@@ -689,7 +635,6 @@ class Database:
             return False
 
     def add_report(self, reporter_id: int, reported_user_id: int, game: str) -> bool:
-        """Добавить жалобу на пользователя"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute('''
@@ -705,7 +650,6 @@ class Database:
             return False
 
     def get_pending_reports(self) -> List[Dict]:
-        """Получить все необработанные жалобы"""
         try:
             with sqlite3.connect(self.db_path) as conn:
                 conn.row_factory = sqlite3.Row
@@ -732,7 +676,6 @@ class Database:
     def process_report(self, report_id: int, action: str, admin_id: int) -> bool:
         try:
             with sqlite3.connect(self.db_path) as conn:
-                # Получаем информацию о жалобе
                 cursor = conn.execute('''
                     SELECT reported_user_id, game FROM reports WHERE id = ?
                 ''', (report_id,))
@@ -744,11 +687,9 @@ class Database:
                 reported_user_id, game = report
 
                 if action == 'approve':
-                    # Удаляем профиль пользователя
                     self.delete_profile(reported_user_id, game)
                     status = 'approved'
                 elif action == 'ban':
-                    # Удаляем профиль и баним пользователя
                     self.delete_profile(reported_user_id, game)
                     self.add_ban(reported_user_id, 'нарушение правил')
                     status = 'banned'
@@ -757,7 +698,6 @@ class Database:
                 else:
                     return False
 
-                # Обновляем статус жалобы
                 conn.execute('''
                     UPDATE reports 
                     SET status = ?, reviewed_at = CURRENT_TIMESTAMP, admin_id = ?

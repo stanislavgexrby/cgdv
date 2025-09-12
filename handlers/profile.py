@@ -18,7 +18,7 @@ class ProfileForm(StatesGroup):
     nickname = State()
     age = State()
     rating = State()
-    region = State()  # Добавить это состояние
+    region = State()
     positions = State()
     additional_info = State()
     photo = State()
@@ -26,8 +26,7 @@ class ProfileForm(StatesGroup):
 @router.callback_query(F.data == "create_profile")
 async def start_create_profile(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
-    
-    # Проверка на бан
+
     if db.is_user_banned(user_id):
         ban_info = db.get_user_ban(user_id)
         if ban_info:
@@ -35,7 +34,7 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext):
         else:
             await callback.answer("🚫 Вы заблокированы", show_alert=True)
         return
-    
+
     user = db.get_user(user_id)
 
     if not user or not user.get('current_game'):
@@ -61,7 +60,7 @@ async def process_name(message: Message, state: FSMContext):
     if not message.text:
         await message.answer("❌ Отправьте текстовое сообщение с именем и фамилией")
         return
-        
+
     name = message.text.strip()
 
     if len(name) < 2 or len(name) > settings.MAX_NAME_LENGTH:
@@ -83,7 +82,6 @@ async def process_name(message: Message, state: FSMContext):
         reply_markup=kb.cancel_profile_creation()
     )
 
-# Обработчик неправильного типа сообщения для имени
 @router.message(ProfileForm.name, ~F.text)
 async def wrong_name_format(message: Message, state: FSMContext):
     await message.answer(
@@ -95,7 +93,7 @@ async def process_nickname(message: Message, state: FSMContext):
     if not message.text:
         await message.answer("❌ Отправьте текстовое сообщение с игровым никнеймом")
         return
-        
+
     nickname = message.text.strip()
 
     if len(nickname) < 2 or len(nickname) > settings.MAX_NICKNAME_LENGTH:
@@ -122,7 +120,7 @@ async def process_age(message: Message, state: FSMContext):
     if not message.text:
         await message.answer(f"❌ Отправьте число больше {settings.MIN_AGE}:")
         return
-        
+
     try:
         age = int(message.text.strip())
     except ValueError:
@@ -146,7 +144,6 @@ async def process_age(message: Message, state: FSMContext):
     rating_text = "🏆 Выберите рейтинг:"
     await message.answer(rating_text, reply_markup=kb.ratings(game))
 
-# Обработчик неправильного типа сообщения для возраста
 @router.message(ProfileForm.age, ~F.text)
 async def wrong_age_format(message: Message, state: FSMContext):
     await message.answer(
@@ -158,10 +155,10 @@ async def process_rating(callback: CallbackQuery, state: FSMContext):
     rating = callback.data.split("_")[1]
 
     await state.update_data(rating=rating)
-    await state.set_state(ProfileForm.region)  # ИЗМЕНИТЬ: было ProfileForm.positions
+    await state.set_state(ProfileForm.region)
 
-    region_text = "🌍 Выберите регион:"  # ИЗМЕНИТЬ: было position_text
-    await callback.message.edit_text(region_text, reply_markup=kb.regions())  # ИЗМЕНИТЬ: было kb.positions(game, [])
+    region_text = "🌍 Выберите регион:"
+    await callback.message.edit_text(region_text, reply_markup=kb.regions())
     await callback.answer()
 
 @router.callback_query(F.data.startswith("region_"), ProfileForm.region)
@@ -169,13 +166,45 @@ async def process_region(callback: CallbackQuery, state: FSMContext):
     region = callback.data.split("_")[1]
 
     await state.update_data(region=region)
-    await state.set_state(ProfileForm.positions)  # Теперь переходим к позициям
+    await state.set_state(ProfileForm.positions)
 
     data = await state.get_data()
     game = data['game']
 
     position_text = "⚔️ Выберите позиции (можно несколько):"
     await callback.message.edit_text(position_text, reply_markup=kb.positions(game, []))
+    await callback.answer()
+
+@router.callback_query(F.data == "rating_any", ProfileForm.rating)
+async def process_any_rating(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(rating="any")
+    await state.set_state(ProfileForm.region)
+
+    region_text = "🌍 Выберите регион:"
+    await callback.message.edit_text(region_text, reply_markup=kb.regions())
+    await callback.answer()
+
+@router.callback_query(F.data == "region_any", ProfileForm.region)
+async def process_any_region(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(region="any")
+    await state.set_state(ProfileForm.positions)
+
+    data = await state.get_data()
+    game = data['game']
+
+    position_text = "⚔️ Выберите позиции (можно несколько):"
+    await callback.message.edit_text(position_text, reply_markup=kb.positions(game, []))
+    await callback.answer()
+
+@router.callback_query(F.data == "pos_any", ProfileForm.positions)
+async def process_any_position(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(positions=["any"])
+    await state.set_state(ProfileForm.additional_info)
+
+    await callback.message.edit_text(
+        "📝 Расскажите о себе:",
+        reply_markup=kb.skip_info()
+    )
     await callback.answer()
 
 @router.callback_query(F.data.startswith("pos_add_"), ProfileForm.positions)
@@ -235,7 +264,7 @@ async def process_additional_info(message: Message, state: FSMContext):
     if not message.text:
         await message.answer("❌ Отправьте текстовое сообщение с описанием или нажмите 'Пропустить'")
         return
-        
+
     info = message.text.strip()
 
     if len(info) > settings.MAX_INFO_LENGTH:

@@ -15,7 +15,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 async def main():
-    # ДОБАВИТЬ защиту от множественного запуска
     if hasattr(main, '_running'):
         logger.warning("main() уже запущен, завершаем дублирующий вызов")
         return
@@ -33,16 +32,15 @@ async def main():
         bot = Bot(token=bot_token)
         dp = Dispatcher(storage=MemoryStorage())
 
-        # Регистрируем handlers ОДИН раз
         from handlers import register_handlers
         register_handlers(dp)
 
-        logger.info("🚀 TeammateBot запускается...")
+        logger.info("CGDV запускается...")
 
         admin_id = os.getenv('ADMIN_ID')
         if admin_id and admin_id != '123456789':
             try:
-                await bot.send_message(int(admin_id), "🤖 TeammateBot запущен!")
+                await bot.send_message(int(admin_id), "CGDV запущен!")
             except:
                 pass
 
@@ -52,9 +50,8 @@ async def main():
             logger.error(f"Ошибка при запуске бота: {e}")
         finally:
             await bot.session.close()
-            
+
     finally:
-        # Убираем флаг при завершении
         if hasattr(main, '_running'):
             delattr(main, '_running')
 

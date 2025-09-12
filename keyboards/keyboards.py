@@ -17,7 +17,6 @@ def main_menu(has_profile: bool = False, current_game: str = None) -> InlineKeyb
             [InlineKeyboardButton(text="👤 Моя анкета", callback_data="edit_profile")],
             [InlineKeyboardButton(text="❤️ Лайки", callback_data="my_likes")],
             [InlineKeyboardButton(text="💖 Матчи", callback_data="my_matches")]
-            # Убрали кнопку "Удалить анкету" отсюда
         ])
     else:
         buttons.append([InlineKeyboardButton(text="📝 Создать анкету", callback_data="create_profile")])
@@ -29,25 +28,34 @@ def main_menu(has_profile: bool = False, current_game: str = None) -> InlineKeyb
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def ratings(game: str) -> InlineKeyboardMarkup:
+def ratings(game: str, for_profile: bool = True) -> InlineKeyboardMarkup:
     buttons = []
+
     for key, name in settings.RATINGS[game].items():
         buttons.append([InlineKeyboardButton(text=name, callback_data=f"rating_{key}")])
 
+    if for_profile:
+        buttons.append([InlineKeyboardButton(text="Любой рейтинг", callback_data="rating_any")])
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def regions() -> InlineKeyboardMarkup:
+def regions(for_profile: bool = True) -> InlineKeyboardMarkup:
     buttons = []
+
     for key, name in settings.REGIONS.items():
         buttons.append([InlineKeyboardButton(text=name, callback_data=f"region_{key}")])
 
+    if for_profile:
+            buttons.append([InlineKeyboardButton(text="Любой регион", callback_data="region_any")])
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def positions(game: str, selected: List[str] = None) -> InlineKeyboardMarkup:
+def positions(game: str, selected: List[str] = None, for_profile: bool = True) -> InlineKeyboardMarkup:
     if selected is None:
         selected = []
 
     buttons = []
+
     for key, name in settings.POSITIONS[game].items():
         if key in selected:
             text = f"✅ {name}"
@@ -58,10 +66,13 @@ def positions(game: str, selected: List[str] = None) -> InlineKeyboardMarkup:
 
         buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
 
-    # buttons.append([InlineKeyboardButton(text="──────────", callback_data="separator")])
+    if for_profile and not selected:
+        buttons.append([InlineKeyboardButton(text="Любая позиция", callback_data="pos_any")])
 
     if selected:
         buttons.append([InlineKeyboardButton(text="✅ Готово", callback_data="pos_done")])
+    elif for_profile:
+        buttons.append([InlineKeyboardButton(text="⚠️ Выберите позицию", callback_data="pos_need")])
     else:
         buttons.append([InlineKeyboardButton(text="⚠️ Выберите позицию", callback_data="pos_need")])
 
@@ -74,15 +85,29 @@ def search_filters() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔍 Начать поиск", callback_data="start_search")],
         [InlineKeyboardButton(text="🏆 Рейтинг", callback_data="filter_rating")],
         [InlineKeyboardButton(text="⚔️ Позиция", callback_data="filter_position")],
-        [InlineKeyboardButton(text="🌍 Регион", callback_data="filter_region")],  # Добавить эту строку
+        [InlineKeyboardButton(text="🌍 Регион", callback_data="filter_region")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
 def regions_filter() -> InlineKeyboardMarkup:
     buttons = []
+
     for key, name in settings.REGIONS.items():
         buttons.append([InlineKeyboardButton(text=name, callback_data=f"region_filter_{key}")])
-    
+
+    buttons.append([InlineKeyboardButton(text="🔄 Сбросить фильтр", callback_data="region_reset")])
+
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_filter")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def ratings_filter(game: str) -> InlineKeyboardMarkup:
+    buttons = []
+
+    for key, name in settings.RATINGS[game].items():
+        buttons.append([InlineKeyboardButton(text=name, callback_data=f"rating_{key}")])
+
+    buttons.append([InlineKeyboardButton(text="🔄 Сбросить фильтр", callback_data="rating_reset")])
+
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_filter")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -174,7 +199,7 @@ def edit_profile_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📝 Изменить описание", callback_data="edit_info")],
         [InlineKeyboardButton(text="📸 Изменить фото", callback_data="edit_photo")],
         [InlineKeyboardButton(text="🔄 Создать заново", callback_data="create_profile")],
-        [InlineKeyboardButton(text="🗑️ Удалить анкету", callback_data="delete_profile")],  # Добавили сюда
+        [InlineKeyboardButton(text="🗑️ Удалить анкету", callback_data="delete_profile")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
@@ -197,6 +222,8 @@ def position_filter_menu(game: str) -> InlineKeyboardMarkup:
     for key, name in settings.POSITIONS[game].items():
         buttons.append([InlineKeyboardButton(text=name, callback_data=f"pos_filter_{key}")])
 
+    buttons.append([InlineKeyboardButton(text="🔄 Сбросить фильтр", callback_data="position_reset")])
+
     buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_filter")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -211,24 +238,21 @@ def subscribe_channel_keyboard(game: str, from_switch: bool = False) -> InlineKe
         button_text = "📢 Подписаться на CS2 канал"
     else:
         return back()
-    
-    # Убираем @ из начала, если есть, для формирования URL
+
     channel_username = channel.lstrip('@')
-    
+
     buttons = [
         [InlineKeyboardButton(text=button_text, url=f"https://t.me/{channel_username}")],
         [InlineKeyboardButton(text="✅ Я подписался", callback_data=f"game_{game}")]
     ]
-    
-    # Разные callback_data для кнопки "Назад" в зависимости от контекста
+
     if from_switch:
         buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_main")])
     else:
         buttons.append([InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_games")])
-    
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-# Клавиатуры для админ-панели работы с жалобами и банами
 def admin_main_menu() -> InlineKeyboardMarkup:
     """Главное меню админ-панели"""
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -270,70 +294,58 @@ def admin_ban_actions(user_id: int) -> InlineKeyboardMarkup:
 def admin_ban_actions_with_nav(user_id: int, current_index: int, total_count: int) -> InlineKeyboardMarkup:
     """Клавиатура для действий с баном с навигацией"""
     buttons = []
-    
-    # Основные действия
+
     buttons.append([InlineKeyboardButton(text="✅ Снять бан", callback_data=f"admin_unban_{user_id}")])
-    
-    # Навигация (если банов больше одного)
+
     if total_count > 1:
         nav_buttons = []
-        
-        # Кнопка "Предыдущий" (если не первый)
+
         if current_index > 0:
             nav_buttons.append(InlineKeyboardButton(
                 text="◀️ Предыдущий", 
                 callback_data=f"admin_ban_prev_{current_index}"
             ))
-        
-        # Кнопка "Следующий" (если не последний)
+
         if current_index < total_count - 1:
             nav_buttons.append(InlineKeyboardButton(
                 text="Следующий ▶️", 
                 callback_data=f"admin_ban_next_{current_index}"
             ))
-        
-        # Добавляем кнопки навигации только если они есть
+
         if nav_buttons:
             buttons.append(nav_buttons)
-    
-    # Кнопка возврата в админ меню (используем существующий callback)
+
     buttons.append([InlineKeyboardButton(text="⬅️ Админ меню", callback_data="admin_stats")])
-    
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def admin_report_actions_with_nav(report_id: int, current_index: int, total_count: int) -> InlineKeyboardMarkup:
-    """Клавиатура для действий с жалобой с навигацией"""
     buttons = []
-    
-    # Основные действия
+
     buttons.append([
         InlineKeyboardButton(text="🗑️ Удалить профиль", callback_data=f"admin_approve_{report_id}"),
         InlineKeyboardButton(text="🚫 Забанить", callback_data=f"admin_ban_{report_id}")
     ])
     buttons.append([InlineKeyboardButton(text="❌ Отклонить", callback_data=f"admin_dismiss_{report_id}")])
-    
-    # Навигация (если жалоб больше одной)
+
     if total_count > 1:
         nav_buttons = []
-        
-        # Кнопка "Предыдущая" (если не первая)
+
         if current_index > 0:
             nav_buttons.append(InlineKeyboardButton(
                 text="◀️ Предыдущая", 
                 callback_data=f"admin_report_prev_{current_index}"
             ))
-        
-        # Кнопка "Следующая" (если не последняя)
+
         if current_index < total_count - 1:
             nav_buttons.append(InlineKeyboardButton(
                 text="Следующая ▶️", 
                 callback_data=f"admin_report_next_{current_index}"
             ))
-        
+
         if nav_buttons:
             buttons.append(nav_buttons)
-    
-    # Кнопка возврата в админ меню
+
     buttons.append([InlineKeyboardButton(text="⬅️ Админ меню", callback_data="admin_stats")])
-    
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)

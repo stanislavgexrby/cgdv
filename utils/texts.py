@@ -8,28 +8,35 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
     text += f"🎂 {user['age']} лет\n"
 
     rating = user['rating']
-    if rating in settings.RATINGS.get(game, {}):
+    if rating == 'any':
+        text += f"🏆 Любой рейтинг\n"
+    elif rating in settings.RATINGS.get(game, {}):
         rating = settings.RATINGS[game][rating]
-    text += f"🏆 {rating}\n"
+        text += f"🏆 {rating}\n"
+    else:
+        text += f"🏆 {rating}\n"
 
-    # Добавить регион
     region = user.get('region', '')
-    if region and region in settings.REGIONS:
+    if region == 'any':
+        text += f"🌍 Любой регион\n"
+    elif region and region in settings.REGIONS:
         text += f"🌍 {settings.REGIONS[region]}\n"
 
     if user['positions']:
-        positions_text = []
-        for pos in user['positions']:
-            if pos in settings.POSITIONS.get(game, {}):
-                positions_text.append(settings.POSITIONS[game][pos])
-            else:
-                positions_text.append(pos)
-        text += f"⚔️ {', '.join(positions_text)}\n"
+        if 'any' in user['positions']:
+            text += f"⚔️ Любая позиция\n"
+        else:
+            positions_text = []
+            for pos in user['positions']:
+                if pos in settings.POSITIONS.get(game, {}):
+                    positions_text.append(settings.POSITIONS[game][pos])
+                else:
+                    positions_text.append(pos)
+            text += f"⚔️ {', '.join(positions_text)}\n"
 
     if user.get('additional_info'):
         text += f"\n📝 {user['additional_info']}\n"
 
-    # Показываем контакты только при матче
     if show_contact and user.get('username'):
         text += f"\n💬 @{user['username']}"
 

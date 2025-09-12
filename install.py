@@ -5,7 +5,6 @@ from pathlib import Path
 import shutil
 
 def check_python_version():
-    """Проверка версии Python"""
     if sys.version_info < (3, 8):
         print("❌ Требуется Python 3.8 или выше")
         print(f"Установлена версия: {sys.version}")
@@ -15,7 +14,6 @@ def check_python_version():
     return True
 
 def create_virtual_env():
-    """Создание виртуального окружения"""
     venv_path = Path("venv")
 
     if venv_path.exists():
@@ -32,10 +30,9 @@ def create_virtual_env():
         return False
 
 def get_pip_command():
-    """Получение команды pip для текущей системы"""
-    if os.name == 'nt':  # Windows
+    if os.name == 'nt':
         return str(Path("venv/Scripts/pip.exe"))
-    else:  # Linux/macOS
+    else:
         return str(Path("venv/bin/pip"))
 
 def install_dependencies():
@@ -45,10 +42,8 @@ def install_dependencies():
     pip_cmd = get_pip_command()
 
     try:
-        # Обновляем pip
         subprocess.run([pip_cmd, "install", "--upgrade", "pip"], check=True)
 
-        # Устанавливаем зависимости
         subprocess.run([pip_cmd, "install", "-r", "requirements.txt"], check=True)
 
         print("✅ Зависимости установлены")
@@ -58,7 +53,6 @@ def install_dependencies():
         return False
 
 def create_env_file():
-    """Создание .env файла"""
     env_path = Path(".env")
     env_example_path = Path(".env.example")
 
@@ -104,30 +98,25 @@ def create_env_file():
     return True
 
 def main():
-    """Основная функция установки"""
     print("🎮 Установка TeammateBot")
     print("=" * 40)
 
-    # Проверяем Python
     if not check_python_version():
         return False
 
-    # Создаем виртуальное окружение
     if not create_virtual_env():
         return False
 
-    # Устанавливаем зависимости
     if not install_dependencies():
         return False
 
-    # Создаем .env файл
     create_env_file()
 
     print("Запустите бота:")
 
-    if os.name == 'nt':  # Windows
+    if os.name == 'nt':
         print("   python main.py")
-    else:  # Linux/macOS
+    else:
         print("   python main.py")
 
     return True
