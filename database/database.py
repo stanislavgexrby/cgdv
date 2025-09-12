@@ -138,7 +138,6 @@ class Database:
                 )
             ''')
 
-            # Таблица профилей для каждой игры
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS profiles (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -148,6 +147,7 @@ class Database:
                     nickname TEXT,
                     age INTEGER,
                     rating TEXT,
+                    region TEXT,
                     positions TEXT,
                     additional_info TEXT,
                     photo_id TEXT,
@@ -353,7 +353,7 @@ class Database:
             return False
 
     def update_user_profile(self, telegram_id: int, game: str, name: str, nickname: str,
-                          age: int, rating: str, positions: List[str],
+                          age: int, rating: str, region: str, positions: List[str],
                           additional_info: str, photo_id: str = None) -> bool:
         try:
             positions_json = json.dumps(positions)
@@ -361,9 +361,9 @@ class Database:
             with sqlite3.connect(self.db_path) as conn:
                 conn.execute('''
                     INSERT OR REPLACE INTO profiles 
-                    (telegram_id, game, name, nickname, age, rating, positions, additional_info, photo_id)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (telegram_id, game, name, nickname, age, rating, positions_json,
+                    (telegram_id, game, name, nickname, age, rating, region, positions, additional_info, photo_id)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (telegram_id, game, name, nickname, age, rating, region, positions_json,
                      additional_info, photo_id))
 
             logger.info(f"Профиль обновлен: {telegram_id} для {game}")
@@ -388,6 +388,7 @@ class Database:
     def get_potential_matches(self, user_id: int, game: str,
                         rating_filter: str = None,
                         position_filter: str = None,
+                        region_filter: str = None,
                         limit: int = 10) -> List[Dict]:
         try:
             # Обновленный базовый запрос с исключением жалоб
@@ -406,6 +407,7 @@ class Database:
                     WHERE reporter_id = ? AND game = ?
                 )
             '''
+
             params = [user_id, game, user_id, game, user_id, game]
 
             if rating_filter:
@@ -415,6 +417,10 @@ class Database:
             if position_filter:
                 base_query += " AND p.positions LIKE ?"
                 params.append(f'%"{position_filter}"%')
+
+            if region_filter:
+                base_query += " AND p.region = ?"
+                params.append(region_filter)
 
             # Получаем информацию о пропусках отдельным запросом
             skip_query = '''

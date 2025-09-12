@@ -18,6 +18,7 @@ class ProfileForm(StatesGroup):
     nickname = State()
     age = State()
     rating = State()
+    region = State()  # Добавить это состояние
     positions = State()
     additional_info = State()
     photo = State()
@@ -157,7 +158,18 @@ async def process_rating(callback: CallbackQuery, state: FSMContext):
     rating = callback.data.split("_")[1]
 
     await state.update_data(rating=rating)
-    await state.set_state(ProfileForm.positions)
+    await state.set_state(ProfileForm.region)  # ИЗМЕНИТЬ: было ProfileForm.positions
+
+    region_text = "🌍 Выберите регион:"  # ИЗМЕНИТЬ: было position_text
+    await callback.message.edit_text(region_text, reply_markup=kb.regions())  # ИЗМЕНИТЬ: было kb.positions(game, [])
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("region_"), ProfileForm.region)
+async def process_region(callback: CallbackQuery, state: FSMContext):
+    region = callback.data.split("_")[1]
+
+    await state.update_data(region=region)
+    await state.set_state(ProfileForm.positions)  # Теперь переходим к позициям
 
     data = await state.get_data()
     game = data['game']
@@ -275,6 +287,7 @@ async def save_profile(message: Message, state: FSMContext, photo_id: str):
         nickname=data['nickname'],
         age=data['age'],
         rating=data['rating'],
+        region=data.get('region', 'eeu'),
         positions=data['positions'],
         additional_info=data['additional_info'],
         photo_id=photo_id
@@ -300,6 +313,7 @@ async def save_profile_callback(callback: CallbackQuery, state: FSMContext, phot
         nickname=data['nickname'],
         age=data['age'],
         rating=data['rating'],
+        region=data.get('region', 'eeu'),
         positions=data['positions'],
         additional_info=data['additional_info'],
         photo_id=photo_id

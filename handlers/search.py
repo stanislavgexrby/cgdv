@@ -64,6 +64,7 @@ async def start_search(callback: CallbackQuery, state: FSMContext):
     text = f"🔍 Поиск в {game_name}\n\nФильтры:\n\n"
     text += "🏆 Рейтинг: любой\n"
     text += "⚔️ Позиция: любая\n\n"
+    text += "🌍 Регион: любой\n\n"
     text += "Настройте фильтры или начните поиск:"
 
     await safe_edit_message(callback, text, kb.search_filters())
@@ -138,6 +139,12 @@ async def save_rating_filter(callback: CallbackQuery, state: FSMContext):
     if data.get('position_filter'):
         position_text = settings.POSITIONS[game].get(data['position_filter'], data['position_filter'])
     text += f"⚔️ Позиция: {position_text}\n\n"
+    region_text = "любой"
+
+    if data.get('region_filter'):
+        region_text = settings.REGIONS.get(data['region_filter'], data['region_filter'])
+    text += f"🌍 Регион: {region_text}\n\n"
+
     text += "Настройте фильтры или начните поиск:"
 
     await safe_edit_message(callback, text, kb.search_filters())
@@ -177,10 +184,73 @@ async def save_position_filter(callback: CallbackQuery, state: FSMContext):
     text = f"🔍 Поиск в {game_name}\n\nФильтры:\n\n"
     text += f"🏆 Рейтинг: {rating_text}\n"
     text += f"⚔️ Позиция: {position_text}\n\n"
+
+    region_text = "любой"
+    if data.get('region_filter'):
+        region_text = settings.REGIONS.get(data['region_filter'], data['region_filter'])
+    text += f"🌍 Регион: {region_text}\n\n"
+
+    text += "Настройте фильтры или начните поиск:"
     text += "Настройте фильтры или начните поиск:"
 
     await safe_edit_message(callback, text, kb.search_filters())
     await callback.answer("✅ Фильтр по позиции установлен")
+
+@router.callback_query(F.data == "filter_region", SearchForm.filters)
+async def set_region_filter(callback: CallbackQuery, state: FSMContext):
+    data = await state.get_data()
+    game = data.get('game')
+    
+    if not game:
+        logger.error("Нет данных об игре в состоянии FSM")
+        await callback.answer("❌ Ошибка состояния", show_alert=True)
+        return
+
+    await safe_edit_message(callback, "🌍 Выберите регион:", kb.regions_filter())
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("region_filter_"), SearchForm.filters)
+async def save_region_filter(callback: CallbackQuery, state: FSMContext):
+    region = callback.data.split("_")[2]
+    
+    data = await state.get_data()
+    
+    if not data or 'game' not in data:
+        logger.error("Некорректное состояние FSM в save_region_filter")
+        await callback.answer("❌ Ошибка состояния. Попробуйте начать поиск заново.", show_alert=True)
+        return
+    
+    current_region = data.get('region_filter')
+    
+    if current_region == region:
+        await callback.answer("Этот регион уже выбран")
+        return
+    
+    await state.update_data(region_filter=region)
+
+    data = await state.get_data()
+    game = data['game']
+    game_name = settings.GAMES.get(game, game)
+    
+    # Обновить отображение фильтров
+    rating_text = "любой"
+    if data.get('rating_filter'):
+        rating_text = settings.RATINGS[game].get(data['rating_filter'], data['rating_filter'])
+
+    position_text = "любая"
+    if data.get('position_filter'):
+        position_text = settings.POSITIONS[game].get(data['position_filter'], data['position_filter'])
+    
+    region_text = settings.REGIONS.get(region, region)
+
+    text = f"🔍 Поиск в {game_name}\n\nФильтры:\n\n"
+    text += f"🏆 Рейтинг: {rating_text}\n"
+    text += f"⚔️ Позиция: {position_text}\n"
+    text += f"🌍 Регион: {region_text}\n\n"
+    text += "Настройте фильтры или начните поиск:"
+
+    await safe_edit_message(callback, text, kb.search_filters())
+    await callback.answer("✅ Фильтр по region установлен")
 
 @router.callback_query(F.data == "cancel_filter", SearchForm.filters)
 async def cancel_filter(callback: CallbackQuery, state: FSMContext):
@@ -196,9 +266,14 @@ async def cancel_filter(callback: CallbackQuery, state: FSMContext):
     if data.get('position_filter'):
         position_text = settings.POSITIONS[game].get(data['position_filter'], data['position_filter'])
 
+    region_text = "любой"
+    if data.get('region_filter'):
+        region_text = settings.REGIONS.get(data['region_filter'], data['region_filter'])
+
     text = f"🔍 Поиск в {game_name}\n\nФильтры:\n\n"
     text += f"🏆 Рейтинг: {rating_text}\n"
     text += f"⚔️ Позиция: {position_text}\n\n"
+    text += f"🌍 Регион: {region_text}\n\n" 
     text += "Настройте фильтры или начните поиск:"
 
     await safe_edit_message(callback, text, kb.search_filters())
@@ -227,6 +302,7 @@ async def begin_search(callback: CallbackQuery, state: FSMContext):
         game=data['game'],
         rating_filter=data.get('rating_filter'),
         position_filter=data.get('position_filter'),
+        region_filter=data.get('region_filter'),  # Добавить эту строку
         limit=20
     )
 

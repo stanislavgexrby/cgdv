@@ -20,6 +20,7 @@ class EditProfileForm(StatesGroup):
     edit_nickname = State()
     edit_age = State()
     edit_rating = State()
+    edit_region = State()  # Добавить это состояние
     edit_positions = State()
     edit_info = State()
     edit_photo = State()
@@ -158,6 +159,51 @@ async def edit_rating(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
+@router.callback_query(F.data == "edit_region")
+async def edit_region(callback: CallbackQuery, state: FSMContext):
+    user_id = callback.from_user.id
+    user = db.get_user(user_id)
+    
+    await state.update_data(user_id=user_id, game=user['current_game'])
+    await state.set_state(EditProfileForm.edit_region)
+    
+    await safe_edit_or_send(
+        callback.message,
+        "🌍 Выберите новый регион:",
+        kb.regions()
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("region_"), EditProfileForm.edit_region)
+async def process_edit_region(callback: CallbackQuery, state: FSMContext):
+    region = callback.data.split("_")[1]
+    
+    data = await state.get_data()
+    profile = db.get_user_profile(data['user_id'], data['game'])
+    
+    if profile:
+        success = db.update_user_profile(
+            telegram_id=data['user_id'],
+            game=data['game'],
+            name=profile['name'],
+            nickname=profile['nickname'],
+            age=profile['age'],
+            rating=profile['rating'],
+            region=region,  # Новый регион
+            positions=profile['positions'],
+            additional_info=profile['additional_info'],
+            photo_id=profile.get('photo_id')
+        )
+        
+        await state.clear()
+        
+        if success:
+            await safe_edit_or_send(callback.message, "✅ Регион обновлен!", kb.back_to_editing())
+        else:
+            await safe_edit_or_send(callback.message, "❌ Ошибка обновления", kb.back_to_editing())
+    
+    await callback.answer()
+
 @router.callback_query(F.data == "edit_positions")
 async def edit_positions(callback: CallbackQuery, state: FSMContext):
     user_id = callback.from_user.id
@@ -240,6 +286,7 @@ async def process_edit_name(message: Message, state: FSMContext):
             nickname=profile['nickname'],
             age=profile['age'],
             rating=profile['rating'],
+            region=data.get('region', 'eeu'),
             positions=profile['positions'],
             additional_info=profile['additional_info'],
             photo_id=profile.get('photo_id')
@@ -279,6 +326,7 @@ async def process_edit_nickname(message: Message, state: FSMContext):
             nickname=nickname,
             age=profile['age'],
             rating=profile['rating'],
+            region=data.get('region', 'eeu'),
             positions=profile['positions'],
             additional_info=profile['additional_info'],
             photo_id=profile.get('photo_id')
@@ -322,6 +370,7 @@ async def process_edit_age(message: Message, state: FSMContext):
             nickname=profile['nickname'],
             age=age,
             rating=profile['rating'],
+            region=data.get('region', 'eeu'),
             positions=profile['positions'],
             additional_info=profile['additional_info'],
             photo_id=profile.get('photo_id')
@@ -361,6 +410,7 @@ async def process_edit_info(message: Message, state: FSMContext):
             nickname=profile['nickname'],
             age=profile['age'],
             rating=profile['rating'],
+            region=data.get('region', 'eeu'),
             positions=profile['positions'],
             additional_info=info,
             photo_id=profile.get('photo_id')
@@ -392,6 +442,7 @@ async def process_edit_photo(message: Message, state: FSMContext):
             nickname=profile['nickname'],
             age=profile['age'],
             rating=profile['rating'],
+            region=data.get('region', 'eeu'),
             positions=profile['positions'],
             additional_info=profile['additional_info'],
             photo_id=photo_id
@@ -428,6 +479,7 @@ async def process_edit_rating(callback: CallbackQuery, state: FSMContext):
             nickname=profile['nickname'],
             age=profile['age'],
             rating=rating,
+            region=data.get('region', 'eeu'),
             positions=profile['positions'],
             additional_info=profile['additional_info'],
             photo_id=profile.get('photo_id')
@@ -501,6 +553,7 @@ async def edit_positions_done(callback: CallbackQuery, state: FSMContext):
             nickname=profile['nickname'],
             age=profile['age'],
             rating=profile['rating'],
+            region=data.get('region', 'eeu'),
             positions=selected,
             additional_info=profile['additional_info'],
             photo_id=profile.get('photo_id')
@@ -534,6 +587,7 @@ async def delete_info(callback: CallbackQuery, state: FSMContext):
             nickname=profile['nickname'],
             age=profile['age'],
             rating=profile['rating'],
+            region=data.get('region', 'eeu'),
             positions=profile['positions'],
             additional_info="",  # Удаляем описание
             photo_id=profile.get('photo_id')
@@ -561,6 +615,7 @@ async def delete_photo(callback: CallbackQuery, state: FSMContext):
             nickname=profile['nickname'],
             age=profile['age'],
             rating=profile['rating'],
+            region=data.get('region', 'eeu'),
             positions=profile['positions'],
             additional_info=profile['additional_info'],
             photo_id=None

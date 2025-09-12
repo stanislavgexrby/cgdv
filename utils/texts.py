@@ -12,6 +12,11 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
         rating = settings.RATINGS[game][rating]
     text += f"🏆 {rating}\n"
 
+    # Добавить регион
+    region = user.get('region', '')
+    if region and region in settings.REGIONS:
+        text += f"🌍 {settings.REGIONS[region]}\n"
+
     if user['positions']:
         positions_text = []
         for pos in user['positions']:

@@ -36,6 +36,13 @@ def ratings(game: str) -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def regions() -> InlineKeyboardMarkup:
+    buttons = []
+    for key, name in settings.REGIONS.items():
+        buttons.append([InlineKeyboardButton(text=name, callback_data=f"region_{key}")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 def positions(game: str, selected: List[str] = None) -> InlineKeyboardMarkup:
     if selected is None:
         selected = []
@@ -67,8 +74,17 @@ def search_filters() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔍 Начать поиск", callback_data="start_search")],
         [InlineKeyboardButton(text="🏆 Рейтинг", callback_data="filter_rating")],
         [InlineKeyboardButton(text="⚔️ Позиция", callback_data="filter_position")],
+        [InlineKeyboardButton(text="🌍 Регион", callback_data="filter_region")],  # Добавить эту строку
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
+
+def regions_filter() -> InlineKeyboardMarkup:
+    buttons = []
+    for key, name in settings.REGIONS.items():
+        buttons.append([InlineKeyboardButton(text=name, callback_data=f"region_filter_{key}")])
+    
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_filter")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def profile_actions(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -153,6 +169,7 @@ def edit_profile_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🎮 Изменить никнейм", callback_data="edit_nickname")],
         [InlineKeyboardButton(text="🎂 Изменить возраст", callback_data="edit_age")],
         [InlineKeyboardButton(text="🏆 Изменить рейтинг", callback_data="edit_rating")],
+        [InlineKeyboardButton(text="🌍 Изменить регион", callback_data="edit_region")],
         [InlineKeyboardButton(text="⚔️ Изменить позиции", callback_data="edit_positions")],
         [InlineKeyboardButton(text="📝 Изменить описание", callback_data="edit_info")],
         [InlineKeyboardButton(text="📸 Изменить фото", callback_data="edit_photo")],
