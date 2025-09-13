@@ -359,24 +359,3 @@ def admin_ban_actions_with_nav(user_id: int, current_index: int, total_count: in
     buttons.append([InlineKeyboardButton(text="⬅️ Админ меню", callback_data="admin_stats")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
-
-# Устаревшие функции для обратной совместимости (можно удалить после рефакторинга)
-def admin_report_actions(report_id: int) -> InlineKeyboardMarkup:
-    """Устаревшая функция - используйте admin_report_actions_with_nav"""
-    return admin_report_actions_with_nav(report_id, 0, 1)
-
-def admin_ban_actions(user_id: int) -> InlineKeyboardMarkup:
-    """Устаревшая функция - используйте admin_ban_actions_with_nav"""
-    return admin_ban_actions_with_nav(user_id, 0, 1)
-
-def admin_back_to_reports() -> InlineKeyboardMarkup:
-    """Устаревшая функция"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад к жалобам", callback_data="admin_reports")]
-    ])
-
-def admin_back_to_bans() -> InlineKeyboardMarkup:
-    """Устаревшая функция"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬅️ Назад к банам", callback_data="admin_bans")]
-    ])

@@ -363,38 +363,32 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
 
 # ==================== ДЕЙСТВИЯ В ПОИСКЕ ====================
 
-@router.callback_query(F.data.startswith("skip_"), SearchForm.browsing)
-async def skip_profile(callback: CallbackQuery, state: FSMContext):
-    """Пропустить профиль в поиске"""
-    if not (callback.data.startswith("skip_") and callback.data[5:].isdigit()):
+@router.callback_query(F.data.startswith("skip_"))
+async def skip_profile(callback: CallbackQuery, state: FSMContext, db):
+    try:
+        target_user_id = int(callback.data.split("_")[1])
+    except Exception:
+        await callback.answer("❌ Ошибка данных", show_alert=True)
         return
+    await handle_search_action(callback, "skip", target_user_id, state, db)  # db!
 
-    target_user_id = int(callback.data[5:])
-    await handle_search_action(callback, "skip", target_user_id, state)
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("like_"), SearchForm.browsing)
-async def like_profile(callback: CallbackQuery, state: FSMContext):
-    """Лайк профиля в поиске"""
-    parts = callback.data.split("_")
-    if len(parts) != 2 or not parts[1].isdigit():
-        await callback.answer("❌ Ошибка", show_alert=True)
+@router.callback_query(F.data.startswith("like_"))
+async def like_profile(callback: CallbackQuery, state: FSMContext, db):
+    try:
+        target_user_id = int(callback.data.split("_")[1])
+    except Exception:
+        await callback.answer("❌ Ошибка данных", show_alert=True)
         return
+    await handle_search_action(callback, "like", target_user_id, state, db)  # db!
 
-    target_user_id = int(parts[1])
-    await handle_search_action(callback, "like", target_user_id, state)
-    await callback.answer()
-
-@router.callback_query(F.data.startswith("report_"), SearchForm.browsing)
-async def report_profile(callback: CallbackQuery, state: FSMContext):
-    """Пожаловаться на профиль в поиске"""
-    parts = callback.data.split("_")
-    if len(parts) != 2 or not parts[1].isdigit():
-        await callback.answer("❌ Ошибка", show_alert=True)
+@router.callback_query(F.data.startswith("report_"))
+async def report_profile(callback: CallbackQuery, state: FSMContext, db):
+    try:
+        target_user_id = int(callback.data.split("_")[1])
+    except Exception:
+        await callback.answer("❌ Ошибка данных", show_alert=True)
         return
-
-    target_user_id = int(parts[1])
-    await handle_search_action(callback, "report", target_user_id, state)
+    await handle_search_action(callback, "report", target_user_id, state, db)  # db!
 
 @router.callback_query(F.data == "continue_search", SearchForm.browsing)
 async def continue_search(callback: CallbackQuery, state: FSMContext):

@@ -1,97 +1,72 @@
 import asyncio
 import logging
 import os
-import signal
-import sys
 from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.memory import MemoryStorage
+from dotenv import load_dotenv, find_dotenv
 
-# Настройка логирования
+from handlers import register_handlers
+from database.database import Database
+from config.settings import ADMIN_ID
+from middleware.database import DatabaseMiddleware
+
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('bot.log', encoding='utf-8'),
-        logging.StreamHandler()
-    ]
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
-# Простые глобальные переменные
-bot_instance = None
-dp_instance = None
-database_instance = None
-shutdown_event = asyncio.Event()
-
-def signal_handler(signum, frame):
-    logger.info(f"Получен сигнал {signum}, начинаем остановку бота...")
-    shutdown_event.set()
-
-async def setup_database():
-    from database.database import Database
-    database = Database()
-    await database.init()
-    return database
-
-async def setup_bot(database):
-    """Настройка и инициализация бота"""
-    bot_token = os.getenv('BOT_TOKEN')
-    if not bot_token or bot_token == 'your_bot_token_here':
-        raise ValueError("BOT_TOKEN не установлен в .env файле")
-
-    bot = Bot(token=bot_token)
-    dp = Dispatcher(storage=MemoryStorage())
-
-    from middleware.database import DatabaseMiddleware
-    dp.message.middleware(DatabaseMiddleware(database))
-    dp.callback_query.middleware(DatabaseMiddleware(database))
-
-    from handlers import register_handlers
-    register_handlers(dp)
-
-    return bot, dp
+async def on_startup(bot: Bot):
+    # сбрасываем возможный старый вебхук
+    await bot.delete_webhook(drop_pending_updates=True)
+    try:
+        await bot.send_message(ADMIN_ID, "🚀 Бот запущен и готов к работе")
+        logger.info("Отправлено сообщение админу о старте")
+    except Exception as e:
+        logger.warning(
+            f"Не удалось отправить сообщение админу: {e} "
+            f"(частая причина — админ не нажал Start у бота)"
+        )
 
 async def main():
-    global bot_instance, dp_instance, database_instance
-    
-    from dotenv import load_dotenv
-    load_dotenv(override=True)
-    
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
+    # 1) env
+    load_dotenv(find_dotenv())
+    token = os.getenv("BOT_TOKEN")
+    if not token:
+        raise RuntimeError("BOT_TOKEN не найден. Проверь .env")
+
+    # 2) bot/dispatcher
+    bot = Bot(token=token)
+    dp = Dispatcher(storage=MemoryStorage())
+
+    # 3) db
+    logger.info("🔄 Инициализация базы данных PostgreSQL + Redis...")
+    db = Database()
+    await db.init()
+    logger.info("✅ База данных инициализирована")
+
+    # 4) middleware
+    dp.update.middleware(DatabaseMiddleware(db))
+
+    # 5) handlers
+    register_handlers(dp)
+
+    # 6) старт и поллинг
+    await on_startup(bot)
+    logger.info("✅ CGDV запущен успешно!")
+
     try:
-        # Инициализация базы данных
-        logger.info("🔄 Инициализация базы данных PostgreSQL + Redis...")
-        database_instance = await setup_database()
-        
-        # Тест БД
-        await database_instance.get_user(123456789)
-        logger.info("✅ База данных инициализирована и протестирована")
-        
-        # Инициализация бота с БД
-        logger.info("🔄 Инициализация CGDV...")
-        bot_instance, dp_instance = await setup_bot(database_instance)
-        
-        logger.info("✅ CGDV запущен успешно!")
-        
-        # Polling
-        await dp_instance.start_polling(bot_instance, skip_updates=True)
-        
-    except Exception as e:
-        logger.error(f"Критическая ошибка: {e}")
-        return False
-    
+        await dp.start_polling(bot)  # обычная остановка даст CancelledError внутри
+    except (asyncio.CancelledError, KeyboardInterrupt):
+        logger.info("🛑 Остановка поллинга по запросу пользователя/ОС")
     finally:
-        if database_instance:
-            await database_instance.close()
-            logger.info("✅ База данных закрыта")
+        await db.close()
+        await bot.session.close()
         logger.info("👋 CGDV остановлен")
-    
-    return True
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        logger.info("👋 Остановка по Ctrl+C")
+        # чтобы Windows/IDE не печатал лишний трейс при Ctrl+C
+        pass

@@ -40,25 +40,39 @@ async def show_empty_state(callback: CallbackQuery, message: str):
     await callback.answer()
 
 async def process_like_action(callback: CallbackQuery, target_user_id: int, action: str, current_index: int = 0, db=None):
-    """Универсальная обработка действий с лайками"""
+    if db is None:
+        raise RuntimeError("db is required")
+
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
     game = user['current_game']
 
     if action == "like":
         is_match = await db.add_like(user_id, target_user_id, game)
-        
+
         if is_match:
-            await handle_match_created(callback, target_user_id, game)
+            # было: await handle_match_created(callback, target_user_id, game)
+            await handle_match_created(callback, target_user_id, game, db)
         else:
             await notify_about_like(callback.bot, target_user_id, game)
-            await show_next_like_or_finish(callback, user_id, game)
-    
+            # было: await show_next_like_or_finish(callback, user_id, game)
+            await show_next_like_or_finish(callback, user_id, game, db)
+
     elif action == "skip":
         await db.skip_like(user_id, target_user_id, game)
-        await show_next_like_or_finish(callback, user_id, game)
+        # было: await show_next_like_or_finish(callback, user_id, game)
+        await show_next_like_or_finish(callback, user_id, game, db)
+
+
 
 async def handle_match_created(callback: CallbackQuery, target_user_id: int, game: str, db):
+    bot = callback.bot
+    user_id = callback.from_user.id
+
+    # уведомление текущему
+    await notify_about_match(bot, user_id, target_user_id, game, db)
+    # уведомление тому, кого лайкнули
+    await notify_about_match(bot, target_user_id, user_id, game, db)
     """Обработка создания матча"""
     target_profile = await db.get_user_profile(target_user_id, game)
     await notify_about_match(callback.bot, target_user_id, callback.from_user.id, game)
@@ -188,41 +202,29 @@ async def show_my_matches(callback: CallbackQuery, state: FSMContext, db):
 
 # ==================== ОБРАБОТЧИКИ ДЕЙСТВИЙ С ЛАЙКАМИ ====================
 
-@router.callback_query(F.data.startswith("loves_back_"))
-async def like_back(callback: CallbackQuery, db):
-    """Лайк в ответ"""
+@router.callback_query(F.data.startswith("like_back"))
+async def like_back(callback: CallbackQuery, state: FSMContext, db):
+    """
+    Возврат к предыдущей анкете и повторная попытка "лайк".
+    Ожидается, что в callback.data есть ID и текущий индекс (как у тебя было).
+    """
+    parts = callback.data.split("_")
     try:
-        parts = callback.data.split("_")
         target_user_id = int(parts[2])
-        current_index = int(parts[3]) if len(parts) > 3 else 0
-    except (ValueError, IndexError):
-        await callback.answer("❌ Ошибка", show_alert=True)
+    except Exception:
+        await callback.answer("❌ Ошибка данных", show_alert=True)
         return
 
-    user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    current_index = 0
+    if len(parts) > 3:
+        try:
+            current_index = int(parts[3])
+        except Exception:
+            current_index = 0
 
-    if not user or not user.get('current_game'):
-        await callback.answer("❌ Ошибка", show_alert=True)
-        return
-
-    # Проверяем бан
-    if await db.is_user_banned(user_id):
-        game_name = settings.GAMES.get(user['current_game'], user['current_game'])
-        ban_info = await db.get_user_ban(user_id)
-        
-        if ban_info:
-            ban_end = ban_info['expires_at'][:16]
-            text = f"🚫 Вы заблокированы в {game_name} до {ban_end}. Нельзя отправлять лайки."
-        else:
-            text = f"🚫 Вы заблокированы в {game_name}. Нельзя отправлять лайки."
-        
-        await safe_edit_message(callback, text, kb.back())
-        await callback.answer()
-        return
-
-    await process_like_action(callback, target_user_id, "like", current_index)
+    await process_like_action(callback, target_user_id, "like", current_index, db=db)
     await callback.answer()
+
 
 @router.callback_query(F.data.startswith("loves_skip_"))
 async def skip_like(callback: CallbackQuery, db):

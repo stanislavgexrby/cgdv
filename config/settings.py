@@ -1,8 +1,27 @@
 import os
 
+from dotenv import load_dotenv, find_dotenv
+
+load_dotenv(find_dotenv())
+
+def _parse_admin_ids(raw: str) -> set[int]:
+    ids = set()
+    for chunk in (raw or "").replace(" ", "").split(","):
+        if not chunk:
+            continue
+        try:
+            ids.add(int(chunk))
+        except ValueError:
+            pass
+    return ids
+
+ADMIN_IDS: set[int] = _parse_admin_ids(os.getenv("ADMIN_ID", ""))
+
+def is_admin(user_id: int) -> bool:
+    return int(user_id) in ADMIN_IDS
+
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
-# Безопасная обработка ADMIN_ID
 admin_id_str = os.getenv("ADMIN_ID", "0")
 try:
     if admin_id_str and admin_id_str.isdigit():

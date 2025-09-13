@@ -9,8 +9,13 @@ logger = logging.getLogger(__name__)
 
 # ==================== БАЗОВЫЕ ФУНКЦИИ ====================
 
-async def safe_send_notification(bot: Bot, user_id: int, text: str,
-                                photo_id: str = None, keyboard: InlineKeyboardMarkup = None) -> bool:
+async def safe_send_notification(
+    bot: Bot,
+    user_id: int,
+    text: str,
+    photo_id: Optional[str] = None,
+    keyboard: Optional[InlineKeyboardMarkup] = None
+) -> bool:
     """Безопасная отправка уведомления пользователю"""
     try:
         if photo_id:
@@ -33,11 +38,7 @@ async def safe_send_notification(bot: Bot, user_id: int, text: str,
 
 def create_navigation_keyboard(buttons: List[Tuple[str, str]]) -> InlineKeyboardMarkup:
     """Создание клавиатуры с кнопками навигации"""
-    keyboard_buttons = []
-    
-    for text, callback_data in buttons:
-        keyboard_buttons.append([InlineKeyboardButton(text=text, callback_data=callback_data)])
-    
+    keyboard_buttons = [[InlineKeyboardButton(text=t, callback_data=cb)] for t, cb in buttons]
     return InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
 def get_game_display_name(game: str) -> str:
@@ -46,83 +47,70 @@ def get_game_display_name(game: str) -> str:
 
 # ==================== УВЕДОМЛЕНИЯ О МАТЧАХ ====================
 
-async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: str) -> bool:
+async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: str, db) -> bool:
     """Уведомление о новом матче"""
     try:
-        from main import DatabaseManager
-        db = DatabaseManager.get_sync()
         match_profile = await db.get_user_profile(match_user_id, game)
         game_name = get_game_display_name(game)
-        
+
         if not match_profile:
             text = f"🎉 У вас новый матч в {game_name}!"
-            await safe_send_notification(bot, user_id, text)
-            return True
-        
-        # Формируем текст уведомления
+            return await safe_send_notification(bot, user_id, text)
+
+        # Текст + кнопки
         profile_text = texts.format_profile(match_profile, show_contact=True)
         text = f"🎉 У вас новый матч в {game_name}!\n\n{profile_text}"
-        
-        # Создаем клавиатуру
+
         current_user = await db.get_user(user_id)
-        buttons = []
-        
+        buttons: List[Tuple[str, str]] = []
         if current_user and current_user.get('current_game') != game:
             buttons.append((f"💖 Перейти к матчам в {game_name}", f"switch_and_matches_{game}"))
         else:
             buttons.append(("💖 Мои матчи", "my_matches"))
-        
         buttons.append(("🏠 Главное меню", "main_menu"))
+
         keyboard = create_navigation_keyboard(buttons)
-        
-        # Отправляем уведомление
-        success = await safe_send_notification(
-            bot, user_id, text, match_profile.get('photo_id'), keyboard
-        )
-        
+        success = await safe_send_notification(bot, user_id, text, match_profile.get('photo_id'), keyboard)
         if success:
             logger.info(f"📨 Уведомление о матче отправлено {user_id}")
-        
         return success
-        
+
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления о матче: {e}")
         return False
 
 # ==================== УВЕДОМЛЕНИЯ О ЛАЙКАХ ====================
 
-async def notify_about_like(bot: Bot, user_id: int, game: str = None) -> bool:
+async def notify_about_like(bot: Bot, user_id: int, game: Optional[str] = None, db=None) -> bool:
     """Уведомление о новом лайке"""
     try:
-        from main import DatabaseManager
-        db = DatabaseManager.get_sync()
+        if db is None:
+            raise RuntimeError("db is required for notify_about_like")
+
         # Определяем игру
         if not game:
             user = await db.get_user(user_id)
             game = user.get('current_game', 'dota') if user else 'dota'
-        
-        # Переключаем пользователя на нужную игру если требуется
+
+        # Переключаем пользователя на нужную игру, если требуется
         current_user = await db.get_user(user_id)
         if current_user and current_user.get('current_game') != game:
             await db.switch_game(user_id, game)
             logger.info(f"Переключили пользователя {user_id} на {game} из-за лайка")
-        
+
         game_name = get_game_display_name(game)
-        text = f"❤️ Кто-то лайкнул вашу анкету в {game_name}! Зайдите в 'Лайки' чтобы посмотреть."
-        
-        buttons = [
+        text = f"❤️ Кто-то лайкнул вашу анкету в {game_name}! Зайдите в «Лайки», чтобы посмотреть."
+
+        keyboard = create_navigation_keyboard([
             ("❤️ Посмотреть лайки", "my_likes"),
-            ("🏠 Главное меню", "main_menu")
-        ]
-        keyboard = create_navigation_keyboard(buttons)
-        
+            ("🏠 Главное меню", "main_menu"),
+        ])
+
         success = await safe_send_notification(bot, user_id, text, None, keyboard)
-        
         if success:
             logger.info(f"📨 Уведомление о лайке отправлено {user_id} для игры {game}")
-        
         return success
-        
+
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления о лайке: {e}")
         return False
@@ -139,20 +127,17 @@ async def notify_profile_deleted(bot: Bot, user_id: int, game: str) -> bool:
                 f"• Создать новую анкету\n"
                 f"• Соблюдать правила сообщества\n"
                 f"• Быть вежливыми с другими игроками")
-        
-        buttons = [
+
+        keyboard = create_navigation_keyboard([
             ("📝 Создать новую анкету", "create_profile"),
-            ("🏠 Главное меню", "main_menu")
-        ]
-        keyboard = create_navigation_keyboard(buttons)
-        
+            ("🏠 Главное меню", "main_menu"),
+        ])
+
         success = await safe_send_notification(bot, user_id, text, None, keyboard)
-        
         if success:
             logger.info(f"📨 Уведомление об удалении профиля отправлено {user_id} для игры {game}")
-        
         return success
-        
+
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления об удалении профиля: {e}")
         return False
@@ -166,14 +151,11 @@ async def notify_user_banned(bot: Bot, user_id: int, expires_at: str) -> bool:
                 f"• Искать игроков\n"
                 f"• Ставить лайки\n"
                 f"• Просматривать лайки и матчи")
-        
         success = await safe_send_notification(bot, user_id, text)
-        
         if success:
             logger.info(f"📨 Уведомление о бане отправлено {user_id}")
-        
         return success
-        
+
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления о бане: {e}")
         return False
@@ -182,17 +164,12 @@ async def notify_user_unbanned(bot: Bot, user_id: int) -> bool:
     """Уведомление о снятии бана"""
     try:
         text = "✅ Блокировка снята! Теперь вы можете снова пользоваться ботом."
-        
-        buttons = [("🏠 Главное меню", "main_menu")]
-        keyboard = create_navigation_keyboard(buttons)
-        
+        keyboard = create_navigation_keyboard([("🏠 Главное меню", "main_menu")])
         success = await safe_send_notification(bot, user_id, text, None, keyboard)
-        
         if success:
             logger.info(f"📨 Уведомление о снятии бана отправлено {user_id}")
-        
         return success
-        
+
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления о снятии бана: {e}")
         return False
@@ -203,20 +180,15 @@ async def notify_admin_new_report(bot: Bot, reporter_id: int, reported_user_id: 
     """Уведомление админа о новой жалобе"""
     if not settings.ADMIN_ID or settings.ADMIN_ID == 0:
         return False
-    
     try:
         game_name = get_game_display_name(game)
         text = (f"🚩 Новая жалоба!\n\n"
                 f"Пользователь {reporter_id} пожаловался на анкету {reported_user_id} "
                 f"в игре {game_name}")
-        
         success = await safe_send_notification(bot, settings.ADMIN_ID, text)
-        
         if success:
-            logger.info(f"📨 Уведомление админу о жалобе отправлено")
-        
+            logger.info("📨 Уведомление админу о жалобе отправлено")
         return success
-        
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления админу: {e}")
         return False

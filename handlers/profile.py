@@ -1,4 +1,7 @@
 import logging
+from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.context import FSMContext
+import keyboards.keyboards as kb
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -296,7 +299,8 @@ async def skip_info(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "skip_photo", ProfileForm.photo)
 async def skip_photo(callback: CallbackQuery, state: FSMContext, db):
-    await save_profile_flow_callback(callback, state, None, db)
+    await save_profile_flow(callback.message, state, None, db)
+    await callback.answer()
 
 @router.callback_query(F.data == "cancel")
 async def cancel_profile(callback: CallbackQuery, state: FSMContext):
@@ -307,18 +311,42 @@ async def cancel_profile(callback: CallbackQuery, state: FSMContext):
 
 # ==================== СОХРАНЕНИЕ ПРОФИЛЯ ====================
 
-async def save_profile_flow(message: Message, state: FSMContext, photo_id: str):
-    """Сохранение профиля через сообщение"""
+async def save_profile_flow(message: Message, state: FSMContext, photo_id: str | None, db):
+    """Финал создания анкеты: сохранение и показ результата."""
+    user_id = message.from_user.id
     data = await state.get_data()
-    success = await save_profile_universal(message.from_user.id, data, photo_id)
+
+    payload = {
+        'game': data.get('game'),
+        'name': data.get('name', '').strip(),
+        'nickname': data.get('nickname', '').strip(),
+        'age': data.get('age'),
+        'rating': data.get('rating'),
+        'region': data.get('region', 'eeu'),
+        'positions': data.get('positions', []) or data.get('positions_selected', []),
+        'additional_info': data.get('additional_info', '').strip(),
+    }
+
+    success = await save_profile_universal(
+        user_id=user_id,
+        data=payload,
+        photo_id=photo_id,
+        db=db
+    )
+    if not success:
+        await message.answer("❌ Не удалось сохранить анкету. Попробуйте ещё раз.")
+        return
+
     await state.clear()
 
-    if success:
-        game_name = settings.GAMES.get(data['game'], data['game'])
-        text = f"✅ Анкета для {game_name} создана! Теперь можете искать сокомандников."
-        await message.answer(text, reply_markup=kb.back())
+    profile = await db.get_user_profile(user_id, payload['game'])
+    game_name = settings.GAMES.get(payload['game'], payload['game'])
+    text = f"✅ Анкета для {game_name} создана!\n\n" + texts.format_profile(profile, show_contact=True)
+
+    if profile and profile.get('photo_id'):
+        await message.answer_photo(photo=profile['photo_id'], caption=text, reply_markup=kb.back())
     else:
-        await message.answer("❌ Ошибка сохранения", reply_markup=kb.back())
+        await message.answer(text, reply_markup=kb.back())
 
 async def save_profile_flow_callback(callback: CallbackQuery, state: FSMContext, photo_id: str):
     """Сохранение профиля через callback"""

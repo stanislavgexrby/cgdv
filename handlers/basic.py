@@ -1,4 +1,7 @@
 import logging
+import keyboards.keyboards as kb
+import config.settings as settings
+from functools import wraps
 from typing import Optional
 from functools import wraps
 from aiogram import Router, F, Bot
@@ -22,42 +25,101 @@ __all__ = ['safe_edit_message', 'router', 'SearchForm']
 
 # ==================== ДЕКОРАТОРЫ ДЛЯ ПРОВЕРОК ====================
 
+def _detect_db_backend(db):
+    """
+    Возвращает (backend_name, db_path_or_None).
+    Для PostgreSQL пути нет, для SQLite может быть db.db_path.
+    """
+    # Простейшая эвристика — у Postgres-пула обычно есть атрибут pool/execute/fetch
+    if hasattr(db, "pool"):
+        return "PostgreSQL", None
+    # Совместимость с старым SQLite-классом
+    if hasattr(db, "db_path"):
+        return "SQLite", getattr(db, "db_path", None)
+    return "Unknown", None
+
+async def _fetch_reports_for_admin(db, limit: int = 100):
+    """
+    Универсальная загрузка жалоб из БД без знания точного имени метода.
+    Пытается вызвать любой из распространённых названий, чтобы не падать.
+    Возвращает list (может быть пустым).
+    """
+    # кандидаты: добавь сюда свои реальные имена, если они есть
+    candidate_methods = [
+        ("get_reports", {"limit": limit}),
+        ("get_all_reports", {"limit": limit}),
+        ("list_reports", {"limit": limit}),
+        ("fetch_reports", {"limit": limit}),
+        ("admin_get_reports", {"limit": limit}),
+        ("get_reports", {}),            # без limit
+        ("get_all_reports", {}),
+        ("list_reports", {}),
+        ("fetch_reports", {}),
+        ("admin_get_reports", {}),
+    ]
+
+    for name, kwargs in candidate_methods:
+        if hasattr(db, name):
+            meth = getattr(db, name)
+            try:
+                res = await meth(**kwargs) if kwargs else await meth()
+                if res is None:
+                    res = []
+                return res
+            except TypeError:
+                # сигнатура другая — пробуем без аргументов
+                try:
+                    res = await meth()
+                    if res is None:
+                        res = []
+                    return res
+                except Exception as e:
+                    logger.warning(f"Метод {name} есть, но не вызвался: {e}")
+            except Exception as e:
+                logger.warning(f"Не удалось получить жалобы через {name}: {e}")
+
+    logger.warning("В Database нет подходящего метода для получения жалоб "
+                   "(например, get_reports/list_reports/get_all_reports). "
+                   "Покажем пустой список.")
+    return []
+
 def check_ban_and_profile(require_profile=True):
     """Декоратор для проверки бана и наличия профиля"""
     def decorator(func):
         @wraps(func)
-        async def wrapper(callback: CallbackQuery, db, *args, **kwargs):  # Добавлен параметр db
+        async def wrapper(callback: CallbackQuery, *args, db=None, **kwargs):
+            if db is None:
+                raise RuntimeError("Database instance not provided. Ensure DatabaseMiddleware injects 'db'.")
+
             user_id = callback.from_user.id
             user = await db.get_user(user_id)
-
             if not user or not user.get('current_game'):
                 await callback.answer("❌ Ошибка", show_alert=True)
                 return
 
             game = user['current_game']
-            
-            # Проверка бана
+
+            # Бан
             if await db.is_user_banned(user_id):
                 ban_info = await db.get_user_ban(user_id)
                 game_name = settings.GAMES.get(game, game)
-                
                 if ban_info:
                     ban_end = ban_info['expires_at'][:16]
                     text = f"🚫 Вы заблокированы в {game_name} до {ban_end}"
                 else:
                     text = f"🚫 Вы заблокированы в {game_name}"
-                
                 await safe_edit_message(callback, text, kb.back())
                 await callback.answer()
                 return
 
-            # Проверка профиля (если требуется)
+            # Профиль (если требуется)
             if require_profile and not await db.has_profile(user_id, game):
                 game_name = settings.GAMES.get(game, game)
                 await callback.answer(f"❌ Сначала создайте анкету для {game_name}", show_alert=True)
                 return
 
-            return await func(callback, db, *args, **kwargs)  # Передаем db дальше
+            # ВАЖНО: db передаём как именованный параметр
+            return await func(callback, *args, db=db, **kwargs)
         return wrapper
     return decorator
 
@@ -426,58 +488,111 @@ async def back_to_search_handler(callback: CallbackQuery, state: FSMContext, db)
 @router.callback_query(F.data == "admin_stats")
 @admin_only
 async def show_admin_stats(callback: CallbackQuery, db):
-    try:
-        import sqlite3
-        with sqlite3.connect(db.db_path) as conn:
-            stats = {}
-            
-            # Получаем основную статистику
-            queries = [
-                ("total_users", "SELECT COUNT(*) FROM users"),
-                ("total_profiles", "SELECT COUNT(*) FROM profiles"),
-                ("total_matches", "SELECT COUNT(*) FROM matches"),
-                ("pending_reports", "SELECT COUNT(*) FROM reports WHERE status = 'pending'")
-            ]
-            
-            for key, query in queries:
-                cursor = conn.execute(query)
-                stats[key] = cursor.fetchone()[0]
+    lines = ["📊 Статистика бота", "", "🗄 База данных: PostgreSQL"]
 
-            # Профили по играм
-            cursor = conn.execute("SELECT game, COUNT(*) FROM profiles GROUP BY game")
-            profiles_by_game = cursor.fetchall()
+    # Redis (если есть в db)
+    if hasattr(db, "redis"):
+        try:
+            pong = await db.redis.ping()
+            lines.append(f"⚡ Redis: {'OK' if pong else '—'}")
+        except Exception:
+            lines.append("⚡ Redis: —")
 
-        text = f"""📊 Статистика бота
+    # 1) Если у твоего класса есть готовый метод get_stats() — используем его
+    stats_dict = None
+    if hasattr(db, "get_stats"):
+        try:
+            value = await db.get_stats()
+            if isinstance(value, dict):
+                stats_dict = value
+        except Exception as e:
+            lines.append(f"ℹ️ Не удалось получить расширенную статистику: {e}")
 
-👥 Всего пользователей: {stats['total_users']}
-📄 Всего анкет: {stats['total_profiles']}"""
+    profiles_by_game = []
 
-        for game, count in profiles_by_game:
+    # 2) Фолбэк: собираем агрегаты напрямую через asyncpg pool
+    if stats_dict is None:
+        stats_dict = {}
+        if not hasattr(db, "pool") or db.pool is None:
+            lines.append("⚠️ Нет подключения к PostgreSQL (db.pool отсутствует).")
+            await safe_edit_message(callback, "\n".join(lines), kb.admin_main_menu())
+            await callback.answer()
+            return
+
+        try:
+            async with db.pool.acquire() as conn:
+                async def fetchval(sql: str):
+                    try:
+                        return await conn.fetchval(sql)
+                    except Exception:
+                        return None
+
+                # Переименуй таблицы/поля под свою схему при необходимости —
+                # если таблицы не найдены, метрика просто будет пропущена.
+                totals = [
+                    ("Пользователи",      "SELECT COUNT(*) FROM users"),
+                    ("Анкеты",            "SELECT COUNT(*) FROM profiles"),
+                    ("Матчи",             "SELECT COUNT(*) FROM matches"),
+                    ("Лайки",             "SELECT COUNT(*) FROM likes"),
+                    ("Жалобы (всего)",    "SELECT COUNT(*) FROM reports"),
+                    ("Ожидающих жалоб",   "SELECT COUNT(*) FROM reports WHERE status = 'pending'"),
+                    ("Заблокированы",     "SELECT COUNT(*) FROM bans WHERE expires_at > NOW()"),
+                ]
+                for key, sql in totals:
+                    v = await fetchval(sql)
+                    if v is not None:
+                        stats_dict[key] = v
+
+                # Профили по играм
+                try:
+                    rows = await conn.fetch("SELECT game, COUNT(*) AS cnt FROM profiles GROUP BY game")
+                    profiles_by_game = [(r["game"], r["cnt"]) for r in rows]
+                except Exception:
+                    profiles_by_game = []
+
+        except Exception as e:
+            lines.append(f"ℹ️ Не удалось собрать статистику PostgreSQL: {e}")
+
+    # 3) Форматируем вывод
+    order = [
+        "Пользователи",
+        "Анкеты",
+        "Матчи",
+        "Лайки",
+        "Жалобы (всего)",
+        "Ожидающих жалоб",
+        "Заблокированы",
+    ]
+    any_printed = False
+    for key in order:
+        if key in stats_dict and stats_dict[key] is not None:
+            lines.append(f"• {key}: {stats_dict[key]}")
+            any_printed = True
+
+    if profiles_by_game:
+        lines.append("• Анкеты по играм:")
+        for game, cnt in profiles_by_game:
             game_name = settings.GAMES.get(game, game)
-            text += f"\n  - {game_name}: {count}"
+            lines.append(f"    - {game_name}: {cnt}")
 
-        text += f"\n💖 Матчей: {stats['total_matches']}"
-        text += f"\n🚩 Ожидающих жалоб: {stats['pending_reports']}"
+    if not any_printed and not profiles_by_game:
+        lines.append("ℹ️ Нет данных для отображения. "
+                     "Добавь метод Database.get_stats() или проверь названия таблиц.")
 
-        await safe_edit_message(callback, text, kb.admin_main_menu())
-        await callback.answer()
-
-    except Exception as e:
-        await callback.message.answer(f"Ошибка получения статистики: {e}")
-        await callback.answer()
+    text = "\n".join(lines)
+    await safe_edit_message(callback, text, kb.admin_main_menu())
+    await callback.answer()
 
 @router.callback_query(F.data == "admin_reports")
 @admin_only
 async def show_admin_reports(callback: CallbackQuery, db):
-    reports = await db.get_pending_reports()
-
+    reports = await _fetch_reports_for_admin(db, limit=100)
+    # если совсем пусто — покажем понятное сообщение, а не молчим
     if not reports:
-        text = "🚩 Нет ожидающих жалоб"
-        await safe_edit_message(callback, text, kb.admin_main_menu())
+        await callback.message.edit_text("🚩 Жалоб пока нет или метод получения жалоб не реализован.")
         await callback.answer()
         return
-
-    await show_admin_report(callback, reports, 0)
+    await show_admin_report(callback, reports, 0, db=db)  # ВАЖНО: db=db
 
 @router.callback_query(F.data == "admin_bans")
 @admin_only
