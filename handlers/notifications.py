@@ -57,7 +57,6 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: s
             text = f"🎉 У вас новый матч в {game_name}!"
             return await safe_send_notification(bot, user_id, text)
 
-        # Текст + кнопки
         profile_text = texts.format_profile(match_profile, show_contact=True)
         text = f"🎉 У вас новый матч в {game_name}!\n\n{profile_text}"
 
@@ -81,22 +80,16 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: s
 
 # ==================== УВЕДОМЛЕНИЯ О ЛАЙКАХ ====================
 
-async def notify_about_like(bot: Bot, user_id: int, game: Optional[str] = None, db=None) -> bool:
+async def notify_about_like(bot: Bot, user_id: int, game: str, db=None) -> bool:
     """Уведомление о новом лайке"""
     try:
         if db is None:
-            raise RuntimeError("db is required for notify_about_like")
+            logger.error("db parameter is required for notify_about_like")
+            return False
 
-        # Определяем игру
         if not game:
             user = await db.get_user(user_id)
             game = user.get('current_game', 'dota') if user else 'dota'
-
-        # Переключаем пользователя на нужную игру, если требуется
-        current_user = await db.get_user(user_id)
-        if current_user and current_user.get('current_game') != game:
-            await db.switch_game(user_id, game)
-            logger.info(f"Переключили пользователя {user_id} на {game} из-за лайка")
 
         game_name = get_game_display_name(game)
         text = f"❤️ Кто-то лайкнул вашу анкету в {game_name}! Зайдите в «Лайки», чтобы посмотреть."

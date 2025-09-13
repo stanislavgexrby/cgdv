@@ -51,31 +51,22 @@ async def process_like_action(callback: CallbackQuery, target_user_id: int, acti
         is_match = await db.add_like(user_id, target_user_id, game)
 
         if is_match:
-            # было: await handle_match_created(callback, target_user_id, game)
             await handle_match_created(callback, target_user_id, game, db)
         else:
-            await notify_about_like(callback.bot, target_user_id, game)
-            # было: await show_next_like_or_finish(callback, user_id, game)
             await show_next_like_or_finish(callback, user_id, game, db)
 
     elif action == "skip":
         await db.skip_like(user_id, target_user_id, game)
-        # было: await show_next_like_or_finish(callback, user_id, game)
         await show_next_like_or_finish(callback, user_id, game, db)
-
-
 
 async def handle_match_created(callback: CallbackQuery, target_user_id: int, game: str, db):
     bot = callback.bot
     user_id = callback.from_user.id
 
-    # уведомление текущему
     await notify_about_match(bot, user_id, target_user_id, game, db)
-    # уведомление тому, кого лайкнули
     await notify_about_match(bot, target_user_id, user_id, game, db)
     """Обработка создания матча"""
     target_profile = await db.get_user_profile(target_user_id, game)
-    await notify_about_match(callback.bot, target_user_id, callback.from_user.id, game)
 
     if target_profile:
         match_text = texts.format_profile(target_profile, show_contact=True)
@@ -176,7 +167,6 @@ async def show_my_matches(callback: CallbackQuery, state: FSMContext, db):
         await show_empty_state(callback, text)
         return
 
-    # Формируем список матчей
     text = f"💖 Ваши матчи в {game_name} ({len(matches)}):\n\n"
     for i, match in enumerate(matches, 1):
         name = match['name']
@@ -185,7 +175,6 @@ async def show_my_matches(callback: CallbackQuery, state: FSMContext, db):
 
     text += "\n💬 Вы можете связаться с любым из них!"
 
-    # Создаем кнопки для контакта (максимум 5)
     buttons = []
     for match in matches[:5]:
         name = match['name'][:15] + "..." if len(match['name']) > 15 else match['name']
@@ -202,12 +191,9 @@ async def show_my_matches(callback: CallbackQuery, state: FSMContext, db):
 
 # ==================== ОБРАБОТЧИКИ ДЕЙСТВИЙ С ЛАЙКАМИ ====================
 
-@router.callback_query(F.data.startswith("like_back"))
+@router.callback_query(F.data.startswith("loves_back"))
 async def like_back(callback: CallbackQuery, state: FSMContext, db):
-    """
-    Возврат к предыдущей анкете и повторная попытка "лайк".
-    Ожидается, что в callback.data есть ID и текущий индекс (как у тебя было).
-    """
+    """Возврат к предыдущей анкете и повторная попытка лайк"""
     parts = callback.data.split("_")
     try:
         target_user_id = int(parts[2])
@@ -245,7 +231,6 @@ async def skip_like(callback: CallbackQuery, db):
         await callback.answer()
         return
 
-    # Проверяем бан
     if await db.is_user_banned(user_id):
         game_name = settings.GAMES.get(user['current_game'], user['current_game'])
         ban_info = await db.get_user_ban(user_id)
@@ -260,7 +245,7 @@ async def skip_like(callback: CallbackQuery, db):
         await callback.answer()
         return
 
-    await process_like_action(callback, target_user_id, "skip", current_index)
+    await process_like_action(callback, target_user_id, "skip", current_index, db=db)
     await callback.answer()
 
 # ==================== ПОКАЗ КОНТАКТОВ ====================
@@ -283,7 +268,6 @@ async def show_contact(callback: CallbackQuery, db):
 
     game = user['current_game']
 
-    # Проверяем бан
     if await db.is_user_banned(user_id):
         game_name = settings.GAMES.get(game, game)
         ban_info = await db.get_user_ban(user_id)
@@ -295,7 +279,6 @@ async def show_contact(callback: CallbackQuery, db):
             await callback.answer(f"🚫 Вы заблокированы в {game_name}", show_alert=True)
         return
 
-    # Получаем профиль
     target_profile = await db.get_user_profile(target_user_id, game)
 
     if not target_profile:

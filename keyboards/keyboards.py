@@ -314,7 +314,6 @@ def admin_report_actions_with_nav(report_id: int, current_index: int, total_coun
         [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"admin_dismiss_{report_id}")]
     ]
 
-    # Навигация, если жалоб больше одной
     if total_count > 1:
         nav_buttons = []
         if current_index > 0:
@@ -340,7 +339,6 @@ def admin_ban_actions_with_nav(user_id: int, current_index: int, total_count: in
         [InlineKeyboardButton(text="✅ Снять бан", callback_data=f"admin_unban_{user_id}")]
     ]
 
-    # Навигация, если банов больше одного
     if total_count > 1:
         nav_buttons = []
         if current_index > 0:

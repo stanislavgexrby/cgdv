@@ -20,7 +20,6 @@ async def update_filter_display(callback: CallbackQuery, state: FSMContext, mess
     game = data.get('game', 'dota')
     game_name = settings.GAMES.get(game, game)
 
-    # Формируем текст фильтров
     filters_text = []
     
     rating_filter = data.get('rating_filter')
@@ -83,9 +82,8 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
         is_match = await db.add_like(user_id, target_user_id, game)
         
         if is_match:
-            # Обработка матча
             target_profile = await db.get_user_profile(target_user_id, game)
-            await notify_about_match(callback.bot, target_user_id, user_id, game)
+            await notify_about_match(callback.bot, target_user_id, user_id, game, db)
 
             if target_profile:
                 match_text = texts.format_profile(target_profile, show_contact=True)
@@ -105,7 +103,6 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
             await safe_edit_message(callback, text, keyboard)
             logger.info(f"Матч: {user_id} <-> {target_user_id}")
         else:
-            # Обычный лайк
             await safe_edit_message(
                 callback, 
                 texts.LIKE_SENT,
@@ -114,7 +111,7 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
                     [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
                 ])
             )
-            await notify_about_like(callback.bot, target_user_id, game)
+            await notify_about_like(callback.bot, target_user_id, game, db)
             logger.info(f"Лайк: {user_id} -> {target_user_id}")
 
     elif action == "skip":
@@ -135,7 +132,6 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
             logger.info(f"Жалоба добавлена: {user_id} пожаловался на {target_user_id}")
             await callback.answer("✅ Жалоба отправлена")
 
-            # Уведомляем админа
             if settings.ADMIN_ID and settings.ADMIN_ID != 0:
                 try:
                     await callback.bot.send_message(
@@ -154,7 +150,6 @@ async def show_current_profile(callback: CallbackQuery, state: FSMContext):
     index = data.get('current_index', 0)
 
     if index >= len(profiles):
-        # Закончились профили
         await state.clear()
         game_name = settings.GAMES.get(data.get('game', 'dota'), data.get('game', 'dota'))
         text = f"😔 Больше анкет в {game_name} не найдено. Попробуйте изменить фильтры или зайти позже."
@@ -247,7 +242,6 @@ async def save_rating_filter(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     game = data['game']
     
-    # Проверяем валидность рейтинга
     if rating not in settings.RATINGS.get(game, {}):
         return
 
@@ -271,7 +265,6 @@ async def save_position_filter(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     game = data['game']
     
-    # Проверяем валидность позиции
     if position not in settings.POSITIONS.get(game, {}):
         return
 
@@ -293,7 +286,6 @@ async def save_region_filter(callback: CallbackQuery, state: FSMContext):
         
     region = parts[2]
     
-    # Проверяем валидность региона
     if region not in settings.REGIONS:
         return
 

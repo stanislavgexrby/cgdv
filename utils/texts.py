@@ -1,6 +1,9 @@
 import config.settings as settings
 
 def format_profile(user: dict, show_contact: bool = False) -> str:
+    if not user:
+        return "❌ Профиль не найден"
+
     game = user.get('current_game') or user.get('game', 'dota')
 
     text = f"👤 {user['name']}\n"

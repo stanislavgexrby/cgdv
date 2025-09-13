@@ -161,18 +161,28 @@ class Database:
                 )
             ''')
 
-            # Создаем индексы
             indexes = [
-                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_game ON profiles(game)",
-                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_likes_to_game ON likes(to_user, game)",
-                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_matches_users ON matches(user1, user2, game)"
-            ]
-            
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_game ON profiles(game)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_telegram_id_game ON profiles(telegram_id, game)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_likes_to_game ON likes(to_user, game)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_likes_from_game ON likes(from_user, game)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_likes_created_at ON likes(created_at DESC)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_matches_users ON matches(user1, user2, game)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_matches_user1_game ON matches(user1, game)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_matches_user2_game ON matches(user2, game)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_matches_created_at ON matches(created_at DESC)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_reports_status ON reports(status)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_reports_reported_user_game ON reports(reported_user_id, game)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_bans_user_expires ON bans(user_id, expires_at)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_search_skipped_user_game ON search_skipped(user_id, game)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_skipped_likes_user_game ON skipped_likes(user_id, game)"
+                    ]
+
             for index_sql in indexes:
                 try:
                     await conn.execute(index_sql)
-                except:
-                    pass
+                except Exception as e:
+                    logger.warning(f"Не удалось создать индекс: {index_sql}, ошибка: {e}")
 
     def _format_profile(self, row) -> Dict:
         """Форматирование профиля"""
@@ -305,20 +315,21 @@ class Database:
                 return True
 
     # === ПОИСК ===
-    
+
     async def get_potential_matches(self, user_id: int, game: str,
                             rating_filter: str = None,
                             position_filter: str = None,
                             region_filter: str = None,
                             limit: int = 10) -> List[Dict]:
-        
+
         # Проверяем кэш
         filters_hash = self._generate_filters_hash(rating_filter, position_filter, region_filter)
         cache_key = f"search:{user_id}:{game}:{filters_hash}"
         cached = await self._get_cache(cache_key)
         if cached:
             return cached
-        
+
+        # ИСПРАВЛЕН: убран DISTINCT для совместимости с ORDER BY RANDOM()
         query = '''
             SELECT p.*, u.username
             FROM profiles p
@@ -352,7 +363,7 @@ class Database:
         async with self._pg_pool.acquire() as conn:
             rows = await conn.fetch(query, *params)
             results = [self._format_profile(row) for row in rows]
-            
+
             # Кэшируем результат на 5 минут
             await self._set_cache(cache_key, results, 300)
             return results

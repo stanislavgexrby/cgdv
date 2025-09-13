@@ -40,7 +40,6 @@ async def update_profile_field(callback: CallbackQuery, field: str, value, state
         await callback.answer("❌ Анкета не найдена", show_alert=True)
         return False
 
-    # Подготавливаем данные для обновления
     update_data = {
         'telegram_id': user_id,
         'game': game,
@@ -54,7 +53,6 @@ async def update_profile_field(callback: CallbackQuery, field: str, value, state
         'photo_id': profile.get('photo_id')
     }
     
-    # Обновляем нужное поле
     update_data[field] = value
     
     success = await db.update_user_profile(**update_data)
@@ -163,12 +161,10 @@ async def recreate_profile(callback: CallbackQuery, state: FSMContext, db):
 
     game = user['current_game']
     
-    # Если профиль существует, удаляем его
     if await db.has_profile(user_id, game):
         await db.delete_profile(user_id, game)
         logger.info(f"Профиль удален для пересоздания: {user_id} в {game}")
     
-    # Переходим к созданию нового профиля
     game_name = settings.GAMES.get(game, game)
     
     await state.clear()
@@ -178,13 +174,11 @@ async def recreate_profile(callback: CallbackQuery, state: FSMContext, db):
         positions_selected=[]
     )
     
-    # Импортируем состояние из handlers.profile
     from handlers.profile import ProfileForm
     await state.set_state(ProfileForm.name)
     
     text = f"📝 Создание новой анкеты для {game_name}\n\n{texts.QUESTIONS['name']}"
     
-    # Для перехода от редактирования к созданию всегда создаем новое сообщение
     await callback.message.delete()
     await callback.bot.send_message(
         chat_id=callback.message.chat.id,
@@ -381,7 +375,6 @@ async def process_edit_photo(message: Message, state: FSMContext, db):
     """Пользователь прислал новое фото — обновляем поле photo_id."""
     photo_id = message.photo[-1].file_id
 
-    # Фейковый callback, чтобы переиспользовать update_profile_field (он ждёт callback-подобный объект)
     class FakeCallback:
         def __init__(self, user_id):
             self.from_user = type('User', (), {'id': user_id})()
@@ -390,7 +383,6 @@ async def process_edit_photo(message: Message, state: FSMContext, db):
 
     fake_callback = FakeCallback(message.from_user.id)
 
-    # ВАЖНО: прокинуть db в update_profile_field
     success = await update_profile_field(fake_callback, 'photo_id', photo_id, state, db=db)
 
     if success:
@@ -398,7 +390,6 @@ async def process_edit_photo(message: Message, state: FSMContext, db):
     else:
         await message.answer("❌ Ошибка обновления фото", reply_markup=kb.back_to_editing())
 
-# Обработчики неправильного формата
 @router.message(EditProfileForm.edit_name, ~F.text)
 async def wrong_edit_name_format(message: Message):
     await message.answer("❌ Отправьте текстовое сообщение с именем и фамилией")
@@ -476,7 +467,6 @@ async def edit_positions_done(callback: CallbackQuery, state: FSMContext, db):
         await safe_edit_message(callback, "ℹ️ Позиции остались прежними", kb.back_to_editing())
         return
 
-    # КРИТИЧЕСКОЕ: прокинуть db в update_profile_field
     await update_profile_field(callback, 'positions', selected, state, db=db)
     await callback.answer()
 
@@ -561,7 +551,6 @@ async def process_edit_photo_message(message: Message, state: FSMContext, db):
     """Пользователь прислал новое фото — обновляем поле photo_id."""
     photo_id = message.photo[-1].file_id
 
-    # Фейковый callback, чтобы переиспользовать update_profile_field (он ждёт callback-like объект)
     class FakeCallback:
         def __init__(self, user_id):
             self.from_user = type('User', (), {'id': user_id})()
