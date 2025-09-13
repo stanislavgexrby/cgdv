@@ -4,7 +4,6 @@ from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 import utils.texts as texts
 import config.settings as settings
-from main import get_database
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +49,8 @@ def get_game_display_name(game: str) -> str:
 async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: str) -> bool:
     """Уведомление о новом матче"""
     try:
-        db = get_database()
+        from main import DatabaseManager
+        db = DatabaseManager.get_sync()
         match_profile = await db.get_user_profile(match_user_id, game)
         game_name = get_game_display_name(game)
         
@@ -94,7 +94,8 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: s
 async def notify_about_like(bot: Bot, user_id: int, game: str = None) -> bool:
     """Уведомление о новом лайке"""
     try:
-        db = get_database()
+        from main import DatabaseManager
+        db = DatabaseManager.get_sync()
         # Определяем игру
         if not game:
             user = await db.get_user(user_id)

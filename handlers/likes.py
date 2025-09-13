@@ -6,7 +6,6 @@ from aiogram.fsm.context import FSMContext
 import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
-from main import get_database
 from handlers.basic import check_ban_and_profile, safe_edit_message
 from handlers.notifications import notify_about_match, notify_about_like
 
@@ -40,9 +39,8 @@ async def show_empty_state(callback: CallbackQuery, message: str):
     await safe_edit_message(callback, message, kb.back())
     await callback.answer()
 
-async def process_like_action(callback: CallbackQuery, target_user_id: int, action: str, current_index: int = 0):
+async def process_like_action(callback: CallbackQuery, target_user_id: int, action: str, current_index: int = 0, db=None):
     """Универсальная обработка действий с лайками"""
-    db = get_database()
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
     game = user['current_game']
@@ -60,9 +58,8 @@ async def process_like_action(callback: CallbackQuery, target_user_id: int, acti
         await db.skip_like(user_id, target_user_id, game)
         await show_next_like_or_finish(callback, user_id, game)
 
-async def handle_match_created(callback: CallbackQuery, target_user_id: int, game: str):
+async def handle_match_created(callback: CallbackQuery, target_user_id: int, game: str, db):
     """Обработка создания матча"""
-    db = get_database()
     target_profile = await db.get_user_profile(target_user_id, game)
     await notify_about_match(callback.bot, target_user_id, callback.from_user.id, game)
 
@@ -84,9 +81,8 @@ async def handle_match_created(callback: CallbackQuery, target_user_id: int, gam
     await safe_edit_message(callback, text, keyboard)
     logger.info(f"Взаимный лайк: {callback.from_user.id} <-> {target_user_id}")
 
-async def show_next_like_or_finish(callback: CallbackQuery, user_id: int, game: str):
+async def show_next_like_or_finish(callback: CallbackQuery, user_id: int, game: str, db):
     """Показ следующего лайка или завершение просмотра"""
-    db = get_database()
     likes = await db.get_likes_for_user(user_id, game)
     
     if likes:
@@ -121,11 +117,10 @@ async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
 
 @router.callback_query(F.data == "my_likes")
 @check_ban_and_profile()
-async def show_my_likes(callback: CallbackQuery, state: FSMContext):
+async def show_my_likes(callback: CallbackQuery, state: FSMContext, db):
     """Показ входящих лайков"""
     await state.clear()
 
-    db = get_database()
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
     game = user['current_game']
@@ -147,11 +142,10 @@ async def show_my_likes(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "my_matches")
 @check_ban_and_profile()
-async def show_my_matches(callback: CallbackQuery, state: FSMContext):
+async def show_my_matches(callback: CallbackQuery, state: FSMContext, db):
     """Показ матчей пользователя"""
     await state.clear()
 
-    db = get_database()
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
     game = user['current_game']
@@ -195,7 +189,7 @@ async def show_my_matches(callback: CallbackQuery, state: FSMContext):
 # ==================== ОБРАБОТЧИКИ ДЕЙСТВИЙ С ЛАЙКАМИ ====================
 
 @router.callback_query(F.data.startswith("loves_back_"))
-async def like_back(callback: CallbackQuery):
+async def like_back(callback: CallbackQuery, db):
     """Лайк в ответ"""
     try:
         parts = callback.data.split("_")
@@ -205,8 +199,6 @@ async def like_back(callback: CallbackQuery):
         await callback.answer("❌ Ошибка", show_alert=True)
         return
 
-    # Проверяем состояние пользователя
-    db = get_database()
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
 
@@ -233,7 +225,7 @@ async def like_back(callback: CallbackQuery):
     await callback.answer()
 
 @router.callback_query(F.data.startswith("loves_skip_"))
-async def skip_like(callback: CallbackQuery):
+async def skip_like(callback: CallbackQuery, db):
     """Пропуск лайка"""
     try:
         parts = callback.data.split("_")
@@ -243,8 +235,6 @@ async def skip_like(callback: CallbackQuery):
         await callback.answer("❌ Ошибка", show_alert=True)
         return
 
-    # Проверяем состояние пользователя
-    db = get_database()
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
 
@@ -274,7 +264,7 @@ async def skip_like(callback: CallbackQuery):
 # ==================== ПОКАЗ КОНТАКТОВ ====================
 
 @router.callback_query(F.data.startswith("contact_"))
-async def show_contact(callback: CallbackQuery):
+async def show_contact(callback: CallbackQuery, db):
     """Показ контактной информации матча"""
     try:
         target_user_id = int(callback.data.split("_")[1])
@@ -282,7 +272,6 @@ async def show_contact(callback: CallbackQuery):
         await callback.answer("❌ Ошибка", show_alert=True)
         return
 
-    db = get_database()
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
 

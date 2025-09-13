@@ -7,7 +7,6 @@ from aiogram.fsm.state import State, StatesGroup
 import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
-from main import get_database
 from handlers.basic import check_ban_and_profile, safe_edit_message
 
 logger = logging.getLogger(__name__)
@@ -51,9 +50,8 @@ def validate_profile_input(field: str, value, game: str = None) -> tuple[bool, s
     
     return True, ""
 
-async def save_profile_universal(user_id: int, data: dict, photo_id: str = None) -> bool:
+async def save_profile_universal(user_id: int, data: dict, photo_id: str = None, db = None) -> bool:
     """Универсальная функция сохранения профиля"""
-    db = get_database()
     success = await db.update_user_profile(
         telegram_id=user_id,
         game=data['game'],
@@ -76,9 +74,8 @@ async def save_profile_universal(user_id: int, data: dict, photo_id: str = None)
 
 @router.callback_query(F.data == "create_profile")
 @check_ban_and_profile(require_profile=False)
-async def start_create_profile(callback: CallbackQuery, state: FSMContext):
+async def start_create_profile(callback: CallbackQuery, state: FSMContext, db):
     """Начало создания профиля"""
-    db = get_database()
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
 
@@ -196,10 +193,9 @@ async def wrong_info_format(message: Message):
     await message.answer("❌ Отправьте текстовое сообщение с описанием или нажмите 'Пропустить'")
 
 @router.message(ProfileForm.photo, F.photo)
-async def process_photo(message: Message, state: FSMContext):
-    """Обработка фото"""
+async def process_photo(message: Message, state: FSMContext, db):
     photo_id = message.photo[-1].file_id
-    await save_profile_flow(message, state, photo_id)
+    await save_profile_flow(message, state, photo_id, db)
 
 @router.message(ProfileForm.photo)
 async def wrong_photo_format(message: Message):
@@ -299,9 +295,8 @@ async def skip_info(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 @router.callback_query(F.data == "skip_photo", ProfileForm.photo)
-async def skip_photo(callback: CallbackQuery, state: FSMContext):
-    """Пропуск фото"""
-    await save_profile_flow_callback(callback, state, None)
+async def skip_photo(callback: CallbackQuery, state: FSMContext, db):
+    await save_profile_flow_callback(callback, state, None, db)
 
 @router.callback_query(F.data == "cancel")
 async def cancel_profile(callback: CallbackQuery, state: FSMContext):

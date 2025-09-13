@@ -6,7 +6,6 @@ from aiogram.fsm.context import FSMContext
 import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
-from main import get_database
 from handlers.basic import check_ban_and_profile, safe_edit_message, SearchForm
 from handlers.notifications import notify_about_match, notify_about_like
 
@@ -74,12 +73,11 @@ async def show_profile_in_search(callback: CallbackQuery, profile: dict, text: s
         logger.error(f"Ошибка показа профиля в поиске: {e}")
         await callback.answer("❌ Ошибка загрузки")
 
-async def handle_search_action(callback: CallbackQuery, action: str, target_user_id: int, state: FSMContext):
+async def handle_search_action(callback: CallbackQuery, action: str, target_user_id: int, state: FSMContext, db):
     """Универсальная обработка действий в поиске"""
     user_id = callback.from_user.id
     data = await state.get_data()
     game = data['game']
-    db = get_database()
 
     if action == "like":
         is_match = await db.add_like(user_id, target_user_id, game)
@@ -190,9 +188,8 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "search")
 @check_ban_and_profile()
-async def start_search(callback: CallbackQuery, state: FSMContext):
+async def start_search(callback: CallbackQuery, state: FSMContext, db):
     """Начало поиска - установка фильтров"""
-    db = get_database()
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
     game = user['current_game']
@@ -334,10 +331,9 @@ async def cancel_filter(callback: CallbackQuery, state: FSMContext):
 # ==================== НАЧАЛО ПОИСКА ====================
 
 @router.callback_query(F.data == "start_search", SearchForm.filters)
-async def begin_search(callback: CallbackQuery, state: FSMContext):
+async def begin_search(callback: CallbackQuery, state: FSMContext, db):
     """Начать поиск с применением фильтров"""
     data = await state.get_data()
-    db = get_database()
 
     profiles = await db.get_potential_matches(
         user_id=data['user_id'],

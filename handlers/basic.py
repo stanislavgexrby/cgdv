@@ -10,7 +10,6 @@ from aiogram.fsm.state import State, StatesGroup
 import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
-from main import get_database
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -27,8 +26,7 @@ def check_ban_and_profile(require_profile=True):
     """Декоратор для проверки бана и наличия профиля"""
     def decorator(func):
         @wraps(func)
-        async def wrapper(callback: CallbackQuery, *args, **kwargs):
-            db = get_database()
+        async def wrapper(callback: CallbackQuery, db, *args, **kwargs):  # Добавлен параметр db
             user_id = callback.from_user.id
             user = await db.get_user(user_id)
 
@@ -59,7 +57,7 @@ def check_ban_and_profile(require_profile=True):
                 await callback.answer(f"❌ Сначала создайте анкету для {game_name}", show_alert=True)
                 return
 
-            return await func(callback, *args, **kwargs)
+            return await func(callback, db, *args, **kwargs)  # Передаем db дальше
         return wrapper
     return decorator
 
@@ -152,10 +150,9 @@ def get_main_menu_text(game: str, has_profile: bool) -> str:
 # ==================== ОСНОВНЫЕ КОМАНДЫ ====================
 
 @router.message(Command("start"))
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, db):
     user_id = message.from_user.id
     logger.info(f"Пользователь {user_id} запустил бота")
-    db = get_database()
 
     user = await db.get_user(user_id)
 
@@ -197,8 +194,7 @@ async def cmd_admin(message: Message):
 # ==================== ВЫБОР И ПЕРЕКЛЮЧЕНИЕ ИГР ====================
 
 @router.callback_query(F.data.startswith("game_"))
-async def select_game(callback: CallbackQuery):
-    db = get_database()
+async def select_game(callback: CallbackQuery, db):
     game = callback.data.split("_")[1]
     user_id = callback.from_user.id
     username = callback.from_user.username
@@ -228,9 +224,8 @@ async def select_game(callback: CallbackQuery):
     await callback.answer()
 
 @router.callback_query(F.data.startswith("switch_and_matches_"))
-async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext):
+async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db):
     """Переключение игры и показ матчей из уведомления"""
-    db = get_database()
     parts = callback.data.split("_")
     
     if len(parts) < 4:
@@ -276,8 +271,7 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext):
     await show_matches(callback, user_id, game)
 
 @router.callback_query(F.data.startswith("switch_"))
-async def switch_game(callback: CallbackQuery):
-    db = get_database()
+async def switch_game(callback: CallbackQuery, db):
     parts = callback.data.split("_")
     if len(parts) < 2:
         await callback.answer("❌ Ошибка", show_alert=True)
@@ -313,8 +307,7 @@ async def switch_game(callback: CallbackQuery):
 # ==================== НАВИГАЦИЯ ПО МЕНЮ ====================
 
 @router.callback_query(F.data.in_(["main_menu", "back_to_main"]))
-async def show_main_menu(callback: CallbackQuery):
-    db = get_database()
+async def show_main_menu(callback: CallbackQuery, db):
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
 
@@ -337,8 +330,7 @@ async def back_to_games(callback: CallbackQuery):
 
 @router.callback_query(F.data == "view_profile")
 @check_ban_and_profile()
-async def view_profile(callback: CallbackQuery):
-    db = get_database()
+async def view_profile(callback: CallbackQuery, db):
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
     game = user['current_game']
@@ -368,8 +360,7 @@ async def view_profile(callback: CallbackQuery):
 
 @router.callback_query(F.data == "back_to_editing")
 @check_ban_and_profile()
-async def back_to_editing_handler(callback: CallbackQuery):
-    db = get_database()
+async def back_to_editing_handler(callback: CallbackQuery, db):
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
     game = user['current_game']
@@ -404,8 +395,7 @@ async def back_to_editing_handler(callback: CallbackQuery):
 
 @router.callback_query(F.data == "back_to_search")  
 @check_ban_and_profile()
-async def back_to_search_handler(callback: CallbackQuery, state: FSMContext):
-    db = get_database()
+async def back_to_search_handler(callback: CallbackQuery, state: FSMContext, db):
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
     game = user['current_game']
@@ -435,10 +425,9 @@ async def back_to_search_handler(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "admin_stats")
 @admin_only
-async def show_admin_stats(callback: CallbackQuery):
+async def show_admin_stats(callback: CallbackQuery, db):
     try:
         import sqlite3
-        db = get_database()
         with sqlite3.connect(db.db_path) as conn:
             stats = {}
             
@@ -479,8 +468,7 @@ async def show_admin_stats(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_reports")
 @admin_only
-async def show_admin_reports(callback: CallbackQuery):
-    db = get_database()
+async def show_admin_reports(callback: CallbackQuery, db):
     reports = await db.get_pending_reports()
 
     if not reports:
@@ -493,8 +481,7 @@ async def show_admin_reports(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_bans")
 @admin_only
-async def show_admin_bans(callback: CallbackQuery):
-    db = get_database()
+async def show_admin_bans(callback: CallbackQuery, db):
     bans = await db.get_all_bans()
 
     if not bans:
@@ -524,14 +511,13 @@ async def admin_dismiss_report(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("admin_unban_"))
 @admin_only
-async def admin_unban_user(callback: CallbackQuery):
+async def admin_unban_user(callback: CallbackQuery, db):
     try:
         user_id = int(callback.data.split("_")[2])
     except (ValueError, IndexError):
         await callback.answer("❌ Ошибка", show_alert=True)
         return
 
-    db = get_database()
     success = await db.unban_user(user_id)
 
     if success:
@@ -556,8 +542,7 @@ async def admin_unban_user(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("admin_report_"))
 @admin_only
-async def navigate_reports(callback: CallbackQuery):
-    db = get_database()
+async def navigate_reports(callback: CallbackQuery, db):
     parts = callback.data.split("_")
     direction = parts[2]  # next или prev
     current_index = int(parts[3])
@@ -574,15 +559,13 @@ async def navigate_reports(callback: CallbackQuery):
 
 @router.callback_query(F.data.startswith("admin_ban_"))
 @admin_only
-async def navigate_bans(callback: CallbackQuery):
+async def navigate_bans(callback: CallbackQuery, db):
     if not callback.data.startswith("admin_ban_next_") and not callback.data.startswith("admin_ban_prev_"):
         return  # Обработается другим обработчиком
         
     parts = callback.data.split("_")
     direction = parts[2]  # next или prev
     current_index = int(parts[3])
-    
-    db = get_database()
     
     bans = await db.get_all_bans()
     
@@ -596,7 +579,7 @@ async def navigate_bans(callback: CallbackQuery):
 
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ АДМИНКИ ====================
 
-async def process_report_action(callback: CallbackQuery, action: str):
+async def process_report_action(callback: CallbackQuery, action: str, db):
     """Обработка действий с жалобами"""
     try:
         report_id = int(callback.data.split("_")[2])
@@ -609,7 +592,6 @@ async def process_report_action(callback: CallbackQuery, action: str):
         await callback.answer("❌ Жалоба не найдена", show_alert=True)
         return
 
-    db = get_database()
     success = await db.process_report(report_id, action, settings.ADMIN_ID)
 
     if success:
@@ -642,7 +624,7 @@ async def process_report_action(callback: CallbackQuery, action: str):
     else:
         await callback.answer("❌ Ошибка обработки жалобы", show_alert=True)
 
-async def show_admin_report(callback: CallbackQuery, reports: list, current_index: int):
+async def show_admin_report(callback: CallbackQuery, reports: list, current_index: int, db):
     """Показ жалобы админу"""
     if current_index >= len(reports):
         text = "✅ Все жалобы просмотрены!"
@@ -651,7 +633,6 @@ async def show_admin_report(callback: CallbackQuery, reports: list, current_inde
         return
 
     report = reports[current_index]
-    db = get_database()
     profile = await db.get_user_profile(report['reported_user_id'], report['game'])
 
     if not profile:
@@ -724,9 +705,8 @@ async def show_admin_ban(callback: CallbackQuery, bans: list, current_index: int
                            kb.admin_ban_actions_with_nav(ban['user_id'], current_index, len(bans)))
     await callback.answer()
 
-async def show_matches(callback: CallbackQuery, user_id: int, game: str):
+async def show_matches(callback: CallbackQuery, user_id: int, game: str, db):
     """Показ матчей пользователя"""
-    db = get_database()
     matches = await db.get_matches(user_id, game)
     game_name = settings.GAMES.get(game, game)
 
