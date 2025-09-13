@@ -1,7 +1,16 @@
 import os
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "0")) if os.getenv("ADMIN_ID", "").isdigit() else 0
+
+# Безопасная обработка ADMIN_ID
+admin_id_str = os.getenv("ADMIN_ID", "0")
+try:
+    if admin_id_str and admin_id_str.isdigit():
+        ADMIN_ID = int(admin_id_str)
+    else:
+        ADMIN_ID = 0
+except (ValueError, TypeError):
+    ADMIN_ID = 0
 
 DOTA_CHANNEL = os.getenv("DOTA_CHANNEL", "@testbotasdasd")
 CS_CHANNEL = os.getenv("CS_CHANNEL", "@test89898922")
