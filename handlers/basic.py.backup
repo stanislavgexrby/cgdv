@@ -7,13 +7,14 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+from database.database import Database
 import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
-from main import get_database
 
 logger = logging.getLogger(__name__)
 router = Router()
+db = Database(settings.DATABASE_PATH)
 
 class SearchForm(StatesGroup):
     filters = State()
@@ -28,9 +29,8 @@ def check_ban_and_profile(require_profile=True):
     def decorator(func):
         @wraps(func)
         async def wrapper(callback: CallbackQuery, *args, **kwargs):
-            db = get_database()
             user_id = callback.from_user.id
-            user = await db.get_user(user_id)
+            user = db.get_user(user_id)
 
             if not user or not user.get('current_game'):
                 await callback.answer("❌ Ошибка", show_alert=True)
@@ -39,8 +39,8 @@ def check_ban_and_profile(require_profile=True):
             game = user['current_game']
             
             # Проверка бана
-            if await db.is_user_banned(user_id):
-                ban_info = await db.get_user_ban(user_id)
+            if db.is_user_banned(user_id):
+                ban_info = db.get_user_ban(user_id)
                 game_name = settings.GAMES.get(game, game)
                 
                 if ban_info:
@@ -54,7 +54,7 @@ def check_ban_and_profile(require_profile=True):
                 return
 
             # Проверка профиля (если требуется)
-            if require_profile and not await db.has_profile(user_id, game):
+            if require_profile and not db.has_profile(user_id, game):
                 game_name = settings.GAMES.get(game, game)
                 await callback.answer(f"❌ Сначала создайте анкету для {game_name}", show_alert=True)
                 return
@@ -154,14 +154,14 @@ def get_main_menu_text(game: str, has_profile: bool) -> str:
 @router.message(Command("start"))
 async def cmd_start(message: Message):
     user_id = message.from_user.id
+    username = message.from_user.username
     logger.info(f"Пользователь {user_id} запустил бота")
-    db = get_database()
 
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
 
     if user and user.get('current_game'):
         game = user['current_game']
-        has_profile = await db.has_profile(user_id, game)
+        has_profile = db.has_profile(user_id, game)
         text = get_main_menu_text(game, has_profile)
         await message.answer(text, reply_markup=kb.main_menu(has_profile, game))
     else:
@@ -198,7 +198,6 @@ async def cmd_admin(message: Message):
 
 @router.callback_query(F.data.startswith("game_"))
 async def select_game(callback: CallbackQuery):
-    db = get_database()
     game = callback.data.split("_")[1]
     user_id = callback.from_user.id
     username = callback.from_user.username
@@ -220,8 +219,8 @@ async def select_game(callback: CallbackQuery):
 
     logger.info(f"Пользователь {user_id} выбрал игру: {game}")
 
-    await db.create_user(user_id, username, game)
-    has_profile = await db.has_profile(user_id, game)
+    db.create_user(user_id, username, game)
+    has_profile = db.has_profile(user_id, game)
     text = get_main_menu_text(game, has_profile)
 
     await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
@@ -230,7 +229,6 @@ async def select_game(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("switch_and_matches_"))
 async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext):
     """Переключение игры и показ матчей из уведомления"""
-    db = get_database()
     parts = callback.data.split("_")
     
     if len(parts) < 4:
@@ -249,15 +247,15 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext):
     logger.info(f"Переключение на игру {game} для показа матчей пользователя {user_id}")
     
     # Переключаем игру и очищаем состояние
-    if not await db.switch_game(user_id, game):
+    if not db.switch_game(user_id, game):
         await callback.answer("❌ Ошибка переключения игры", show_alert=True)
         return
     
     await state.clear()
     
     # Проверяем бан и показываем матчи
-    if await db.is_user_banned(user_id):
-        ban_info = await db.get_user_ban(user_id)
+    if db.is_user_banned(user_id):
+        ban_info = db.get_user_ban(user_id)
         game_name = settings.GAMES.get(game, game)
         text = f"🚫 Вы заблокированы в {game_name}"
         if ban_info:
@@ -268,7 +266,7 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext):
         await callback.answer()
         return
 
-    if not await db.has_profile(user_id, game):
+    if not db.has_profile(user_id, game):
         game_name = settings.GAMES.get(game, game)
         await callback.answer(f"❌ Сначала создайте анкету для {game_name}", show_alert=True)
         return
@@ -277,7 +275,6 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("switch_"))
 async def switch_game(callback: CallbackQuery):
-    db = get_database()
     parts = callback.data.split("_")
     if len(parts) < 2:
         await callback.answer("❌ Ошибка", show_alert=True)
@@ -303,8 +300,8 @@ async def switch_game(callback: CallbackQuery):
 
     logger.info(f"Переключение на игру: {game}")
 
-    await db.switch_game(user_id, game)
-    has_profile = await db.has_profile(user_id, game)
+    db.switch_game(user_id, game)
+    has_profile = db.has_profile(user_id, game)
     text = get_main_menu_text(game, has_profile)
 
     await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
@@ -314,9 +311,8 @@ async def switch_game(callback: CallbackQuery):
 
 @router.callback_query(F.data.in_(["main_menu", "back_to_main"]))
 async def show_main_menu(callback: CallbackQuery):
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
 
     if not user or not user.get('current_game'):
         await safe_edit_message(callback, texts.WELCOME, kb.game_selection())
@@ -324,7 +320,7 @@ async def show_main_menu(callback: CallbackQuery):
         return
 
     game = user['current_game']
-    has_profile = await db.has_profile(user_id, game)
+    has_profile = db.has_profile(user_id, game)
     text = get_main_menu_text(game, has_profile)
 
     await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
@@ -338,11 +334,10 @@ async def back_to_games(callback: CallbackQuery):
 @router.callback_query(F.data == "view_profile")
 @check_ban_and_profile()
 async def view_profile(callback: CallbackQuery):
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
     game = user['current_game']
-    profile = await db.get_user_profile(user_id, game)
+    profile = db.get_user_profile(user_id, game)
 
     profile_text = texts.format_profile(profile, show_contact=True)
     game_name = settings.GAMES.get(game, game)
@@ -369,11 +364,10 @@ async def view_profile(callback: CallbackQuery):
 @router.callback_query(F.data == "back_to_editing")
 @check_ban_and_profile()
 async def back_to_editing_handler(callback: CallbackQuery):
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
     game = user['current_game']
-    profile = await db.get_user_profile(user_id, game)
+    profile = db.get_user_profile(user_id, game)
 
     game_name = settings.GAMES.get(game, game)
     current_info = f"📝 Текущая анкета в {game_name}:\n\n"
@@ -405,9 +399,8 @@ async def back_to_editing_handler(callback: CallbackQuery):
 @router.callback_query(F.data == "back_to_search")  
 @check_ban_and_profile()
 async def back_to_search_handler(callback: CallbackQuery, state: FSMContext):
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
     game = user['current_game']
 
     await state.clear()
@@ -438,7 +431,6 @@ async def back_to_search_handler(callback: CallbackQuery, state: FSMContext):
 async def show_admin_stats(callback: CallbackQuery):
     try:
         import sqlite3
-        db = get_database()
         with sqlite3.connect(db.db_path) as conn:
             stats = {}
             
@@ -480,8 +472,7 @@ async def show_admin_stats(callback: CallbackQuery):
 @router.callback_query(F.data == "admin_reports")
 @admin_only
 async def show_admin_reports(callback: CallbackQuery):
-    db = get_database()
-    reports = await db.get_pending_reports()
+    reports = db.get_pending_reports()
 
     if not reports:
         text = "🚩 Нет ожидающих жалоб"
@@ -494,8 +485,7 @@ async def show_admin_reports(callback: CallbackQuery):
 @router.callback_query(F.data == "admin_bans")
 @admin_only
 async def show_admin_bans(callback: CallbackQuery):
-    db = get_database()
-    bans = await db.get_all_bans()
+    bans = db.get_all_bans()
 
     if not bans:
         text = "✅ Нет активных банов"
@@ -531,8 +521,7 @@ async def admin_unban_user(callback: CallbackQuery):
         await callback.answer("❌ Ошибка", show_alert=True)
         return
 
-    db = get_database()
-    success = await db.unban_user(user_id)
+    success = db.unban_user(user_id)
 
     if success:
         await callback.answer("✅ Бан снят")
@@ -543,7 +532,7 @@ async def admin_unban_user(callback: CallbackQuery):
         await notify_user_unbanned(callback.bot, user_id)
 
         # Показываем следующего
-        bans = await db.get_all_bans()
+        bans = db.get_all_bans()
         if not bans:
             text = "✅ Бан снят!\n\nБольше активных банов нет."
             await safe_edit_message(callback, text, kb.admin_main_menu())
@@ -557,12 +546,11 @@ async def admin_unban_user(callback: CallbackQuery):
 @router.callback_query(F.data.startswith("admin_report_"))
 @admin_only
 async def navigate_reports(callback: CallbackQuery):
-    db = get_database()
     parts = callback.data.split("_")
     direction = parts[2]  # next или prev
     current_index = int(parts[3])
     
-    reports = await db.get_pending_reports()
+    reports = db.get_pending_reports()
     
     if direction == "next" and current_index + 1 < len(reports):
         await show_admin_report(callback, reports, current_index + 1)
@@ -582,9 +570,7 @@ async def navigate_bans(callback: CallbackQuery):
     direction = parts[2]  # next или prev
     current_index = int(parts[3])
     
-    db = get_database()
-    
-    bans = await db.get_all_bans()
+    bans = db.get_all_bans()
     
     if direction == "next" and current_index + 1 < len(bans):
         await show_admin_ban(callback, bans, current_index + 1)
@@ -604,13 +590,12 @@ async def process_report_action(callback: CallbackQuery, action: str):
         await callback.answer("❌ Ошибка", show_alert=True)
         return
 
-    report_info = await db.get_report_info(report_id)
+    report_info = db.get_report_info(report_id)
     if not report_info:
         await callback.answer("❌ Жалоба не найдена", show_alert=True)
         return
 
-    db = get_database()
-    success = await db.process_report(report_id, action, settings.ADMIN_ID)
+    success = db.process_report(report_id, action, settings.ADMIN_ID)
 
     if success:
         action_messages = {
@@ -628,12 +613,12 @@ async def process_report_action(callback: CallbackQuery, action: str):
             await notify_profile_deleted(callback.bot, report_info['reported_user_id'], report_info['game'])
             
             if action == "ban":
-                ban_info = await db.get_user_ban(report_info['reported_user_id'])
+                ban_info = db.get_user_ban(report_info['reported_user_id'])
                 if ban_info:
                     await notify_user_banned(callback.bot, report_info['reported_user_id'], ban_info['expires_at'])
 
         # Показываем следующую жалобу
-        reports = await db.get_pending_reports()
+        reports = db.get_pending_reports()
         if not reports:
             text = "✅ Жалоба обработана! Больше жалоб нет."
             await safe_edit_message(callback, text, kb.admin_main_menu())
@@ -651,8 +636,7 @@ async def show_admin_report(callback: CallbackQuery, reports: list, current_inde
         return
 
     report = reports[current_index]
-    db = get_database()
-    profile = await db.get_user_profile(report['reported_user_id'], report['game'])
+    profile = db.get_user_profile(report['reported_user_id'], report['game'])
 
     if not profile:
         game_name = settings.GAMES.get(report['game'], report['game'])
@@ -726,8 +710,7 @@ async def show_admin_ban(callback: CallbackQuery, bans: list, current_index: int
 
 async def show_matches(callback: CallbackQuery, user_id: int, game: str):
     """Показ матчей пользователя"""
-    db = get_database()
-    matches = await db.get_matches(user_id, game)
+    matches = db.get_matches(user_id, game)
     game_name = settings.GAMES.get(game, game)
 
     if not matches:

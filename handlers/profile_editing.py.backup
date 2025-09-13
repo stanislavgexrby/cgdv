@@ -4,14 +4,15 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+from database.database import Database
 import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
-from main import get_database
 from handlers.basic import check_ban_and_profile, safe_edit_message
 
 logger = logging.getLogger(__name__)
 router = Router()
+db = Database(settings.DATABASE_PATH)
 
 class EditProfileForm(StatesGroup):
     edit_name = State()
@@ -27,16 +28,15 @@ class EditProfileForm(StatesGroup):
 
 async def update_profile_field(callback: CallbackQuery, field: str, value, state: FSMContext = None):
     """Универсальная функция обновления поля профиля"""
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
     
     if not user or not user.get('current_game'):
         await callback.answer("❌ Ошибка", show_alert=True)
         return False
 
     game = user['current_game']
-    profile = await db.get_user_profile(user_id, game)
+    profile = db.get_user_profile(user_id, game)
     
     if not profile:
         await callback.answer("❌ Анкета не найдена", show_alert=True)
@@ -59,7 +59,7 @@ async def update_profile_field(callback: CallbackQuery, field: str, value, state
     # Обновляем нужное поле
     update_data[field] = value
     
-    success = await db.update_user_profile(**update_data)
+    success = db.update_user_profile(**update_data)
     
     if state:
         await state.clear()
@@ -120,11 +120,10 @@ def validate_input(field: str, value, game: str = None) -> tuple[bool, str]:
 @check_ban_and_profile()
 async def edit_profile(callback: CallbackQuery):
     """Показ меню редактирования профиля"""
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
     game = user['current_game']
-    profile = await db.get_user_profile(user_id, game)
+    profile = db.get_user_profile(user_id, game)
 
     game_name = settings.GAMES.get(game, game)
     current_info = f"📝 Текущая анкета в {game_name}:\n\n"
@@ -157,9 +156,8 @@ async def edit_profile(callback: CallbackQuery):
 @check_ban_and_profile(require_profile=False)
 async def recreate_profile(callback: CallbackQuery, state: FSMContext):
     """Создание анкеты заново (переход к форме создания профиля)"""
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
     
     if not user or not user.get('current_game'):
         await callback.answer("❌ Ошибка", show_alert=True)
@@ -168,8 +166,8 @@ async def recreate_profile(callback: CallbackQuery, state: FSMContext):
     game = user['current_game']
     
     # Если профиль существует, удаляем его
-    if await db.has_profile(user_id, game):
-        await db.delete_profile(user_id, game)
+    if db.has_profile(user_id, game):
+        db.delete_profile(user_id, game)
         logger.info(f"Профиль удален для пересоздания: {user_id} в {game}")
     
     # Переходим к созданию нового профиля
@@ -202,9 +200,8 @@ async def recreate_profile(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "edit_name")
 @check_ban_and_profile()
 async def edit_name(callback: CallbackQuery, state: FSMContext):
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
 
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_name)
@@ -215,9 +212,8 @@ async def edit_name(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "edit_nickname")
 @check_ban_and_profile()
 async def edit_nickname(callback: CallbackQuery, state: FSMContext):
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
 
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_nickname)
@@ -228,9 +224,8 @@ async def edit_nickname(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "edit_age")
 @check_ban_and_profile()
 async def edit_age(callback: CallbackQuery, state: FSMContext):
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
 
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_age)
@@ -241,9 +236,8 @@ async def edit_age(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "edit_rating")
 @check_ban_and_profile()
 async def edit_rating(callback: CallbackQuery, state: FSMContext):
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
 
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_rating)
@@ -254,9 +248,8 @@ async def edit_rating(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "edit_region")
 @check_ban_and_profile()
 async def edit_region(callback: CallbackQuery, state: FSMContext):
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
 
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_region)
@@ -267,11 +260,10 @@ async def edit_region(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "edit_positions")
 @check_ban_and_profile()
 async def edit_positions(callback: CallbackQuery, state: FSMContext):
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
 
-    profile = await db.get_user_profile(user_id, user['current_game'])
+    profile = db.get_user_profile(user_id, user['current_game'])
     current_positions = profile['positions'] if profile else []
 
     await state.update_data(
@@ -292,9 +284,8 @@ async def edit_positions(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "edit_info")
 @check_ban_and_profile()
 async def edit_info(callback: CallbackQuery, state: FSMContext):
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
 
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_info)
@@ -309,9 +300,8 @@ async def edit_info(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "edit_photo")
 @check_ban_and_profile()
 async def edit_photo(callback: CallbackQuery, state: FSMContext):
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
 
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_photo)
@@ -563,9 +553,8 @@ async def cancel_edit(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "delete_profile")
 @check_ban_and_profile()
 async def confirm_delete_profile(callback: CallbackQuery):
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
     game = user['current_game']
     game_name = settings.GAMES.get(game, game)
 
@@ -574,7 +563,7 @@ async def confirm_delete_profile(callback: CallbackQuery):
            f"Все лайки и матчи в {game_name} будут удалены.")
 
     try:
-        profile = await db.get_user_profile(user_id, game)
+        profile = db.get_user_profile(user_id, game)
         if profile and profile.get('photo_id'):
             await callback.message.delete()
             await callback.message.answer(text, reply_markup=kb.confirm_delete())
@@ -589,12 +578,11 @@ async def confirm_delete_profile(callback: CallbackQuery):
 @router.callback_query(F.data == "confirm_delete")
 @check_ban_and_profile()
 async def delete_profile(callback: CallbackQuery):
-    db = get_database()
     user_id = callback.from_user.id
-    user = await db.get_user(user_id)
+    user = db.get_user(user_id)
     game = user['current_game']
     
-    success = await db.delete_profile(user_id, game)
+    success = db.delete_profile(user_id, game)
 
     if success:
         game_name = settings.GAMES.get(game, game)

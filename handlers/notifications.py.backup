@@ -2,15 +2,16 @@ import logging
 from typing import Optional, List, Tuple
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from database.database import Database
 import utils.texts as texts
 import config.settings as settings
-from main import get_database
 
 logger = logging.getLogger(__name__)
+db = Database(settings.DATABASE_PATH)
 
 # ==================== БАЗОВЫЕ ФУНКЦИИ ====================
 
-async def safe_send_notification(bot: Bot, user_id: int, text: str,
+async def safe_send_notification(bot: Bot, user_id: int, text: str, 
                                 photo_id: str = None, keyboard: InlineKeyboardMarkup = None) -> bool:
     """Безопасная отправка уведомления пользователю"""
     try:
@@ -50,8 +51,7 @@ def get_game_display_name(game: str) -> str:
 async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: str) -> bool:
     """Уведомление о новом матче"""
     try:
-        db = get_database()
-        match_profile = await db.get_user_profile(match_user_id, game)
+        match_profile = db.get_user_profile(match_user_id, game)
         game_name = get_game_display_name(game)
         
         if not match_profile:
@@ -64,7 +64,7 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: s
         text = f"🎉 У вас новый матч в {game_name}!\n\n{profile_text}"
         
         # Создаем клавиатуру
-        current_user = await db.get_user(user_id)
+        current_user = db.get_user(user_id)
         buttons = []
         
         if current_user and current_user.get('current_game') != game:
@@ -94,16 +94,15 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: s
 async def notify_about_like(bot: Bot, user_id: int, game: str = None) -> bool:
     """Уведомление о новом лайке"""
     try:
-        db = get_database()
         # Определяем игру
         if not game:
-            user = await db.get_user(user_id)
+            user = db.get_user(user_id)
             game = user.get('current_game', 'dota') if user else 'dota'
         
         # Переключаем пользователя на нужную игру если требуется
-        current_user = await db.get_user(user_id)
+        current_user = db.get_user(user_id)
         if current_user and current_user.get('current_game') != game:
-            await db.switch_game(user_id, game)
+            db.switch_game(user_id, game)
             logger.info(f"Переключили пользователя {user_id} на {game} из-за лайка")
         
         game_name = get_game_display_name(game)
