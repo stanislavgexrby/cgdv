@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: teammates
       POSTGRES_USER: teammates_user
-      POSTGRES_PASSWORD: 07072112sS
+      POSTGRES_PASSWORD: your_secure_password
     ports:
       - "5432:5432"
     volumes:
