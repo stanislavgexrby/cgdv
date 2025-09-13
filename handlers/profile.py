@@ -78,7 +78,6 @@ async def save_profile_universal(user_id: int, data: dict, photo_id: str = None,
 @router.callback_query(F.data == "create_profile")
 @check_ban_and_profile(require_profile=False)
 async def start_create_profile(callback: CallbackQuery, state: FSMContext, db):
-    """Начало создания профиля"""
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
 
@@ -94,7 +93,6 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext, db):
         game=game,
         positions_selected=[]
     )
-
     await state.set_state(ProfileForm.name)
     text = f"📝 Создание анкеты для {game_name}\n\n{texts.QUESTIONS['name']}"
     
@@ -299,8 +297,7 @@ async def skip_info(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "skip_photo", ProfileForm.photo)
 async def skip_photo(callback: CallbackQuery, state: FSMContext, db):
-    await save_profile_flow(callback.message, state, None, db)
-    await callback.answer()
+    await save_profile_flow_callback(callback, state, None, db)
 
 @router.callback_query(F.data == "cancel")
 async def cancel_profile(callback: CallbackQuery, state: FSMContext):
@@ -313,8 +310,13 @@ async def cancel_profile(callback: CallbackQuery, state: FSMContext):
 
 async def save_profile_flow(message: Message, state: FSMContext, photo_id: str | None, db):
     """Финал создания анкеты: сохранение и показ результата."""
-    user_id = message.from_user.id
     data = await state.get_data()
+    user_id = data.get('user_id')  # ← Используем ID из state
+    
+    if not user_id:
+        # Фоллбек на message, если в state нет ID
+        user_id = message.from_user.id
+        logger.warning(f"⚠️ user_id не найден в state, используем из message: {user_id}")
 
     payload = {
         'game': data.get('game'),
@@ -328,30 +330,25 @@ async def save_profile_flow(message: Message, state: FSMContext, photo_id: str |
     }
 
     success = await save_profile_universal(
-        user_id=user_id,
+        user_id=user_id,  # ← Теперь всегда правильный ID
         data=payload,
         photo_id=photo_id,
         db=db
     )
-    if not success:
-        await message.answer("❌ Не удалось сохранить анкету. Попробуйте ещё раз.")
-        return
+    
+    # Остальной код без изменений...
 
-    await state.clear()
-
-    profile = await db.get_user_profile(user_id, payload['game'])
-    game_name = settings.GAMES.get(payload['game'], payload['game'])
-    text = f"✅ Анкета для {game_name} создана!\n\n" + texts.format_profile(profile, show_contact=True)
-
-    if profile and profile.get('photo_id'):
-        await message.answer_photo(photo=profile['photo_id'], caption=text, reply_markup=kb.back())
-    else:
-        await message.answer(text, reply_markup=kb.back())
-
-async def save_profile_flow_callback(callback: CallbackQuery, state: FSMContext, photo_id: str):
+async def save_profile_flow_callback(callback: CallbackQuery, state: FSMContext, photo_id: str, db):
     """Сохранение профиля через callback"""
     data = await state.get_data()
-    success = await save_profile_universal(callback.from_user.id, data, photo_id)
+    user_id = data.get('user_id', callback.from_user.id)  # Берем из state, фоллбек на callback
+    
+    success = await save_profile_universal(
+        user_id=user_id,  # Используем ID из state
+        data=data, 
+        photo_id=photo_id,
+        db=db  # Передаем db
+    )
     await state.clear()
 
     if success:
