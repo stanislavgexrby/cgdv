@@ -31,25 +31,25 @@ def validate_profile_input(field: str, value, game: str = None) -> tuple[bool, s
     """Валидация ввода при создании профиля"""
     if field == 'name':
         if len(value) < 2 or len(value) > settings.MAX_NAME_LENGTH:
-            return False, f"❌ Имя должно быть от 2 до {settings.MAX_NAME_LENGTH} символов"
+            return False, f"Имя должно быть от 2 до {settings.MAX_NAME_LENGTH} символов"
         if len(value.split()) < 2:
-            return False, "❌ Введите имя и фамилию"
+            return False, "Введите имя и фамилию"
 
     elif field == 'nickname':
         if len(value) < 2 or len(value) > settings.MAX_NICKNAME_LENGTH:
-            return False, f"❌ Никнейм должен быть от 2 до {settings.MAX_NICKNAME_LENGTH} символов"
+            return False, f"Никнейм должен быть от 2 до {settings.MAX_NICKNAME_LENGTH} символов"
 
     elif field == 'age':
         try:
             age = int(value)
             if age < settings.MIN_AGE:
-                return False, f"❌ Возраст должен быть больше {settings.MIN_AGE}"
+                return False, f"Возраст должен быть больше {settings.MIN_AGE}"
         except ValueError:
-            return False, "❌ Введите число"
+            return False, "Введите число"
 
     elif field == 'info':
         if len(value) > settings.MAX_INFO_LENGTH:
-            return False, f"❌ Слишком длинный текст (максимум {settings.MAX_INFO_LENGTH} символов)"
+            return False, f"Слишком длинный текст (максимум {settings.MAX_INFO_LENGTH} символов)"
 
     return True, ""
 
@@ -82,7 +82,7 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext, db):
     user = await db.get_user(user_id)
 
     if not user or not user.get('current_game'):
-        await callback.answer("❌ Ошибка", show_alert=True)
+        await callback.answer("Ошибка", show_alert=True)
         return
 
     game = user['current_game']
@@ -94,7 +94,7 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext, db):
         positions_selected=[]
     )
     await state.set_state(ProfileForm.name)
-    text = f"📝 Создание анкеты для {game_name}\n\n{texts.QUESTIONS['name']}"
+    text = f"Создание анкеты для {game_name}\n\n{texts.QUESTIONS['name']}"
 
     await safe_edit_message(callback, text, kb.cancel_profile_creation())
     await callback.answer()
@@ -105,57 +105,57 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext, db):
 async def process_name(message: Message, state: FSMContext):
     """Обработка имени"""
     if not message.text:
-        await message.answer("❌ Отправьте текстовое сообщение с именем и фамилией")
+        await message.answer("Отправьте текстовое сообщение с именем и фамилией", parse_mode='HTML')
         return
 
     name = message.text.strip()
     is_valid, error_msg = validate_profile_input('name', name)
 
     if not is_valid:
-        await message.answer(error_msg)
+        await message.answer(error_msg, parse_mode='HTML')
         return
 
     await state.update_data(name=name)
     await state.set_state(ProfileForm.nickname)
-    await message.answer(texts.QUESTIONS["nickname"], reply_markup=kb.cancel_profile_creation())
+    await message.answer(texts.QUESTIONS["nickname"], reply_markup=kb.cancel_profile_creation(), parse_mode='HTML')
 
 @router.message(ProfileForm.name, ~F.text)
 async def wrong_name_format(message: Message):
-    await message.answer("❌ Отправьте текстовое сообщение с именем и фамилией")
+    await message.answer("Отправьте текстовое сообщение с именем и фамилией", parse_mode='HTML')
 
 @router.message(ProfileForm.nickname)
 async def process_nickname(message: Message, state: FSMContext):
     """Обработка никнейма"""
     if not message.text:
-        await message.answer("❌ Отправьте текстовое сообщение с игровым никнеймом")
+        await message.answer("Отправьте текстовое сообщение с игровым никнеймом", parse_mode='HTML')
         return
 
     nickname = message.text.strip()
     is_valid, error_msg = validate_profile_input('nickname', nickname)
 
     if not is_valid:
-        await message.answer(error_msg)
+        await message.answer(error_msg, parse_mode='HTML')
         return
 
     await state.update_data(nickname=nickname)
     await state.set_state(ProfileForm.age)
-    await message.answer(texts.QUESTIONS["age"], reply_markup=kb.cancel_profile_creation())
+    await message.answer(texts.QUESTIONS["age"], reply_markup=kb.cancel_profile_creation(), parse_mode='HTML')
 
 @router.message(ProfileForm.nickname, ~F.text)
 async def wrong_nickname_format(message: Message):
-    await message.answer("❌ Отправьте текстовое сообщение с игровым никнеймом")
+    await message.answer("Отправьте текстовое сообщение с игровым никнеймом", parse_mode='HTML')
 
 @router.message(ProfileForm.age)
 async def process_age(message: Message, state: FSMContext):
     """Обработка возраста"""
     if not message.text:
-        await message.answer(f"❌ Отправьте число больше {settings.MIN_AGE}")
+        await message.answer(f"Отправьте число больше {settings.MIN_AGE}", parse_mode='HTML')
         return
 
     is_valid, error_msg = validate_profile_input('age', message.text.strip())
 
     if not is_valid:
-        await message.answer(error_msg)
+        await message.answer(error_msg, parse_mode='HTML')
         return
 
     age = int(message.text.strip())
@@ -165,33 +165,33 @@ async def process_age(message: Message, state: FSMContext):
     data = await state.get_data()
     game = data['game']
 
-    await message.answer("🏆 Выберите рейтинг:", reply_markup=kb.ratings(game, with_cancel=True))
+    await message.answer("Выберите рейтинг:", reply_markup=kb.ratings(game, with_cancel=True), parse_mode='HTML')
 
 @router.message(ProfileForm.age, ~F.text)
 async def wrong_age_format(message: Message):
-    await message.answer(f"❌ Отправьте число больше {settings.MIN_AGE}")
+    await message.answer(f"Отправьте число больше {settings.MIN_AGE}", parse_mode='HTML')
 
 @router.message(ProfileForm.additional_info)
 async def process_additional_info(message: Message, state: FSMContext):
     """Обработка дополнительной информации"""
     if not message.text:
-        await message.answer("❌ Отправьте текстовое сообщение с описанием или нажмите 'Пропустить'")
+        await message.answer("Отправьте текстовое сообщение с описанием или нажмите 'Пропустить'", parse_mode='HTML')
         return
 
     info = message.text.strip()
     is_valid, error_msg = validate_profile_input('info', info)
 
     if not is_valid:
-        await message.answer(error_msg)
+        await message.answer(error_msg, parse_mode='HTML')
         return
 
     await state.update_data(additional_info=info)
     await state.set_state(ProfileForm.photo)
-    await message.answer(texts.QUESTIONS["photo"], reply_markup=kb.skip_photo())
+    await message.answer(texts.QUESTIONS["photo"], reply_markup=kb.skip_photo(), parse_mode='HTML')
 
 @router.message(ProfileForm.additional_info, ~F.text)
 async def wrong_info_format(message: Message):
-    await message.answer("❌ Отправьте текстовое сообщение с описанием или нажмите 'Пропустить'")
+    await message.answer("Отправьте текстовое сообщение с описанием или нажмите 'Пропустить'", parse_mode='HTML')
 
 @router.message(ProfileForm.photo, F.photo)
 async def process_photo(message: Message, state: FSMContext, db):
@@ -200,7 +200,7 @@ async def process_photo(message: Message, state: FSMContext, db):
 
 @router.message(ProfileForm.photo)
 async def wrong_photo_format(message: Message):
-    await message.answer("❌ Отправьте фотографию или нажмите 'Пропустить'", reply_markup=kb.skip_photo())
+    await message.answer("Отправьте фотографию или нажмите 'Пропустить'", reply_markup=kb.skip_photo(), parse_mode='HTML')
 
 # ==================== ОБРАБОТЧИКИ CALLBACK ====================
 
@@ -211,7 +211,7 @@ async def process_rating(callback: CallbackQuery, state: FSMContext):
     await state.update_data(rating=rating)
     await state.set_state(ProfileForm.region)
 
-    await safe_edit_message(callback, "🌍 Выберите регион:", kb.regions(with_cancel=True))
+    await safe_edit_message(callback, "Выберите регион:", kb.regions(with_cancel=True))
     await callback.answer()
 
 @router.callback_query(F.data.startswith("region_"), ProfileForm.region)
@@ -224,7 +224,7 @@ async def process_region(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     game = data['game']
 
-    await safe_edit_message(callback, "⚔️ Выберите позиции (можно несколько):", kb.positions(game, []))
+    await safe_edit_message(callback, "Выберите позиции (можно несколько):", kb.positions(game, []))
     await callback.answer()
 
 @router.callback_query(F.data.startswith("pos_add_"), ProfileForm.positions)
@@ -264,13 +264,13 @@ async def positions_done(callback: CallbackQuery, state: FSMContext):
     selected = data.get('positions_selected', [])
 
     if not selected:
-        await callback.answer("❌ Выберите хотя бы одну позицию", show_alert=True)
+        await callback.answer("Выберите хотя бы одну позицию", show_alert=True)
         return
 
     await state.update_data(positions=selected)
     await state.set_state(ProfileForm.additional_info)
 
-    await safe_edit_message(callback, "📝 Расскажите о себе:", kb.skip_info())
+    await safe_edit_message(callback, "Расскажите о себе:", kb.skip_info())
     await callback.answer()
 
 @router.callback_query(F.data == "pos_any", ProfileForm.positions)
@@ -279,12 +279,12 @@ async def process_any_position(callback: CallbackQuery, state: FSMContext):
     await state.update_data(positions=["any"])
     await state.set_state(ProfileForm.additional_info)
 
-    await safe_edit_message(callback, "📝 Расскажите о себе:", kb.skip_info())
+    await safe_edit_message(callback, "Расскажите о себе:", kb.skip_info())
     await callback.answer()
 
 @router.callback_query(F.data == "pos_need", ProfileForm.positions)
 async def positions_need(callback: CallbackQuery):
-    await callback.answer("⚠️ Выберите хотя бы одну позицию", show_alert=True)
+    await callback.answer("Выберите хотя бы одну позицию", show_alert=True)
 
 @router.callback_query(F.data == "skip_info", ProfileForm.additional_info)
 async def skip_info(callback: CallbackQuery, state: FSMContext):
@@ -303,7 +303,7 @@ async def skip_photo(callback: CallbackQuery, state: FSMContext, db):
 async def cancel_profile(callback: CallbackQuery, state: FSMContext):
     """Отмена создания профиля"""
     await state.clear()
-    await safe_edit_message(callback, "❌ Создание анкеты отменено", kb.back())
+    await safe_edit_message(callback, "Создание анкеты отменено", kb.back())
     await callback.answer()
 
 # ==================== СОХРАНЕНИЕ ПРОФИЛЯ ====================
@@ -335,7 +335,7 @@ async def save_profile_flow(message: Message, state: FSMContext, photo_id: str |
     )
 
     if not success:
-        await message.answer("❌ Не удалось сохранить анкету. Попробуйте ещё раз.")
+        await message.answer("Не удалось сохранить анкету. Попробуйте ещё раз.", parse_mode='HTML')
         return
 
     await state.clear()
@@ -344,15 +344,15 @@ async def save_profile_flow(message: Message, state: FSMContext, photo_id: str |
     game_name = settings.GAMES.get(payload['game'], payload['game'])
 
     if profile:
-        text = f"✅ Анкета для {game_name} создана!\n\n" + texts.format_profile(profile, show_contact=True)
+        text = f"Анкета для {game_name} создана!\n\n" + texts.format_profile(profile, show_contact=True)
 
         if profile.get('photo_id'):
-            await message.answer_photo(photo=profile['photo_id'], caption=text, reply_markup=kb.back())
+            await message.answer_photo(photo=profile['photo_id'], caption=text, reply_markup=kb.back(), parse_mode='HTML')
         else:
-            await message.answer(text, reply_markup=kb.back())
+            await message.answer(text, reply_markup=kb.back(), parse_mode='HTML')
     else:
-        text = f"✅ Анкета для {game_name} создана!"
-        await message.answer(text, reply_markup=kb.back())
+        text = f"Анкета для {game_name} создана!"
+        await message.answer(text, reply_markup=kb.back(), parse_mode='HTML')
 
 async def save_profile_flow_callback(callback: CallbackQuery, state: FSMContext, photo_id: str, db):
     """Сохранение профиля через callback"""
@@ -369,9 +369,9 @@ async def save_profile_flow_callback(callback: CallbackQuery, state: FSMContext,
 
     if success:
         game_name = settings.GAMES.get(data['game'], data['game'])
-        text = f"✅ Анкета для {game_name} создана! Теперь можете искать сокомандников."
+        text = f"Анкета для {game_name} создана! Теперь можете искать сокомандников."
         await safe_edit_message(callback, text, kb.back())
     else:
-        await safe_edit_message(callback, "❌ Ошибка сохранения", kb.back())
+        await safe_edit_message(callback, "Ошибка сохранения", kb.back())
 
     await callback.answer()

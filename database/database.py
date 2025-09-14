@@ -353,6 +353,7 @@ class Database:
             return True
 
     # === ПРОФИЛИ ===
+# === ПРОФИЛИ ===
 
     async def get_user_profile(self, telegram_id: int, game: str) -> Optional[Dict]:
         """Получение профиля пользователя с кэшированием"""
@@ -375,24 +376,24 @@ class Database:
             profile = self._format_profile(row)
             await self._set_cache(cache_key, profile, self._cache_ttl['profile'])
             return profile
-
+    
     async def has_profile(self, telegram_id: int, game: str) -> bool:
         """Проверка наличия профиля с кэшированием"""
         profile = await self.get_user_profile(telegram_id, game)
         return profile is not None
 
     async def update_user_profile(self, telegram_id: int, game: str, name: str, nickname: str,
-                          age: int, rating: str, region: str, positions: List[str],
-                          additional_info: str, photo_id: str = None) -> bool:
+                        age: int, rating: str, region: str, positions: List[str],
+                        additional_info: str, photo_id: str = None) -> bool:
         """Создание/обновление профиля пользователя"""
         async with self._pg_pool.acquire() as conn:
             await conn.execute(
                 '''INSERT INTO profiles (telegram_id, game, name, nickname, age, rating, region, positions, additional_info, photo_id)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-                   ON CONFLICT (telegram_id, game)
-                   DO UPDATE SET
-                       name = $3, nickname = $4, age = $5, rating = $6,
-                       region = $7, positions = $8, additional_info = $9, photo_id = $10''',
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                ON CONFLICT (telegram_id, game)
+                DO UPDATE SET
+                    name = $3, nickname = $4, age = $5, rating = $6,
+                    region = $7, positions = $8, additional_info = $9, photo_id = $10''',
                 telegram_id, game, name, nickname, age, rating, region,
                 json.dumps(positions), additional_info, photo_id
             )
@@ -434,6 +435,7 @@ class Database:
                 return True
 
     # === ОПТИМИЗИРОВАННЫЙ ПОИСК ===
+        # === ОПТИМИЗИРОВАННЫЙ ПОИСК ===
 
     async def get_potential_matches(self, user_id: int, game: str,
                             rating_filter: str = None,
@@ -454,7 +456,7 @@ class Database:
                 SELECT DISTINCT to_user as user_id FROM likes 
                 WHERE from_user = $1 AND game = $2
                 UNION
-                -- Исключаем пожаловавшихся
+                -- Исключаем тех, на кого жаловались (НОВОЕ)
                 SELECT DISTINCT reported_user_id as user_id FROM reports 
                 WHERE reporter_id = $1 AND game = $2
                 UNION

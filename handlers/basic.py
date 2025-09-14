@@ -36,33 +36,39 @@ def check_ban_and_profile(require_profile=True):
                 raise RuntimeError("Database instance not provided. Ensure DatabaseMiddleware injects 'db'.")
 
             user_id = callback.from_user.id
-            user = await db.get_user(user_id)
-            if not user or not user.get('current_game'):
-                await callback.answer("❌ Ошибка", show_alert=True)
-                return
-
-            game = user['current_game']
-
+            
+            # СНАЧАЛА проверяем бан
             if await db.is_user_banned(user_id):
                 ban_info = await db.get_user_ban(user_id)
-                game_name = settings.GAMES.get(game, game)
                 if ban_info:
                     expires_at = ban_info['expires_at']
                     if isinstance(expires_at, str):
                         ban_end = expires_at[:16]
                     else:
                         ban_end = expires_at.strftime("%Y-%m-%d %H:%M")
-                    text = f"🚫 Вы заблокированы в {game_name} до {ban_end}"
+                    text = f"Вы заблокированы до {ban_end} за: {ban_info.get('reason', 'нарушение правил')}"
                 else:
-                    text = f"🚫 Вы заблокированы в {game_name}"
-                    await safe_edit_message(callback, text, kb.back())
-                    await callback.answer()
-                    return
-
-            if require_profile and not await db.has_profile(user_id, game):
-                game_name = settings.GAMES.get(game, game)
-                await callback.answer(f"❌ Сначала создайте анкету для {game_name}", show_alert=True)
+                    text = "Вы заблокированы"
+                
+                await safe_edit_message(callback, text, kb.back())
+                await callback.answer()
                 return
+
+            # Затем проверяем пользователя и игру
+            user = await db.get_user(user_id)
+            if not user or not user.get('current_game'):
+                await callback.answer("Ошибка", show_alert=True)
+                return
+
+            game = user['current_game']
+
+            if require_profile:
+                profile = await db.get_user_profile(user_id, game)
+                has_profile = profile is not None
+                if not has_profile:
+                    game_name = settings.GAMES.get(game, game)
+                    await callback.answer(f"Сначала создайте анкету для {game_name}", show_alert=True)
+                    return
 
             return await func(callback, *args, db=db, **kwargs)
         return wrapper
@@ -73,7 +79,7 @@ def admin_only(func):
     @wraps(func)
     async def wrapper(callback: CallbackQuery, *args, **kwargs):
         if callback.from_user.id != settings.ADMIN_ID:
-            await callback.answer("❌ Нет прав", show_alert=True)
+            await callback.answer("Нет прав", show_alert=True)
             return
         return await func(callback, *args, **kwargs)
     return wrapper
@@ -100,10 +106,11 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
             await callback.bot.send_message(
                 chat_id=message.chat.id,
                 text=text,
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                parse_mode='HTML'
             )
         else:
-            await message.edit_text(text, reply_markup=reply_markup)
+            await message.edit_text(text=text, reply_markup=reply_markup, parse_mode='HTML')
 
     except Exception as e:
         logger.error(f"Ошибка редактирования сообщения: {e}")
@@ -115,7 +122,8 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
             await callback.bot.send_message(
                 chat_id=callback.message.chat.id,
                 text=text,
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                parse_mode='HTML'
             )
         except Exception as e2:
             logger.error(f"Ошибка отправки нового сообщения: {e2}")
@@ -139,7 +147,7 @@ async def check_subscription(user_id: int, game: str, bot: Bot) -> bool:
 def get_main_menu_text(game: str, has_profile: bool) -> str:
     """Генерация текста главного меню"""
     game_name = settings.GAMES.get(game, game)
-    text = f"🏠 Главное меню\n\nИгра: {game_name}"
+    text = f"Главное меню\n\nИгра: {game_name}"
 
     if has_profile:
         text += "\n\nВыберите действие:"
@@ -155,42 +163,59 @@ async def cmd_start(message: Message, db):
     user_id = message.from_user.id
     logger.info(f"Пользователь {user_id} запустил бота")
 
+    # Проверяем бан в самом начале
+    if await db.is_user_banned(user_id):
+        ban_info = await db.get_user_ban(user_id)
+        if ban_info:
+            expires_at = ban_info['expires_at']
+            if isinstance(expires_at, str):
+                ban_end = expires_at[:16]
+            else:
+                ban_end = expires_at.strftime("%Y-%m-%d %H:%M")
+            text = f"Вы заблокированы до {ban_end}\n\nПричина: {ban_info.get('reason', 'нарушение правил')}"
+        else:
+            text = "Вы заблокированы"
+        
+        await message.answer(text, parse_mode='HTML')
+        return
+
     user = await db.get_user(user_id)
 
     if user and user.get('current_game'):
         game = user['current_game']
-        has_profile = await db.has_profile(user_id, game)
+        profile = await db.get_user_profile(user_id, game)
+        has_profile = profile is not None
         text = get_main_menu_text(game, has_profile)
-        await message.answer(text, reply_markup=kb.main_menu(has_profile, game))
+        await message.answer(text, reply_markup=kb.main_menu(has_profile, game), parse_mode='HTML')
     else:
-        await message.answer(texts.WELCOME, reply_markup=kb.game_selection())
+        await message.answer(texts.WELCOME, reply_markup=kb.game_selection(), parse_mode='HTML')
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
-    help_text = """🎮 TeammateBot - Помощь
+    help_text = """TeammateBot - Помощь
 
-🔍 Функции:
-• Создание анкеты для каждой игры
-• Поиск сокомандников
-• Система лайков и матчей
+Функции:
+- Создание анкеты для каждой игры
+- Поиск сокомандников
+- Система лайков и матчей
 
-📝 Как пользоваться:
+Как пользоваться:
 1. Выберите игру (Dota 2 или CS2)
 2. Создайте анкету для выбранной игры
 3. Ищите игроков с фильтрами
 4. Лайкайте понравившихся
 5. При взаимном лайке получите контакты
 
-⚙️ Команды:
+Команды:
 /start - Главное меню
 /help - Эта справка"""
 
-    await message.answer(help_text)
+    await message.answer(help_text, parse_mode='HTML')
 
 @router.message(Command("admin"))
 @admin_only
 async def cmd_admin(message: Message):
-    await message.answer("👑 Админ панель", reply_markup=kb.admin_main_menu())
+    await message.answer("Админ панель", reply_markup=kb.admin_main_menu(), parse_mode='HTML')
 
 # ==================== ВЫБОР И ПЕРЕКЛЮЧЕНИЕ ИГР ====================
 
@@ -204,11 +229,11 @@ async def select_game(callback: CallbackQuery, db):
         game_name = settings.GAMES.get(game, game)
         channel = settings.DOTA_CHANNEL if game == "dota" else settings.CS_CHANNEL
 
-        text = (f"❌ Чтобы использовать {game_name}, нужно подписаться на канал: {channel}\n\n"
+        text = (f"Чтобы использовать {game_name}, нужно подписаться на канал: {channel}\n\n"
                "1. Нажмите кнопку для перехода в канал\n"
                "2. Подпишитесь на канал\n"
-               "3. Вернитесь в бота и нажмите '✅ Я подписался'\n\n"
-               "Или нажмите '⬅️ Назад' для выбора другой игры:")
+               "3. Вернитесь в бота и нажмите 'Я подписался'\n\n"
+               "Или нажмите 'Назад' для выбора другой игры:")
 
         await safe_edit_message(callback, text, kb.subscribe_channel_keyboard(game))
         await callback.answer()
@@ -217,7 +242,8 @@ async def select_game(callback: CallbackQuery, db):
     logger.info(f"Пользователь {user_id} выбрал игру: {game}")
 
     await db.create_user(user_id, username, game)
-    has_profile = await db.has_profile(user_id, game)
+    profile = await db.get_user_profile(user_id, game)
+    has_profile = profile is not None
     text = get_main_menu_text(game, has_profile)
 
     await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
@@ -230,7 +256,7 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db
 
     if len(parts) < 4:
         logger.error(f"Неверный формат callback_data: {callback.data}")
-        await callback.answer("❌ Ошибка данных", show_alert=True)
+        await callback.answer("Ошибка данных", show_alert=True)
         return
 
     game = parts[3]
@@ -238,13 +264,13 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db
 
     if game not in settings.GAMES:
         logger.error(f"Неверная игра в callback: {game}")
-        await callback.answer("❌ Неверная игра", show_alert=True)
+        await callback.answer("Неверная игра", show_alert=True)
         return
 
     logger.info(f"Переключение на игру {game} для показа матчей пользователя {user_id}")
 
     if not await db.switch_game(user_id, game):
-        await callback.answer("❌ Ошибка переключения игры", show_alert=True)
+        await callback.answer("Ошибка переключения игры", show_alert=True)
         return
 
     await state.clear()
@@ -252,7 +278,7 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db
     if await db.is_user_banned(user_id):
         ban_info = await db.get_user_ban(user_id)
         game_name = settings.GAMES.get(game, game)
-        text = f"🚫 Вы заблокированы в {game_name}"
+        text = f"Вы заблокированы в {game_name}"
         if ban_info:
             expires_at = ban_info['expires_at']
             if isinstance(expires_at, str):
@@ -265,12 +291,13 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db
         await callback.answer()
         return
 
-    if not await db.has_profile(user_id, game):
+    profile = await db.get_user_profile(user_id, game)
+    if not profile:
         game_name = settings.GAMES.get(game, game)
-        await callback.answer(f"❌ Сначала создайте анкету для {game_name}", show_alert=True)
+        await callback.answer(f"Сначала создайте анкету для {game_name}", show_alert=True)
         return
 
-    await show_matches(callback, user_id, game)
+    await show_matches(callback, user_id, game, db)
 
 async def show_matches(callback: CallbackQuery, user_id: int, game: str, db):
     """Показ матчей пользователя"""
@@ -278,41 +305,41 @@ async def show_matches(callback: CallbackQuery, user_id: int, game: str, db):
     game_name = settings.GAMES.get(game, game)
 
     if not matches:
-        text = f"💔 У вас пока нет матчей в {game_name}\n\n"
-        text += "Чтобы получить матчи:\n"
+        text = f"У вас пока нет матчей в {game_name}\n\n"
+        text += "Чтобы получить мэтчи:\n"
         text += "• Лайкайте анкеты в поиске\n"
         text += "• Отвечайте на лайки других игроков"
         await safe_edit_message(callback, text, kb.back())
-        await callback.answer(f"✅ Переключено на {game_name}")
+        await callback.answer(f"Переключено на {game_name}")
         return
 
-    text = f"💖 Ваши матчи в {game_name} ({len(matches)}):\n\n"
+    text = f"Ваши мэтчи в {game_name} ({len(matches)}):\n\n"
     for i, match in enumerate(matches, 1):
         name = match['name']
         username = match.get('username', 'нет username')
         text += f"{i}. {name} (@{username})\n"
 
-    text += "\n💬 Вы можете связаться с любым из них!"
+    text += "\n Вы можете связаться с любым из них!"
 
     buttons = []
     for i, match in enumerate(matches[:5]):
         name = match['name'][:15] + "..." if len(match['name']) > 15 else match['name']
         buttons.append([kb.InlineKeyboardButton(
-            text=f"💬 {name}", 
+            text=f" {name}", 
             callback_data=f"contact_{match['telegram_id']}"
         )])
 
-    buttons.append([kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+    buttons.append([kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")])
     keyboard = kb.InlineKeyboardMarkup(inline_keyboard=buttons)
 
     await safe_edit_message(callback, text, keyboard)
-    await callback.answer(f"✅ Переключено на {game_name}")
+    await callback.answer(f"Переключено на {game_name}")
 
 @router.callback_query(F.data.startswith("switch_"))
 async def switch_game(callback: CallbackQuery, db):
     parts = callback.data.split("_")
     if len(parts) < 2:
-        await callback.answer("❌ Ошибка", show_alert=True)
+        await callback.answer("Ошибка", show_alert=True)
         return
 
     game = parts[1]
@@ -322,20 +349,21 @@ async def switch_game(callback: CallbackQuery, db):
         game_name = settings.GAMES.get(game, game)
         channel = settings.DOTA_CHANNEL if game == "dota" else settings.CS_CHANNEL
 
-        text = (f"❌ Чтобы использовать {game_name}, нужно подписаться на канал: {channel}\n\n"
+        text = (f"Чтобы использовать {game_name}, нужно подписаться на канал: {channel}\n\n"
                "1. Нажмите кнопку для перехода в канал\n"
                "2. Подпишитесь на канал\n"
-               "3. Вернитесь в бота и нажмите '✅ Я подписался'\n\n"
-               "Или нажмите '⬅️ Назад' для выбора другой игры:")
+               "3. Вернитесь в бота и нажмите 'Я подписался'\n\n"
+               "Или нажмите 'Назад' для выбора другой игры:")
 
-        await callback.message.edit_text(text, reply_markup=kb.subscribe_channel_keyboard(game))
+        await callback.message.edit_text(text, reply_markup=kb.subscribe_channel_keyboard(game), parse_mode='HTML')
         await callback.answer()
         return
 
     logger.info(f"Переключение на игру: {game}")
 
     await db.switch_game(user_id, game)
-    has_profile = await db.has_profile(user_id, game)
+    profile = await db.get_user_profile(user_id, game)
+    has_profile = profile is not None
     text = get_main_menu_text(game, has_profile)
 
     await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
@@ -354,11 +382,13 @@ async def show_main_menu(callback: CallbackQuery, db):
         return
 
     game = user['current_game']
-    has_profile = await db.has_profile(user_id, game)
+    profile = await db.get_user_profile(user_id, game)
+    has_profile = profile is not None
 
     if not has_profile:
         other_game = "dota" if game == "cs" else "cs"
-        has_other_profile = await db.has_profile(user_id, other_game)
+        other_profile = await db.get_user_profile(user_id, other_game)
+        has_other_profile = other_profile is not None
 
         if has_other_profile:
             await db.switch_game(user_id, other_game)
@@ -384,7 +414,7 @@ async def view_profile(callback: CallbackQuery, db):
 
     profile_text = texts.format_profile(profile, show_contact=True)
     game_name = settings.GAMES.get(game, game)
-    text = f"👤 Ваша анкета в {game_name}:\n\n{profile_text}"
+    text = f"Ваша анкета в {game_name}:\n\n{profile_text}"
 
     try:
         if profile.get('photo_id'):
@@ -392,7 +422,8 @@ async def view_profile(callback: CallbackQuery, db):
             await callback.message.answer_photo(
                 photo=profile['photo_id'],
                 caption=text,
-                reply_markup=kb.back()
+                reply_markup=kb.back(),
+                parse_mode='HTML'
             )
         else:
             await safe_edit_message(callback, text, kb.back())
@@ -413,7 +444,7 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
     profile = await db.get_user_profile(user_id, game)
 
     game_name = settings.GAMES.get(game, game)
-    current_info = f"📝 Текущая анкета в {game_name}:\n\n"
+    current_info = f"Текущая анкета в {game_name}:\n\n"
     current_info += texts.format_profile(profile, show_contact=True)
     current_info += "\n\nЧто хотите изменить?"
 
@@ -425,17 +456,18 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
             await callback.message.answer_photo(
                 photo=profile['photo_id'],
                 caption=current_info,
-                reply_markup=keyboard
+                reply_markup=keyboard,
+                parse_mode='HTML'
             )
         else:
-            await callback.message.edit_text(current_info, reply_markup=keyboard)
+            await callback.message.edit_text(current_info, reply_markup=keyboard, parse_mode='HTML')
     except Exception as e:
         logger.error(f"Ошибка отображения профиля для редактирования: {e}")
         try:
-            await callback.message.edit_text(current_info, reply_markup=keyboard)
+            await callback.message.edit_text(current_info, reply_markup=keyboard, parse_mode='HTML')
         except:
             await callback.message.delete()
-            await callback.message.answer(current_info, reply_markup=keyboard)
+            await callback.message.answer(current_info, reply_markup=keyboard, parse_mode='HTML')
 
     await callback.answer()
 
@@ -459,9 +491,9 @@ async def back_to_search_handler(callback: CallbackQuery, state: FSMContext, db)
     await state.set_state(SearchForm.filters)
 
     game_name = settings.GAMES.get(game, game)
-    text = f"🔍 Поиск в {game_name}\n\nФильтры:\n\n"
-    text += "🏆 Рейтинг: любой\n"
-    text += "⚔️ Позиция: любая\n\n"
+    text = f"Поиск в {game_name}\n\nФильтры:\n\n"
+    text += "<b>Рейтинг:</b> любой\n"
+    text += "<b>Позиция:</b> любая\n\n"
     text += "Настройте фильтры или начните поиск:"
 
     await safe_edit_message(callback, text, kb.search_filters())

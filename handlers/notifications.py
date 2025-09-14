@@ -64,13 +64,15 @@ async def safe_send_notification(
                 chat_id=user_id,
                 photo=photo_id,
                 caption=text,
-                reply_markup=keyboard
+                reply_markup=keyboard, 
+                parse_mode= 'HTML'
             )
         else:
             await bot.send_message(
                 chat_id=user_id,
                 text=text,
-                reply_markup=keyboard
+                reply_markup=keyboard, 
+                parse_mode= 'HTML'
             )
         return True
     except Exception as e:
@@ -100,19 +102,19 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: s
             game_name = settings.GAMES.get(game, game)
 
             if not match_profile:
-                text = f"🎉 У вас новый матч в {game_name}!"
+                text = f"У вас новый мэтч в {game_name}!"
                 return await _send_notification_internal(bot, user_id, text)
 
             profile_text = texts.format_profile(match_profile, show_contact=True)
-            text = f"🎉 У вас новый матч в {game_name}!\n\n{profile_text}"
+            text = f"У вас новый мэтч в {game_name}!\n\n{profile_text}"
 
             current_user = await db.get_user(user_id)
             buttons: List[Tuple[str, str]] = []
             if current_user and current_user.get('current_game') != game:
-                buttons.append((f"💖 Перейти к матчам в {game_name}", f"switch_and_matches_{game}"))
+                buttons.append((f"Перейти к мэтчам в {game_name}", f"switch_and_matches_{game}"))
             else:
-                buttons.append(("💖 Мои матчи", "my_matches"))
-            buttons.append(("🏠 Главное меню", "main_menu"))
+                buttons.append(("Мои мэтчи", "my_matches"))
+            buttons.append(("Главное меню", "main_menu"))
 
             keyboard = kb.create_navigation_keyboard(buttons)
             return await _send_notification_internal(
@@ -147,11 +149,11 @@ async def notify_about_like(bot: Bot, user_id: int, game: str, db=None) -> bool:
                 actual_game = game
 
             game_name = settings.GAMES.get(actual_game, actual_game)
-            text = f"❤️ Кто-то лайкнул вашу анкету в {game_name}! Зайдите в «Лайки», чтобы посмотреть."
+            text = f"Кто-то лайкнул вашу анкету в {game_name}! Зайдите в «Лайки», чтобы посмотреть."
 
             keyboard = kb.create_navigation_keyboard([
-                ("❤️ Посмотреть лайки", "my_likes"),
-                ("🏠 Главное меню", "main_menu"),
+                ("Посмотреть лайки", "my_likes"),
+                ("Главное меню", "main_menu"),
             ])
 
             return await _send_notification_internal(bot, user_id, text, None, keyboard)
@@ -208,7 +210,7 @@ async def notify_user_banned(bot: Bot, user_id: int, expires_at: str) -> bool:
                     f"• Создавать анкеты\n"
                     f"• Искать игроков\n"
                     f"• Ставить лайки\n"
-                    f"• Просматривать лайки и матчи")
+                    f"• Просматривать лайки и мэтчи")
             return await _send_notification_internal(bot, user_id, text)
 
         except Exception as e:
