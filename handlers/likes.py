@@ -62,8 +62,8 @@ async def process_like_action(callback: CallbackQuery, target_user_id: int, acti
 async def handle_match_created(callback: CallbackQuery, target_user_id: int, game: str, db):
     """Обработка создания матча"""
     user_id = callback.from_user.id
-    notify_about_match(callback.bot, user_id, target_user_id, game, db)
-    notify_about_match(callback.bot, target_user_id, user_id, game, db)
+    await notify_about_match(callback.bot, user_id, target_user_id, game, db)
+    await notify_about_match(callback.bot, target_user_id, user_id, game, db)
     
     target_profile = await db.get_user_profile(target_user_id, game)
     

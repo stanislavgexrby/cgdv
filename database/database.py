@@ -267,14 +267,16 @@ class Database:
     # === ОПТИМИЗИРОВАННОЕ КЭШИРОВАНИЕ ===
 
     async def _get_cache(self, key: str):
-        """Получение из кэша с обработкой ошибок"""
+        raw = await self._redis.get(key)
+        if raw is None:
+            return None
+        if isinstance(raw, bytes):
+            raw = raw.decode()
         try:
-            data = await self._redis.get(key)
-            if data:
-                return json.loads(data)
-        except Exception as e:
-            logger.warning(f"Ошибка чтения из кэша {key}: {e}")
-        return None
+            return json.loads(raw)
+        except Exception:
+            return raw
+
 
     async def _set_cache(self, key: str, data, ttl: int = 600):
         """Сохранение в кэш с обработкой ошибок"""
@@ -626,7 +628,7 @@ class Database:
         cache_key = f"ban:{user_id}"
         cached = await self._get_cache(cache_key)
         if cached is not None:
-            return cached
+            return bool(cached)
 
         async with self._pg_pool.acquire() as conn:
             row = await conn.fetchval(
