@@ -200,8 +200,6 @@ async def handle_report_action(callback: CallbackQuery, db):
         await _delete_profile_action(callback, report_id, user_id, db)
     elif action == "ban":
         await _ban_user_action(callback, report_id, user_id, days, db)
-    elif action == "ok":
-        await _approve_report_action(callback, report_id, db)
     elif action == "ignore":
         await _dismiss_report_action(callback, report_id, db)
     elif action == "next":
@@ -243,14 +241,29 @@ async def _ban_user_action(callback: CallbackQuery, report_id: int, user_id: int
     
     await _show_next_report(callback, db)
 
-async def _approve_report_action(callback: CallbackQuery, report_id: int, db):
-    """Одобрение жалобы без действий"""
-    success = await db.update_report_status(report_id, status="resolved", admin_id=callback.from_user.id)
+async def unban_user(callback: CallbackQuery, db):
+    """Снятие бана"""
+    try:
+        user_id = int(callback.data.split("_")[2])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Ошибка данных", show_alert=True)
+        return
     
-    message = "✅ Жалоба одобрена" if success else "❌ Ошибка обновления"
-    await callback.answer(message, show_alert=not success)
+    success = await db.unban_user(user_id)
     
-    await _show_next_report(callback, db)
+    if success:
+        notify_user_unbanned(callback.bot, user_id)
+        logger.info(f"Админ снял бан с пользователя {user_id}")
+        await callback.answer("✅ Бан снят")
+        
+        bans = await db.get_all_bans()
+        if not bans:
+            text = "✅ Бан снят!\n\nБольше активных банов нет."
+            await safe_edit_message(callback, text, kb.admin_back_menu())
+        else:
+            await _show_ban(callback, bans[0], 0, len(bans))
+    else:
+        await callback.answer("❌ Ошибка снятия бана", show_alert=True)
 
 async def _dismiss_report_action(callback: CallbackQuery, report_id: int, db):
     """Отклонение жалобы"""
@@ -303,33 +316,6 @@ async def _show_ban(callback: CallbackQuery, ban: dict, current_index: int, tota
     keyboard = kb.admin_ban_actions_with_nav(ban['user_id'], current_index, total_bans)
     await safe_edit_message(callback, ban_text, keyboard)
     await callback.answer()
-
-@router.callback_query(F.data.startswith("admin_unban_"))
-@admin_only
-async def unban_user(callback: CallbackQuery, db):
-    """Снятие бана"""
-    try:
-        user_id = int(callback.data.split("_")[2])
-    except (ValueError, IndexError):
-        await callback.answer("❌ Ошибка данных", show_alert=True)
-        return
-    
-    success = await db.unban_user(user_id)
-    
-    if success:
-        notify_user_unbanned(callback.bot, user_id)
-        logger.info(f"Админ снял бан с пользователя {user_id}")
-        await callback.answer("✅ Бан снят")
-        
-        # Показываем обновленный список банов
-        bans = await db.get_all_bans()
-        if not bans:
-            text = "✅ Бан снят!\n\nБольше активных банов нет."
-            await safe_edit_message(callback, text, kb.admin_back_menu())
-        else:
-            await _show_ban(callback, bans[0], 0, len(bans))
-    else:
-        await callback.answer("❌ Ошибка снятия бана", show_alert=True)
 
 @router.callback_query(F.data.startswith("admin_ban_"))
 @admin_only

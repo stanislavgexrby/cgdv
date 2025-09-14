@@ -353,8 +353,7 @@ def admin_report_actions(reported_user_id: int, report_id: int) -> InlineKeyboar
             InlineKeyboardButton(text="🚫 Бан 7д", callback_data=f"rep:ban:{report_id}:{reported_user_id}:7")
         ],
         [
-            InlineKeyboardButton(text="🚫 Бан 30д", callback_data=f"rep:ban:{report_id}:{reported_user_id}:30"),
-            InlineKeyboardButton(text="✅ Одобрить", callback_data=f"rep:ok:{report_id}:{reported_user_id}")
+            InlineKeyboardButton(text="🚫 Бан 30д", callback_data=f"rep:ban:{report_id}:{reported_user_id}:30")
         ],
         [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"rep:ignore:{report_id}")],
         [InlineKeyboardButton(text="➡️ Следующая", callback_data=f"rep:next")],

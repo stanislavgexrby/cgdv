@@ -46,11 +46,15 @@ def check_ban_and_profile(require_profile=True):
             if await db.is_user_banned(user_id):
                 ban_info = await db.get_user_ban(user_id)
                 game_name = settings.GAMES.get(game, game)
-                if ban_info:
-                    ban_end = ban_info['expires_at'][:16]
-                    text = f"🚫 Вы заблокированы в {game_name} до {ban_end}"
+            if ban_info:
+                expires_at = ban_info['expires_at']
+                if isinstance(expires_at, str):
+                    ban_end = expires_at[:16]
                 else:
-                    text = f"🚫 Вы заблокированы в {game_name}"
+                    ban_end = expires_at.strftime("%Y-%m-%d %H:%M")
+                text = f"🚫 Вы заблокированы в {game_name} до {ban_end}"
+            else:
+                text = f"🚫 Вы заблокированы в {game_name}"
                 await safe_edit_message(callback, text, kb.back())
                 await callback.answer()
                 return
@@ -250,8 +254,12 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db
         game_name = settings.GAMES.get(game, game)
         text = f"🚫 Вы заблокированы в {game_name}"
         if ban_info:
-            text += f" до {ban_info['expires_at'][:16]}"
-        text += "\n\nРаздел 'Матчи' недоступен."
+            expires_at = ban_info['expires_at']
+            if isinstance(expires_at, str):
+                ban_end = expires_at[:16]
+            else:
+                ban_end = expires_at.strftime("%Y-%m-%d %H:%M")
+            text += f" до {ban_end}"
 
         await safe_edit_message(callback, text, kb.back())
         await callback.answer()
