@@ -73,6 +73,12 @@ def subscribe_channel_keyboard(game: str, from_switch: bool = False) -> InlineKe
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def notification_ok() -> InlineKeyboardMarkup:
+    """Кнопка OK для уведомлений"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="✅ Понятно", callback_data="dismiss_notification")]
+    ])
+
 # ==================== СОЗДАНИЕ И РЕДАКТИРОВАНИЕ ПРОФИЛЕЙ ====================
 
 def ratings(game: str, for_profile: bool = True, with_cancel: bool = False) -> InlineKeyboardMarkup:

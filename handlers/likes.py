@@ -63,14 +63,21 @@ async def process_like_action(callback: CallbackQuery, target_user_id: int, acti
 async def handle_match_created(callback: CallbackQuery, target_user_id: int, game: str, db):
     """Обработка создания матча"""
     user_id = callback.from_user.id
-    # await notify_about_match(callback.bot, user_id, target_user_id, game, db)
     await notify_about_match(callback.bot, target_user_id, user_id, game, db)
-    
+
     target_profile = await db.get_user_profile(target_user_id, game)
-    
+
     if target_profile:
         match_text = texts.format_profile(target_profile, show_contact=True)
         text = f"{texts.MATCH_CREATED}\n\n{match_text}"
+
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="Другие лайки", callback_data="my_likes")],
+            [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+        ])
+
+        await show_profile_with_photo(callback, target_profile, text, keyboard)
+
     else:
         text = texts.MATCH_CREATED
         if target_profile and target_profile.get('username'):
@@ -78,12 +85,14 @@ async def handle_match_created(callback: CallbackQuery, target_user_id: int, gam
         else:
             text += "\n\n(У пользователя нет @username)"
 
-    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
-        [kb.InlineKeyboardButton(text="Другие лайки", callback_data="my_likes")],
-        [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
-    ])
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="Другие лайки", callback_data="my_likes")],
+            [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+        ])
 
-    await safe_edit_message(callback, text, keyboard)
+        await safe_edit_message(callback, text, keyboard)
+        await callback.answer()
+
     logger.info(f"Взаимный лайк: {callback.from_user.id} <-> {target_user_id}")
 
 async def show_next_like_or_finish(callback: CallbackQuery, user_id: int, game: str, db):

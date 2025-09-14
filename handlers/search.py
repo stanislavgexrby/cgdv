@@ -3,11 +3,12 @@ from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 
+from handlers.basic import check_ban_and_profile, safe_edit_message, SearchForm
+from handlers.notifications import notify_about_match, notify_about_like, update_user_activity
+
 import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
-from handlers.basic import check_ban_and_profile, safe_edit_message, SearchForm
-from handlers.notifications import notify_about_match, notify_about_like
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -191,6 +192,8 @@ async def start_search(callback: CallbackQuery, state: FSMContext, db):
     user = await db.get_user(user_id)
     game = user['current_game']
 
+    await update_user_activity(user_id, 'search_setup', db)
+
     await state.clear()
     await state.update_data(
         user_id=user_id,
@@ -328,6 +331,8 @@ async def cancel_filter(callback: CallbackQuery, state: FSMContext):
 async def begin_search(callback: CallbackQuery, state: FSMContext, db):
     """Начать поиск с применением фильтров"""
     data = await state.get_data()
+
+    await update_user_activity(data['user_id'], 'search_browsing', db)
 
     profiles = await db.get_potential_matches(
         user_id=data['user_id'],

@@ -7,10 +7,12 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+from handlers.notifications import update_user_activity
+from handlers.basic import check_ban_and_profile, safe_edit_message
+
 import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
-from handlers.basic import check_ban_and_profile, safe_edit_message
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -85,6 +87,8 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext, db):
         await callback.answer("Ошибка", show_alert=True)
         return
 
+    await update_user_activity(user_id, 'profile_creation', db)
+
     game = user['current_game']
     game_name = settings.GAMES.get(game, game)
 
@@ -94,6 +98,7 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext, db):
         positions_selected=[]
     )
     await state.set_state(ProfileForm.name)
+    await update_user_activity(user_id, 'profile_creation', db)
     text = f"Создание анкеты для {game_name}\n\n{texts.QUESTIONS['name']}"
 
     await safe_edit_message(callback, text, kb.cancel_profile_creation())
@@ -339,6 +344,8 @@ async def save_profile_flow(message: Message, state: FSMContext, photo_id: str |
         return
 
     await state.clear()
+
+    await update_user_activity(user_id, 'available', db)
 
     profile = await db.get_user_profile(user_id, payload['game'])
     game_name = settings.GAMES.get(payload['game'], payload['game'])

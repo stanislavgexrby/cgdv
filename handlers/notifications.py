@@ -2,7 +2,7 @@ import asyncio
 import logging
 from typing import Optional, List, Tuple, Dict, Any
 from aiogram import Bot
-from aiogram.types import InlineKeyboardMarkup
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from datetime import datetime
 
 import utils.texts as texts
@@ -52,29 +52,100 @@ _notification_queue = NotificationQueue()
 
 # ==================== БАЗОВЫЕ ФУНКЦИИ ====================
 
+async def get_user_interaction_state(user_id: int, db) -> str:
+    """Определяем состояние взаимодействия пользователя"""
+    try:
+        cache_key = f"user_state:{user_id}"
+        last_state = await db._redis.get(cache_key)
+        
+        busy_states = [
+            'search_browsing',     # Просматривает анкеты
+            'profile_editing',     # Редактирует профиль
+            'profile_creation',    # Создает профиль
+            'search_setup'         # Настраивает фильтры поиска
+        ]
+        
+        if last_state in busy_states:
+            return 'busy'
+        
+        return 'available'
+        
+    except Exception as e:
+        logger.warning(f"Ошибка определения состояния пользователя {user_id}: {e}")
+        return 'available'
+
+async def smart_notification(bot: Bot, user_id: int, text: str, 
+                           quick_actions: List[Tuple[str, str]] = None, 
+                           photo_id: Optional[str] = None, db=None):
+    """Умное уведомление в зависимости от состояния пользователя"""
+    try:
+        user_state = await get_user_interaction_state(user_id, db) if db else 'available'
+        
+        if user_state == 'busy':
+            # Простое текстовое уведомление без кнопок действий
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="✅ Понятно", callback_data="dismiss_notification")]
+            ])
+            notification_text = f"🔔 {text}"
+            return await safe_send_notification(bot, user_id, notification_text, None, keyboard)
+        else:
+            # Полное уведомление с быстрыми действиями
+            if quick_actions:
+                keyboard = kb.create_navigation_keyboard(quick_actions)
+            else:
+                keyboard = kb.create_navigation_keyboard([("Главное меню", "main_menu")])
+            return await safe_send_notification(bot, user_id, text, photo_id, keyboard)
+            
+    except Exception as e:
+        logger.error(f"Ошибка отправки умного уведомления: {e}")
+        return False
+
+async def update_user_activity(user_id: int, state: str = None, db=None):
+    """Обновляем активность и состояние пользователя"""
+    if not db:
+        return
+        
+    try:
+        import time
+        current_time = time.time()
+        
+        # Обновляем время последней активности
+        activity_key = f"last_activity:{user_id}"
+        await db._redis.setex(activity_key, 300, str(current_time))  # 5 минут
+        
+        # Обновляем состояние если передано
+        if state:
+            state_key = f"user_state:{user_id}"
+            await db._redis.setex(state_key, 300, state)  # 5 минут
+            
+    except Exception as e:
+        logger.warning(f"Ошибка обновления активности пользователя {user_id}: {e}")
+
 async def safe_send_notification(
     bot: Bot,
     user_id: int,
     text: str,
     photo_id: Optional[str] = None,
-    keyboard: Optional[InlineKeyboardMarkup] = None
+    add_ok_button: bool = True
 ) -> bool:
     """Безопасная отправка уведомления пользователю"""
     try:
+        keyboard = kb.notification_ok() if add_ok_button else None
+
         if photo_id:
             await bot.send_photo(
                 chat_id=user_id,
                 photo=photo_id,
                 caption=text,
                 reply_markup=keyboard, 
-                parse_mode= 'HTML'
+                parse_mode='HTML'
             )
         else:
             await bot.send_message(
                 chat_id=user_id,
                 text=text,
                 reply_markup=keyboard, 
-                parse_mode= 'HTML'
+                parse_mode='HTML'
             )
         return True
     except Exception as e:
@@ -97,47 +168,33 @@ async def _send_notification_internal(
 # ==================== УВЕДОМЛЕНИЯ О МАТЧАХ ====================
 
 async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: str, db) -> bool:
-    """Уведомление о новом матче (асинхронное)"""
+    """Уведомление о новом матче (упрощенное, как лайки)"""
     async def _notify():
         try:
-            match_profile = await db.get_user_profile(match_user_id, game)
             game_name = settings.GAMES.get(game, game)
-
-            if not match_profile:
-                text = f"У вас новый мэтч в {game_name}!"
-                return await _send_notification_internal(bot, user_id, text)
-
-            profile_text = texts.format_profile(match_profile, show_contact=True)
-            text = f"У вас новый мэтч в {game_name}!\n\n{profile_text}"
+            text = f"У вас новый мэтч в {game_name}! Зайдите в «Мэтчи», чтобы посмотреть контакты."
 
             current_user = await db.get_user(user_id)
-            buttons: List[Tuple[str, str]] = []
-            if current_user and current_user.get('current_game') != game:
-                buttons.append((f"Перейти к мэтчам в {game_name}", f"switch_and_matches_{game}"))
-            else:
-                buttons.append(("Мои мэтчи", "my_matches"))
-            buttons.append(("Главное меню", "main_menu"))
+            quick_actions = []
 
-            keyboard = kb.create_navigation_keyboard(buttons)
-            return await _send_notification_internal(
-                bot, user_id, text, match_profile.get('photo_id'), keyboard
-            )
+            if current_user and current_user.get('current_game') != game:
+                quick_actions.append((f"Мэтчи в {game_name}", f"switch_and_matches_{game}"))
+            else:
+                quick_actions.append(("Мои мэтчи", "my_matches"))
+
+            return await smart_notification(bot, user_id, text, quick_actions, None, db)
 
         except Exception as e:
             logger.error(f"Ошибка отправки уведомления о матче: {e}")
             return False
 
-    # Добавляем в очередь для асинхронной обработки
-    await _notification_queue.add_notification(
-        _notify(), 
-        f"match notification to {user_id}"
-    )
-    return True  # Возвращаем True, так как задача поставлена в очередь
+    await _notification_queue.add_notification(_notify(), f"match notification to {user_id}")
+    return True
 
 # ==================== УВЕДОМЛЕНИЯ О ЛАЙКАХ ====================
 
 async def notify_about_like(bot: Bot, user_id: int, game: str, db=None) -> bool:
-    """Уведомление о новом лайке (асинхронное)"""
+    """Уведомление о новом лайке (умное)"""
     async def _notify():
         try:
             if db is None:
@@ -154,116 +211,96 @@ async def notify_about_like(bot: Bot, user_id: int, game: str, db=None) -> bool:
             text = f"Кто-то лайкнул вашу анкету в {game_name}! Зайдите в «Лайки», чтобы посмотреть."
 
             current_user = await db.get_user(user_id)
-            buttons: List[Tuple[str, str]] = []
+            quick_actions = []
 
             if current_user and current_user.get('current_game') != actual_game:
-                buttons.append((f"Перейти к лайкам в {game_name}", f"switch_and_likes_{actual_game}"))
+                quick_actions.append((f"Лайки в {game_name}", f"switch_and_likes_{actual_game}"))
             else:
-                buttons.append(("Посмотреть лайки", "my_likes"))
+                quick_actions.append(("Посмотреть лайки", "my_likes"))
 
-            buttons.append(("Главное меню", "main_menu"))
-
-            keyboard = kb.create_navigation_keyboard(buttons)
-
-            return await _send_notification_internal(bot, user_id, text, None, keyboard)
+            return await smart_notification(bot, user_id, text, quick_actions, None, db)
 
         except Exception as e:
             logger.error(f"Ошибка отправки уведомления о лайке: {e}")
             return False
 
-    await _notification_queue.add_notification(
-        _notify(),
-        f"like notification to {user_id}"
-    )
+    await _notification_queue.add_notification(_notify(), f"like notification to {user_id}")
     return True
 
 # ==================== УВЕДОМЛЕНИЯ МОДЕРАЦИИ ====================
 
+# Обновляем notify_profile_deleted, notify_user_banned, notify_user_unbanned
+# Заменяем их на использование smart_notification:
+
 async def notify_profile_deleted(bot: Bot, user_id: int, game: str) -> bool:
-    """Уведомление об удалении профиля модератором (асинхронное)"""
+    """Уведомление об удалении профиля модератором (умное)"""
     async def _notify():
         try:
             game_name = settings.GAMES.get(game, game)
-            text = (f"Ваша анкета в {game_name} была удалена модератором\n\n"
-                    f"Причина: нарушение правил сообщества\n\n"
-                    f"Что можно сделать:\n"
-                    f"• Создать новую анкету\n"
-                    f"• Соблюдать правила сообщества\n"
-                    f"• Быть вежливыми с другими игроками")
+            text = (f"Ваша анкета в {game_name} была удалена модератором за нарушение правил сообщества.\n\n"
+                    f"Вы можете создать новую анкету, соблюдая правила.")
 
-            keyboard = kb.create_navigation_keyboard([
+            quick_actions = [
                 ("Создать новую анкету", "create_profile"),
                 ("Главное меню", "main_menu"),
-            ])
+            ]
 
-            return await _send_notification_internal(bot, user_id, text, None, keyboard)
+            return await smart_notification(bot, user_id, text, quick_actions, None, None)
 
         except Exception as e:
             logger.error(f"Ошибка отправки уведомления об удалении профиля: {e}")
             return False
 
-    # Добавляем в очередь для асинхронной обработки
-    await _notification_queue.add_notification(
-        _notify(), 
-        f"profile deleted notification to {user_id}"
-    )
+    await _notification_queue.add_notification(_notify(), f"profile deleted notification to {user_id}")
     return True
 
 async def notify_user_banned(bot: Bot, user_id: int, expires_at: datetime) -> bool:
-    """Уведомление о бане пользователя (асинхронное)"""
+    """Уведомление о бане пользователя (умное)"""
     async def _notify():
         try:
             formatted_date = expires_at.strftime("%d.%m.%Y %H:%M (UTC)")
-
             text = (f"Вы заблокированы до {formatted_date} за нарушение правил сообщества.\n\n"
-                    f"Во время блокировки вы не можете:\n"
-                    f"• Создавать анкеты\n"
-                    f"• Искать игроков\n"
-                    f"• Ставить лайки\n"
-                    f"• Просматривать лайки и мэтчи")
-            return await _send_notification_internal(bot, user_id, text)
+                    f"Во время блокировки вы не можете использовать бота.")
+            
+            # Для банов не даем быстрых действий
+            return await smart_notification(bot, user_id, text, None, None, None)
 
         except Exception as e:
             logger.error(f"Ошибка отправки уведомления о бане: {e}")
             return False
 
-    await _notification_queue.add_notification(
-        _notify(),
-        f"ban notification to {user_id}"
-    )
+    await _notification_queue.add_notification(_notify(), f"ban notification to {user_id}")
     return True
 
 async def notify_user_unbanned(bot: Bot, user_id: int) -> bool:
-    """Уведомление о снятии бана (асинхронное)"""
+    """Уведомление о снятии бана (умное)"""
     async def _notify():
         try:
             text = "Блокировка снята! Теперь вы можете снова пользоваться ботом."
-            keyboard = kb.create_navigation_keyboard([("Главное меню", "main_menu")])
-            return await _send_notification_internal(bot, user_id, text, None, keyboard)
+            quick_actions = [("Главное меню", "main_menu")]
+            return await smart_notification(bot, user_id, text, quick_actions, None, None)
 
         except Exception as e:
             logger.error(f"Ошибка отправки уведомления о снятии бана: {e}")
             return False
 
-    await _notification_queue.add_notification(
-        _notify(),
-        f"unban notification to {user_id}"
-    )
+    await _notification_queue.add_notification(_notify(), f"unban notification to {user_id}")
     return True
 
 # ==================== УВЕДОМЛЕНИЯ АДМИНА ====================
 
 async def notify_admin_new_report(bot: Bot, reporter_id: int, reported_user_id: int, game: str) -> bool:
-    """Уведомление админа о новой жалобе (синхронное - важно для админа)"""
+    """Уведомление админа о новой жалобе"""
     if not settings.ADMIN_ID or settings.ADMIN_ID == 0:
         return False
-    
+
     try:
         game_name = settings.GAMES.get(game, game)
         text = (f"🚩 Новая жалоба!\n\n"
                 f"Пользователь {reporter_id} пожаловался на анкету {reported_user_id} "
                 f"в игре {game_name}")
-        success = await safe_send_notification(bot, settings.ADMIN_ID, text)
+        # Админские уведомления без кнопки OK
+        success = await safe_send_notification(bot, settings.ADMIN_ID, text, add_ok_button=False)
         if success:
             logger.info("📨 Уведомление админу о жалобе отправлено")
         return success

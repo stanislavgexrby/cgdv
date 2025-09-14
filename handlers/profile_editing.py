@@ -4,10 +4,12 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+from handlers.notifications import update_user_activity
+from handlers.basic import check_ban_and_profile, safe_edit_message
+
 import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
-from handlers.basic import check_ban_and_profile, safe_edit_message
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -92,6 +94,8 @@ async def edit_profile(callback: CallbackQuery, db):
     user = await db.get_user(user_id)
     game = user['current_game']
     profile = await db.get_user_profile(user_id, game)
+
+    await update_user_activity(user_id, 'profile_editing', db)
 
     game_name = settings.GAMES.get(game, game)
     current_info = f"Редактирование анкеты в {game_name}:\n\n"
@@ -286,6 +290,9 @@ async def process_edit_name(message: Message, state: FSMContext, db):
     success = await update_profile_field(message.from_user.id, 'name', name, db)
     await state.clear()
 
+    await update_user_activity(message.from_user.id, 'available', db)
+
+
     if success:
         await message.answer("Имя обновлено!", reply_markup=kb.back_to_editing(), parse_mode='HTML')
     else:
@@ -305,6 +312,8 @@ async def process_edit_nickname(message: Message, state: FSMContext, db):
 
     success = await update_profile_field(message.from_user.id, 'nickname', nickname, db)
     await state.clear()
+
+    await update_user_activity(message.from_user.id, 'available', db)
 
     if success:
         await message.answer("Никнейм обновлён!", reply_markup=kb.back_to_editing(), parse_mode='HTML')
@@ -326,6 +335,8 @@ async def process_edit_age(message: Message, state: FSMContext, db):
     success = await update_profile_field(message.from_user.id, 'age', age, db)
     await state.clear()
 
+    await update_user_activity(message.from_user.id, 'available', db)
+
     if success:
         await message.answer("Возраст обновлён!", reply_markup=kb.back_to_editing(), parse_mode='HTML')
     else:
@@ -346,6 +357,8 @@ async def process_edit_info(message: Message, state: FSMContext, db):
     success = await update_profile_field(message.from_user.id, 'additional_info', info, db)
     await state.clear()
 
+    await update_user_activity(message.from_user.id, 'available', db)
+
     if success:
         await message.answer("Описание обновлено!", reply_markup=kb.back_to_editing(), parse_mode='HTML')
     else:
@@ -356,6 +369,8 @@ async def process_edit_photo(message: Message, state: FSMContext, db):
     photo_id = message.photo[-1].file_id
     success = await update_profile_field(message.from_user.id, 'photo_id', photo_id, db)
     await state.clear()
+
+    await update_user_activity(message.from_user.id, 'available', db)
 
     if success:
         await message.answer("Фото обновлено!", reply_markup=kb.back_to_editing(), parse_mode='HTML')
@@ -396,6 +411,8 @@ async def process_edit_rating(callback: CallbackQuery, state: FSMContext, db):
     success = await update_profile_field(callback.from_user.id, 'rating', rating, db)
     await state.clear()
 
+    await update_user_activity(callback.from_user.id, 'available', db)
+
     if success:
         await safe_edit_message(callback, "Рейтинг обновлён!", kb.back_to_editing())
     else:
@@ -408,6 +425,8 @@ async def process_edit_region(callback: CallbackQuery, state: FSMContext, db):
     region = callback.data.split("_")[1]
     success = await update_profile_field(callback.from_user.id, 'region', region, db)
     await state.clear()
+
+    await update_user_activity(callback.from_user.id, 'available', db)
 
     if success:
         await safe_edit_message(callback, "Регион обновлён!", kb.back_to_editing())
@@ -469,6 +488,8 @@ async def edit_positions_done(callback: CallbackQuery, state: FSMContext, db):
     success = await update_profile_field(callback.from_user.id, 'positions', selected, db)
     await state.clear()
 
+    await update_user_activity(callback.from_user.id, 'available', db)
+
     if success:
         await safe_edit_message(callback, "Позиции обновлены!", kb.back_to_editing())
     else:
@@ -485,6 +506,8 @@ async def delete_info(callback: CallbackQuery, state: FSMContext, db):
     success = await update_profile_field(callback.from_user.id, 'additional_info', "", db)
     await state.clear()
 
+    await update_user_activity(callback.from_user.id, 'available', db)
+
     if success:
         await safe_edit_message(callback, "Описание удалено!", kb.back_to_editing())
     else:
@@ -497,6 +520,8 @@ async def delete_photo(callback: CallbackQuery, state: FSMContext, db):
     success = await update_profile_field(callback.from_user.id, 'photo_id', None, db)
     await state.clear()
 
+    await update_user_activity(callback.from_user.id, 'available', db)
+
     if success:
         await safe_edit_message(callback, "Фото удалено!", kb.back_to_editing())
     else:
@@ -505,8 +530,11 @@ async def delete_photo(callback: CallbackQuery, state: FSMContext, db):
     await callback.answer()
 
 @router.callback_query(F.data == "cancel_edit")
-async def cancel_edit(callback: CallbackQuery, state: FSMContext):
+async def cancel_edit(callback: CallbackQuery, state: FSMContext, db):
     await state.clear()
+
+    await update_user_activity(callback.from_user.id, 'available', db)
+
     await safe_edit_message(callback, "Редактирование отменено", kb.back_to_editing())
     await callback.answer()
 

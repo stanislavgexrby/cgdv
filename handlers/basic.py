@@ -12,6 +12,8 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+from handlers.notifications import update_user_activity
+
 import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
@@ -387,9 +389,22 @@ async def switch_game(callback: CallbackQuery, db):
 
 # ==================== НАВИГАЦИЯ ПО МЕНЮ ====================
 
+@router.callback_query(F.data == "dismiss_notification")
+async def dismiss_notification(callback: CallbackQuery):
+    """Удаление уведомления"""
+    try:
+        await callback.message.delete()
+        await callback.answer()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить уведомление: {e}")
+        await callback.answer()
+
 @router.callback_query(F.data.in_(["main_menu", "back_to_main"]))
 async def show_main_menu(callback: CallbackQuery, db):
     user_id = callback.from_user.id
+    
+    await update_user_activity(user_id, 'available', db)
+    
     user = await db.get_user(user_id)
 
     if not user or not user.get('current_game'):
@@ -455,6 +470,21 @@ async def view_profile(callback: CallbackQuery, db):
             await callback.message.answer(text, reply_markup=keyboard, parse_mode='HTML')
 
     await callback.answer()
+
+# ==================== ОБРАБОТЧИК УВЕДОМЛЕНИЙ ====================
+
+@router.callback_query(F.data == "dismiss_notification")
+async def dismiss_notification(callback: CallbackQuery, db):
+    """Удаление уведомления"""
+    try:
+        await callback.message.delete()
+        await callback.answer("✅")
+    except Exception as e:
+        logger.warning(f"Ошибка удаления уведомления: {e}")
+        await callback.answer("Скрыто")
+    
+    # Обновляем активность пользователя
+    await update_user_activity(callback.from_user.id, db=db)
 
 # ==================== ВОЗВРАТ К РЕДАКТИРОВАНИЮ И ПОИСКУ ====================
 
