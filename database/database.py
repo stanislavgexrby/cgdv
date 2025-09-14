@@ -623,6 +623,21 @@ class Database:
             await self._clear_pattern_cache(f"likes:{user_id}:*")
             return True
 
+    async def remove_like(self, from_user: int, to_user: int, game: str) -> bool:
+        """Удаление лайка"""
+        async with self._pg_pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM likes WHERE from_user = $1 AND to_user = $2 AND game = $3",
+                from_user, to_user, game
+            )
+
+            # Очищаем кэш
+            await self._clear_pattern_cache(f"likes:{to_user}:*")
+            await self._clear_pattern_cache(f"matches:{from_user}:*")
+            await self._clear_pattern_cache(f"matches:{to_user}:*")
+
+            return result != "DELETE 0"
+
     # === БАНЫ ===
 
     async def is_user_banned(self, user_id: int) -> bool:

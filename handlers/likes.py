@@ -6,8 +6,8 @@ from aiogram.fsm.context import FSMContext
 import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
-from handlers.basic import check_ban_and_profile, safe_edit_message
-from handlers.notifications import notify_about_match, notify_about_like
+from handlers.basic import check_ban_and_profile, safe_edit_message, _format_expire_date
+from handlers.notifications import notify_about_match
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -110,10 +110,11 @@ async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
 
     keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
         [
-            kb.InlineKeyboardButton(text="Лайк в ответ", callback_data=f"loves_back_{profile['telegram_id']}_{index}"),
-            kb.InlineKeyboardButton(text="Пропустить", callback_data=f"loves_skip_{profile['telegram_id']}_{index}")
+            kb.InlineKeyboardButton(text="❤️ Лайк в ответ", callback_data=f"loves_back_{profile['telegram_id']}_{index}"),
+            kb.InlineKeyboardButton(text="👎 Пропустить", callback_data=f"loves_skip_{profile['telegram_id']}_{index}")
         ],
-        [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+        [kb.InlineKeyboardButton(text="🚩 Пожаловаться", callback_data=f"loves_report_{profile['telegram_id']}_{index}")],
+        [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
     await show_profile_with_photo(callback, profile, text, keyboard)
@@ -246,6 +247,66 @@ async def skip_like(callback: CallbackQuery, db):
 
     await process_like_action(callback, target_user_id, "skip", current_index, db=db)
     await callback.answer()
+
+@router.callback_query(F.data.startswith("loves_report_"))
+async def report_like(callback: CallbackQuery, db):
+    """Жалоба на лайк"""
+    try:
+        parts = callback.data.split("_")
+        target_user_id = int(parts[2])
+        current_index = int(parts[3]) if len(parts) > 3 else 0
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка", show_alert=True)
+        return
+
+    user_id = callback.from_user.id
+    user = await db.get_user(user_id)
+
+    if not user or not user.get('current_game'):
+        await safe_edit_message(callback, "Ошибка", kb.back())
+        await callback.answer()
+        return
+
+    game = user['current_game']
+
+    # Проверяем бан
+    if await db.is_user_banned(user_id):
+        game_name = settings.GAMES.get(game, game)
+        ban_info = await db.get_user_ban(user_id)
+
+        if ban_info:
+            expires_at = ban_info['expires_at']
+            ban_end = _format_expire_date(expires_at)
+            text = f"Вы заблокированы в {game_name} до {ban_end}."
+        else:
+            text = f"Вы заблокированы в {game_name}."
+
+        await safe_edit_message(callback, text, kb.back())
+        await callback.answer()
+        return
+
+    like_removed = await db.remove_like(target_user_id, user_id, game)
+
+    report_added = await db.add_report(user_id, target_user_id, game)
+
+    if report_added:
+        if settings.ADMIN_ID and settings.ADMIN_ID != 0:
+            try:
+                await callback.bot.send_message(
+                    settings.ADMIN_ID,
+                    f"🚩 Новая жалоба!\n\nПользователь {user_id} пожаловался на лайк от {target_user_id} в игре {settings.GAMES.get(game, game)}",
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.error(f"Ошибка отправки уведомления админу: {e}")
+
+        await callback.answer("Жалоба отправлена модератору")
+        logger.info(f"Жалоба на лайк: {user_id} пожаловался на {target_user_id}")
+    else:
+        await callback.answer("Вы уже жаловались на этого пользователя", show_alert=True)
+        return
+
+    await show_next_like_or_finish(callback, user_id, game, db)
 
 # ==================== ПОКАЗ КОНТАКТОВ ====================
 

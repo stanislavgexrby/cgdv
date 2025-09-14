@@ -36,19 +36,16 @@ def check_ban_and_profile(require_profile=True):
                 raise RuntimeError("Database instance not provided. Ensure DatabaseMiddleware injects 'db'.")
 
             user_id = callback.from_user.id
-            
+
             if await db.is_user_banned(user_id):
                 ban_info = await db.get_user_ban(user_id)
                 if ban_info:
                     expires_at = ban_info['expires_at']
-                    if isinstance(expires_at, str):
-                        ban_end = expires_at[:16]
-                    else:
-                        ban_end = expires_at.strftime("%Y-%m-%d %H:%M")
+                    ban_end = _format_expire_date(expires_at)
                     text = f"Вы заблокированы до {ban_end} за: {ban_info.get('reason', 'нарушение правил')}"
                 else:
                     text = "Вы заблокированы"
-                
+
                 await safe_edit_message(callback, text, kb.back())
                 await callback.answer()
                 return
@@ -146,15 +143,12 @@ def _format_expire_date(expires_at: str | datetime) -> str:
     """Приводим expires_at (str или datetime) к красивому виду"""
     if isinstance(expires_at, str):
         try:
-            # Парсим ISO-строку
             dt = datetime.fromisoformat(expires_at)
         except ValueError:
-            # На всякий случай, если формат кривой — показываем как есть
             return expires_at
     else:
         dt = expires_at
 
-    # Красивый формат: 14.09.2025 18:40 (UTC)
     return dt.strftime("%d.%m.%Y %H:%M (UTC)")
 
 
