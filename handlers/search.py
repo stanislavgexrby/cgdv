@@ -21,7 +21,7 @@ async def update_filter_display(callback: CallbackQuery, state: FSMContext, mess
     game_name = settings.GAMES.get(game, game)
 
     filters_text = []
-    
+
     rating_filter = data.get('rating_filter')
     if rating_filter:
         rating_name = settings.RATINGS[game].get(rating_filter, rating_filter)
@@ -48,7 +48,7 @@ async def update_filter_display(callback: CallbackQuery, state: FSMContext, mess
     text += "\n\nНастройте фильтры или начните поиск:"
 
     await safe_edit_message(callback, text, kb.search_filters())
-    
+
     if message:
         await callback.answer(message)
 
@@ -80,7 +80,7 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
 
     if action == "like":
         is_match = await db.add_like(user_id, target_user_id, game)
-        
+
         if is_match:
             target_profile = await db.get_user_profile(target_user_id, game)
             await notify_about_match(callback.bot, target_user_id, user_id, game, db)
@@ -121,7 +121,7 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
 
     elif action == "report":
         success = await db.add_report(user_id, target_user_id, game)
-        
+
         if success:
             text = "🚩 Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время."
             keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
@@ -164,11 +164,11 @@ async def show_current_profile(callback: CallbackQuery, state: FSMContext):
 
     profile = profiles[index]
     profile_text = texts.format_profile(profile)
-    
+
     await show_profile_in_search(
-        callback, 
-        profile, 
-        profile_text, 
+        callback,
+        profile,
+        profile_text,
         kb.profile_actions(profile['telegram_id'])
     )
 
@@ -237,11 +237,11 @@ async def save_rating_filter(callback: CallbackQuery, state: FSMContext):
         await state.update_data(rating_filter=None)
         await update_filter_display(callback, state, "🔄 Фильтр по рейтингу сброшен")
         return
-        
+
     rating = callback.data.split("_")[1]
     data = await state.get_data()
     game = data['game']
-    
+
     if rating not in settings.RATINGS.get(game, {}):
         return
 
@@ -260,11 +260,11 @@ async def save_position_filter(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split("_")
     if len(parts) < 3:
         return
-        
+
     position = parts[2]
     data = await state.get_data()
     game = data['game']
-    
+
     if position not in settings.POSITIONS.get(game, {}):
         return
 
@@ -283,9 +283,9 @@ async def save_region_filter(callback: CallbackQuery, state: FSMContext):
     parts = callback.data.split("_")
     if len(parts) < 3:
         return
-        
+
     region = parts[2]
-    
+
     if region not in settings.REGIONS:
         return
 
@@ -362,7 +362,7 @@ async def skip_profile(callback: CallbackQuery, state: FSMContext, db):
     except Exception:
         await callback.answer("❌ Ошибка данных", show_alert=True)
         return
-    await handle_search_action(callback, "skip", target_user_id, state, db)  # db!
+    await handle_search_action(callback, "skip", target_user_id, state, db)
 
 @router.callback_query(F.data.startswith("like_"))
 async def like_profile(callback: CallbackQuery, state: FSMContext, db):
@@ -371,7 +371,7 @@ async def like_profile(callback: CallbackQuery, state: FSMContext, db):
     except Exception:
         await callback.answer("❌ Ошибка данных", show_alert=True)
         return
-    await handle_search_action(callback, "like", target_user_id, state, db)  # db!
+    await handle_search_action(callback, "like", target_user_id, state, db)
 
 @router.callback_query(F.data.startswith("report_"))
 async def report_profile(callback: CallbackQuery, state: FSMContext, db):
@@ -380,7 +380,7 @@ async def report_profile(callback: CallbackQuery, state: FSMContext, db):
     except Exception:
         await callback.answer("❌ Ошибка данных", show_alert=True)
         return
-    await handle_search_action(callback, "report", target_user_id, state, db)  # db!
+    await handle_search_action(callback, "report", target_user_id, state, db)
 
 @router.callback_query(F.data == "continue_search", SearchForm.browsing)
 async def continue_search(callback: CallbackQuery, state: FSMContext):
@@ -393,7 +393,7 @@ async def continue_search(callback: CallbackQuery, state: FSMContext):
 async def handle_search_outside_state(callback: CallbackQuery, state: FSMContext):
     """Обработчик для случаев, когда поиск вызывается вне состояния FSM"""
     current_state = await state.get_state()
-    
+
     if current_state is None or current_state != SearchForm.filters:
         logger.warning(f"Обработчик поиска вызван вне состояния FSM: {callback.data}")
         await state.clear()

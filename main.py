@@ -28,7 +28,7 @@ async def on_startup(bot: Bot):
         )
 
 async def main():
-    load_dotenv(find_dotenv())
+    load_dotenv(find_dotenv(), override=True)
     token = os.getenv("BOT_TOKEN")
     if not token:
         raise RuntimeError("BOT_TOKEN не найден. Проверь .env")

@@ -34,11 +34,7 @@ def main():
             print(f"❌ {var}: НЕ УСТАНОВЛЕНА ({description})")
             all_ok = False
         else:
-            # Скрываем пароли в выводе
-            if 'PASSWORD' in var or 'TOKEN' in var:
-                display_value = '***'
-            else:
-                display_value = value
+            display_value = value
             print(f"✅ {var}: {display_value}")
     
     print("-" * 30)

@@ -2,7 +2,7 @@ import os
 
 from dotenv import load_dotenv, find_dotenv
 
-load_dotenv(find_dotenv())
+load_dotenv(find_dotenv(), override=True)
 
 def _parse_admin_ids(raw: str) -> set[int]:
     ids = set()

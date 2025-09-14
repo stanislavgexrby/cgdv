@@ -23,7 +23,7 @@ class Database:
         except Exception as e:
             logger.error(f"❌ Ошибка инициализации базы данных: {e}")
             raise
-    
+
     async def close(self):
         """Закрытие подключений"""
         if self._pg_pool:
@@ -39,12 +39,12 @@ class Database:
         db_name = os.getenv('DB_NAME', 'teammates')
         db_user = os.getenv('DB_USER', 'teammates_user')
         db_password = os.getenv('DB_PASSWORD', '')
-        
+
         if not db_password:
             raise ValueError("DB_PASSWORD не установлен в переменных окружения")
-        
+
         connection_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-        
+
         self._pg_pool = await asyncpg.create_pool(connection_url, min_size=5, max_size=20)
         await self._create_tables()
         logger.info("✅ PostgreSQL подключена")
@@ -54,9 +54,9 @@ class Database:
         redis_host = os.getenv('REDIS_HOST', 'localhost')
         redis_port = os.getenv('REDIS_PORT', '6379')
         redis_db = os.getenv('REDIS_DB', '0')
-        
+
         redis_url = f"redis://{redis_host}:{redis_port}/{redis_db}"
-        
+
         self._redis = redis.from_url(redis_url, decode_responses=True)
         await self._redis.ping()
         logger.info("✅ Redis подключен")
@@ -72,7 +72,7 @@ class Database:
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                 )
             ''')
-            
+
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS profiles (
                     id SERIAL PRIMARY KEY,
@@ -90,7 +90,7 @@ class Database:
                     UNIQUE(telegram_id, game)
                 )
             ''')
-            
+
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS likes (
                     id SERIAL PRIMARY KEY,
@@ -101,7 +101,7 @@ class Database:
                     UNIQUE(from_user, to_user, game)
                 )
             ''')
-            
+
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS matches (
                     id SERIAL PRIMARY KEY,
@@ -112,7 +112,7 @@ class Database:
                     UNIQUE(user1, user2, game)
                 )
             ''')
-            
+
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS skipped_likes (
                     id SERIAL PRIMARY KEY,
@@ -123,7 +123,7 @@ class Database:
                     UNIQUE(user_id, skipped_user_id, game)
                 )
             ''')
-            
+
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS search_skipped (
                     id SERIAL PRIMARY KEY,
@@ -135,7 +135,7 @@ class Database:
                     UNIQUE(user_id, skipped_user_id, game)
                 )
             ''')
-            
+
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS reports (
                     id SERIAL PRIMARY KEY,
@@ -150,7 +150,7 @@ class Database:
                     UNIQUE(reporter_id, reported_user_id, game)
                 )
             ''')
-            
+
             await conn.execute('''
                 CREATE TABLE IF NOT EXISTS bans (
                     id SERIAL PRIMARY KEY,
@@ -175,7 +175,12 @@ class Database:
                         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_reports_reported_user_game ON reports(reported_user_id, game)",
                         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_bans_user_expires ON bans(user_id, expires_at)",
                         "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_search_skipped_user_game ON search_skipped(user_id, game)",
-                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_skipped_likes_user_game ON skipped_likes(user_id, game)"
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_skipped_likes_user_game ON skipped_likes(user_id, game)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_rating ON profiles(rating)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_region ON profiles(region)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_positions_gin ON profiles USING gin (positions jsonb_path_ops)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_likes_from_to_game ON likes(from_user, to_user, game)",
+                        "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_reports_reporter_reported_game ON reports(reporter_id, reported_user_id, game)"
                     ]
 
             for index_sql in indexes:
@@ -188,7 +193,7 @@ class Database:
         """Форматирование профиля"""
         if not row:
             return None
-        
+
         profile = dict(row)
         positions = profile.get('positions', [])
         if isinstance(positions, str):
@@ -206,7 +211,7 @@ class Database:
         return hashlib.md5(filters_str.encode()).hexdigest()[:8]
 
     # === КЭШИРОВАНИЕ ===
-    
+
     async def _get_cache(self, key: str):
         """Получение из кэша"""
         try:
@@ -236,7 +241,7 @@ class Database:
             logger.error(f"Ошибка очистки кэша: {e}")
 
     # === ПОЛЬЗОВАТЕЛИ ===
-    
+
     async def get_user(self, telegram_id: int) -> Optional[Dict]:
         async with self._pg_pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM users WHERE telegram_id = $1", telegram_id)
@@ -258,27 +263,24 @@ class Database:
             return True
 
     # === ПРОФИЛИ ===
-    
+
     async def get_user_profile(self, telegram_id: int, game: str) -> Optional[Dict]:
-        # Проверяем кэш
         cache_key = f"profile:{telegram_id}:{game}"
         cached = await self._get_cache(cache_key)
         if cached:
             return cached
-        
+
         async with self._pg_pool.acquire() as conn:
             row = await conn.fetchrow("SELECT * FROM profiles WHERE telegram_id = $1 AND game = $2", telegram_id, game)
             if not row:
                 return None
-                
+
             profile = self._format_profile(row)
-            
-            # Добавляем username
+
             user = await self.get_user(telegram_id)
             if user:
                 profile['username'] = user.get('username')
-            
-            # Кэшируем результат
+
             await self._set_cache(cache_key, profile)
             return profile
 
@@ -322,14 +324,12 @@ class Database:
                             region_filter: str = None,
                             limit: int = 10) -> List[Dict]:
 
-        # Проверяем кэш
         filters_hash = self._generate_filters_hash(rating_filter, position_filter, region_filter)
         cache_key = f"search:{user_id}:{game}:{filters_hash}"
         cached = await self._get_cache(cache_key)
         if cached:
             return cached
 
-        # ИСПРАВЛЕН: убран DISTINCT для совместимости с ORDER BY RANDOM()
         query = '''
             SELECT p.*, u.username
             FROM profiles p
@@ -353,7 +353,7 @@ class Database:
 
         if region_filter and region_filter != 'any':
             param_count += 1
-            query += f" AND p.region = ${param_count}"
+            query += f" AND (p.region = ${param_count} OR p.region = 'any')"
             params.append(region_filter)
 
         param_count += 1
@@ -364,7 +364,6 @@ class Database:
             rows = await conn.fetch(query, *params)
             results = [self._format_profile(row) for row in rows]
 
-            # Кэшируем результат на 5 минут
             await self._set_cache(cache_key, results, 300)
             return results
 
@@ -380,7 +379,7 @@ class Database:
             return True
 
     # === ЛАЙКИ И МАТЧИ ===
-    
+
     async def add_like(self, from_user: int, to_user: int, game: str) -> bool:
         """Возвращает True если это матч"""
         async with self._pg_pool.acquire() as conn:
@@ -401,7 +400,7 @@ class Database:
                     "SELECT 1 FROM likes WHERE from_user = $1 AND to_user = $2 AND game = $3",
                     to_user, from_user, game
                 )
-                
+
                 if mutual:
                     user1, user2 = sorted([from_user, to_user])
                     await conn.execute(
@@ -458,7 +457,7 @@ class Database:
             return True
 
     # === БАНЫ ===
-    
+
     async def is_user_banned(self, user_id: int) -> bool:
         async with self._pg_pool.acquire() as conn:
             row = await conn.fetchval(
@@ -504,7 +503,7 @@ class Database:
             return True
 
     # === ЖАЛОБЫ ===
-    
+
     async def add_report(self, reporter_id: int, reported_user_id: int, game: str) -> bool:
         async with self._pg_pool.acquire() as conn:
             try:

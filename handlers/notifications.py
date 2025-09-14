@@ -1,9 +1,10 @@
 import logging
 from typing import Optional, List, Tuple
 from aiogram import Bot
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import InlineKeyboardMarkup
 import utils.texts as texts
 import config.settings as settings
+import keyboards.keyboards as kb
 
 logger = logging.getLogger(__name__)
 
@@ -36,22 +37,13 @@ async def safe_send_notification(
         logger.warning(f"Не удалось отправить уведомление пользователю {user_id}: {e}")
         return False
 
-def create_navigation_keyboard(buttons: List[Tuple[str, str]]) -> InlineKeyboardMarkup:
-    """Создание клавиатуры с кнопками навигации"""
-    keyboard_buttons = [[InlineKeyboardButton(text=t, callback_data=cb)] for t, cb in buttons]
-    return InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
-
-def get_game_display_name(game: str) -> str:
-    """Получение отображаемого названия игры"""
-    return settings.GAMES.get(game, game)
-
 # ==================== УВЕДОМЛЕНИЯ О МАТЧАХ ====================
 
 async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: str, db) -> bool:
     """Уведомление о новом матче"""
     try:
         match_profile = await db.get_user_profile(match_user_id, game)
-        game_name = get_game_display_name(game)
+        game_name = settings.GAMES.get(game, game)
 
         if not match_profile:
             text = f"🎉 У вас новый матч в {game_name}!"
@@ -68,7 +60,7 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: s
             buttons.append(("💖 Мои матчи", "my_matches"))
         buttons.append(("🏠 Главное меню", "main_menu"))
 
-        keyboard = create_navigation_keyboard(buttons)
+        keyboard = kb.create_navigation_keyboard(buttons)
         success = await safe_send_notification(bot, user_id, text, match_profile.get('photo_id'), keyboard)
         if success:
             logger.info(f"📨 Уведомление о матче отправлено {user_id}")
@@ -91,10 +83,10 @@ async def notify_about_like(bot: Bot, user_id: int, game: str, db=None) -> bool:
             user = await db.get_user(user_id)
             game = user.get('current_game', 'dota') if user else 'dota'
 
-        game_name = get_game_display_name(game)
+        game_name = settings.GAMES.get(game, game)
         text = f"❤️ Кто-то лайкнул вашу анкету в {game_name}! Зайдите в «Лайки», чтобы посмотреть."
 
-        keyboard = create_navigation_keyboard([
+        keyboard = kb.create_navigation_keyboard([
             ("❤️ Посмотреть лайки", "my_likes"),
             ("🏠 Главное меню", "main_menu"),
         ])
@@ -113,7 +105,7 @@ async def notify_about_like(bot: Bot, user_id: int, game: str, db=None) -> bool:
 async def notify_profile_deleted(bot: Bot, user_id: int, game: str) -> bool:
     """Уведомление об удалении профиля модератором"""
     try:
-        game_name = get_game_display_name(game)
+        game_name = settings.GAMES.get(game, game)
         text = (f"⚠️ Ваша анкета в {game_name} была удалена модератором\n\n"
                 f"📋 Причина: нарушение правил сообщества\n\n"
                 f"✅ Что можно сделать:\n"
@@ -121,7 +113,7 @@ async def notify_profile_deleted(bot: Bot, user_id: int, game: str) -> bool:
                 f"• Соблюдать правила сообщества\n"
                 f"• Быть вежливыми с другими игроками")
 
-        keyboard = create_navigation_keyboard([
+        keyboard = kb.create_navigation_keyboard([
             ("📝 Создать новую анкету", "create_profile"),
             ("🏠 Главное меню", "main_menu"),
         ])
@@ -157,7 +149,7 @@ async def notify_user_unbanned(bot: Bot, user_id: int) -> bool:
     """Уведомление о снятии бана"""
     try:
         text = "✅ Блокировка снята! Теперь вы можете снова пользоваться ботом."
-        keyboard = create_navigation_keyboard([("🏠 Главное меню", "main_menu")])
+        keyboard = kb.create_navigation_keyboard([("🏠 Главное меню", "main_menu")])
         success = await safe_send_notification(bot, user_id, text, None, keyboard)
         if success:
             logger.info(f"📨 Уведомление о снятии бана отправлено {user_id}")
@@ -174,7 +166,7 @@ async def notify_admin_new_report(bot: Bot, reporter_id: int, reported_user_id: 
     if not settings.ADMIN_ID or settings.ADMIN_ID == 0:
         return False
     try:
-        game_name = get_game_display_name(game)
+        game_name = settings.GAMES.get(game, game)
         text = (f"🚩 Новая жалоба!\n\n"
                 f"Пользователь {reporter_id} пожаловался на анкету {reported_user_id} "
                 f"в игре {game_name}")

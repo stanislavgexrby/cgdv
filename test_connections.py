@@ -185,8 +185,6 @@ async def main():
         print("🎉 ВСЕ ТЕСТЫ ПРОЙДЕНЫ!")
         print("\n🚀 Можно запускать бота:")
         print("   python main.py")
-        print("\n📋 Или сначала мигрировать данные:")
-        print("   python migrate.py")
     else:
         print("💥 ЕСТЬ ПРОБЛЕМЫ!")
         print("\n🔧 Что проверить:")

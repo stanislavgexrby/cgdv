@@ -50,7 +50,6 @@ def check_ban_and_profile(require_profile=True):
 
             game = user['current_game']
 
-            # Бан
             if await db.is_user_banned(user_id):
                 ban_info = await db.get_user_ban(user_id)
                 game_name = settings.GAMES.get(game, game)
@@ -63,13 +62,11 @@ def check_ban_and_profile(require_profile=True):
                 await callback.answer()
                 return
 
-            # Профиль (если требуется)
             if require_profile and not await db.has_profile(user_id, game):
                 game_name = settings.GAMES.get(game, game)
                 await callback.answer(f"❌ Сначала создайте анкету для {game_name}", show_alert=True)
                 return
 
-            # ВАЖНО: db передаём как именованный параметр
             return await func(callback, *args, db=db, **kwargs)
         return wrapper
     return decorator
@@ -90,17 +87,17 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
     """Безопасное редактирование сообщения"""
     try:
         message = callback.message
-        
+
         has_photo = bool(message.photo)
         current_text = message.caption if has_photo else (message.text or "")
         current_markup = message.reply_markup
-        
+
         text_changed = current_text != text
         markup_changed = str(current_markup) != str(reply_markup)
-        
+
         if not text_changed and not markup_changed:
             return
-        
+
         if has_photo:
             await message.delete()
             await callback.bot.send_message(
@@ -110,7 +107,7 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
             )
         else:
             await message.edit_text(text, reply_markup=reply_markup)
-            
+
     except Exception as e:
         logger.error(f"Ошибка редактирования сообщения: {e}")
         try:
@@ -130,7 +127,7 @@ async def check_subscription(user_id: int, game: str, bot: Bot) -> bool:
     """Проверка подписки на канал"""
     if not settings.CHECK_SUBSCRIPTION:
         return True
-        
+
     channel = settings.DOTA_CHANNEL if game == "dota" else settings.CS_CHANNEL
     if not channel:
         return True
@@ -146,12 +143,12 @@ def get_main_menu_text(game: str, has_profile: bool) -> str:
     """Генерация текста главного меню"""
     game_name = settings.GAMES.get(game, game)
     text = f"🏠 Главное меню\n\nИгра: {game_name}"
-    
+
     if has_profile:
         text += "\n\nВыберите действие:"
     else:
         text += "\n\nСоздайте анкету для начала:"
-    
+
     return text
 
 # ==================== ОСНОВНЫЕ КОМАНДЫ ====================
@@ -233,28 +230,28 @@ async def select_game(callback: CallbackQuery, db):
 async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db):
     """Переключение игры и показ матчей из уведомления"""
     parts = callback.data.split("_")
-    
+
     if len(parts) < 4:
         logger.error(f"Неверный формат callback_data: {callback.data}")
         await callback.answer("❌ Ошибка данных", show_alert=True)
         return
-    
+
     game = parts[3]
     user_id = callback.from_user.id
-    
+
     if game not in settings.GAMES:
         logger.error(f"Неверная игра в callback: {game}")
         await callback.answer("❌ Неверная игра", show_alert=True)
         return
-    
+
     logger.info(f"Переключение на игру {game} для показа матчей пользователя {user_id}")
-    
+
     if not await db.switch_game(user_id, game):
         await callback.answer("❌ Ошибка переключения игры", show_alert=True)
         return
-    
+
     await state.clear()
-    
+
     if await db.is_user_banned(user_id):
         ban_info = await db.get_user_ban(user_id)
         game_name = settings.GAMES.get(game, game)
@@ -262,7 +259,7 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db
         if ban_info:
             text += f" до {ban_info['expires_at'][:16]}"
         text += "\n\nРаздел 'Матчи' недоступен."
-        
+
         await safe_edit_message(callback, text, kb.back())
         await callback.answer()
         return
@@ -280,7 +277,7 @@ async def switch_game(callback: CallbackQuery, db):
     if len(parts) < 2:
         await callback.answer("❌ Ошибка", show_alert=True)
         return
-        
+
     game = parts[1]
     user_id = callback.from_user.id
 
@@ -321,16 +318,16 @@ async def show_main_menu(callback: CallbackQuery, db):
 
     game = user['current_game']
     has_profile = await db.has_profile(user_id, game)
-    
+
     if not has_profile:
         other_game = "dota" if game == "cs" else "cs"
         has_other_profile = await db.has_profile(user_id, other_game)
-        
+
         if has_other_profile:
             await db.switch_game(user_id, other_game)
             game = other_game
             has_profile = True
-    
+
     text = get_main_menu_text(game, has_profile)
     await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
     await callback.answer()
@@ -466,7 +463,7 @@ async def show_admin_stats(callback: CallbackQuery, db):
                 ("Ожидающих жалоб", "SELECT COUNT(*) FROM reports WHERE status = 'pending'"),
                 ("Заблокированы", "SELECT COUNT(*) FROM bans WHERE expires_at > NOW()"),
             ]
-            
+
             for name, query in stats_queries:
                 try:
                     count = await conn.fetchval(query)
@@ -496,13 +493,13 @@ async def show_admin_stats(callback: CallbackQuery, db):
 @admin_only
 async def show_admin_reports(callback: CallbackQuery, db):
     reports = await db.get_pending_reports()
-    
+
     if not reports:
         text = "🚩 Нет ожидающих жалоб"
         await safe_edit_message(callback, text, kb.admin_main_menu())
         await callback.answer()
         return
-        
+
     await show_admin_report(callback, reports, 0, db=db)
 
 @router.callback_query(F.data == "admin_bans")
@@ -526,7 +523,7 @@ async def admin_approve_report(callback: CallbackQuery, db):
     await process_report_action(callback, "approve", db)
 
 @router.callback_query(F.data.startswith("admin_ban_"))
-@admin_only  
+@admin_only
 async def admin_ban_user(callback: CallbackQuery, db):
     await process_report_action(callback, "ban", db)
 
@@ -570,9 +567,9 @@ async def navigate_reports(callback: CallbackQuery, db):
     parts = callback.data.split("_")
     direction = parts[2]
     current_index = int(parts[3])
-    
+
     reports = await db.get_pending_reports()
-    
+
     if direction == "next" and current_index + 1 < len(reports):
         await show_admin_report(callback, reports, current_index + 1, db=db)
     elif direction == "prev" and current_index > 0:
@@ -586,13 +583,13 @@ async def navigate_reports(callback: CallbackQuery, db):
 async def navigate_bans(callback: CallbackQuery, db):
     if not callback.data.startswith("admin_ban_next_") and not callback.data.startswith("admin_ban_prev_"):
         return
-        
+
     parts = callback.data.split("_")
     direction = parts[2]
     current_index = int(parts[3])
-    
+
     bans = await db.get_all_bans()
-    
+
     if direction == "next" and current_index + 1 < len(bans):
         await show_admin_ban(callback, bans, current_index + 1)
     elif direction == "prev" and current_index > 0:
@@ -617,7 +614,7 @@ async def process_report_action(callback: CallbackQuery, action: str):
         state = FSMContext(bot=callback.bot, user_id=callback.from_user.id, chat_id=callback.message.chat.id)
         data = await state.get_data()
         db = data.get('db')
-    
+
     if not db:
         await callback.answer("❌ Ошибка подключения к БД", show_alert=True)
         return
@@ -635,14 +632,14 @@ async def process_report_action(callback: CallbackQuery, action: str):
             "ban": "✅ Пользователь забанен", 
             "dismiss": "❌ Жалоба отклонена"
         }
-        
+
         await callback.answer(action_messages[action])
         logger.info(f"Админ {settings.ADMIN_ID} выполнил действие {action} для жалобы {report_id}")
 
         if action in ["approve", "ban"]:
             from .notifications import notify_profile_deleted, notify_user_banned
             await notify_profile_deleted(callback.bot, report_info['reported_user_id'], report_info['game'])
-            
+
             if action == "ban":
                 ban_info = await db.get_user_ban(report_info['reported_user_id'])
                 if ban_info:

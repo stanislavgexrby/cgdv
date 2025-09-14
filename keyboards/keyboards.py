@@ -1,5 +1,5 @@
 from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
-from typing import List
+from typing import List, Tuple
 import config.settings as settings
 
 # ==================== ОСНОВНЫЕ МЕНЮ ====================
@@ -222,7 +222,7 @@ def ratings_filter(game: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔄 Сбросить фильтр", callback_data="rating_reset")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_filter")]
     ])
-    
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def regions_filter() -> InlineKeyboardMarkup:
@@ -236,13 +236,13 @@ def regions_filter() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="🔄 Сбросить фильтр", callback_data="region_reset")],
         [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_filter")]
     ])
-    
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def position_filter_menu(game: str) -> InlineKeyboardMarkup:
     """Фильтр по позиции"""
     buttons = []
-    
+
     for key, name in settings.POSITIONS[game].items():
         buttons.append([InlineKeyboardButton(text=name, callback_data=f"pos_filter_{key}")])
 
@@ -292,6 +292,11 @@ def contact(username: str = None) -> InlineKeyboardMarkup:
     buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def create_navigation_keyboard(buttons: List[Tuple[str, str]]) -> InlineKeyboardMarkup:
+    """Создание клавиатуры с кнопками навигации"""
+    keyboard_buttons = [[InlineKeyboardButton(text=t, callback_data=cb)] for t, cb in buttons]
+    return InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
 
 # ==================== АДМИН ПАНЕЛЬ ====================
 
