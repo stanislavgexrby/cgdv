@@ -424,10 +424,16 @@ async def edit_add_position(callback: CallbackQuery, state: FSMContext):
     game = data['game']
 
     if position not in selected:
-        selected.append(position)
+        if position == "any":
+            selected = ["any"]
+        else:
+            if "any" in selected:
+                selected.remove("any")
+            selected.append(position)
+
         await state.update_data(positions_selected=selected)
 
-    await callback.message.edit_reply_markup(reply_markup=kb.positions(game, selected))
+    await callback.message.edit_reply_markup(reply_markup=kb.positions(game, selected, for_profile=False, editing=True))
     await callback.answer()
 
 @router.callback_query(F.data.startswith("pos_remove_"), EditProfileForm.edit_positions)
@@ -441,7 +447,7 @@ async def edit_remove_position(callback: CallbackQuery, state: FSMContext):
         selected.remove(position)
         await state.update_data(positions_selected=selected)
 
-    await callback.message.edit_reply_markup(reply_markup=kb.positions(game, selected))
+    await callback.message.edit_reply_markup(reply_markup=kb.positions(game, selected, for_profile=False, editing=True))
     await callback.answer()
 
 @router.callback_query(F.data == "pos_done", EditProfileForm.edit_positions)

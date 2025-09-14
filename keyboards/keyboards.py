@@ -126,7 +126,13 @@ def positions(game: str, selected: List[str] = None, for_profile: bool = True, e
 
         buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
 
-    if for_profile and not selected:
+    if editing and "any" in selected:
+        buttons.append([InlineKeyboardButton(text="✅ Любая позиция", callback_data="pos_remove_any")])
+
+    # Кнопка "Любая позиция" для добавления
+    if editing and "any" not in selected:
+        buttons.append([InlineKeyboardButton(text="Любая позиция", callback_data="pos_add_any")])
+    elif for_profile and not selected:
         buttons.append([InlineKeyboardButton(text="Любая позиция", callback_data="pos_any")])
 
     if selected:
