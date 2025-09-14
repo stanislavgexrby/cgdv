@@ -486,21 +486,33 @@ class Database:
             )
             return [dict(row) for row in rows]
 
-    async def add_ban(self, user_id: int, reason: str, duration_days: int = 7) -> bool:
-        expires_at = datetime.now() + timedelta(days=duration_days)
+    # async def add_ban(self, user_id: int, reason: str, duration_days: int = 7) -> bool:
+    #     expires_at = datetime.now() + timedelta(days=duration_days)
+    #     async with self._pg_pool.acquire() as conn:
+    #         await conn.execute(
+    #             "INSERT INTO bans (user_id, reason, expires_at) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET reason = $2, expires_at = $3",
+    #             user_id, reason, expires_at
+    #         )
+    #         await self._clear_user_cache(user_id)
+    #         return True
+    async def ban_user(self, user_id: int, reason: str, expires_at: datetime | None):
         async with self._pg_pool.acquire() as conn:
-            await conn.execute(
-                "INSERT INTO bans (user_id, reason, expires_at) VALUES ($1, $2, $3) ON CONFLICT (user_id) DO UPDATE SET reason = $2, expires_at = $3",
-                user_id, reason, expires_at
-            )
-            await self._clear_user_cache(user_id)
-            return True
+            # upsert: если бан уже есть — обновим
+            await conn.execute("""
+                INSERT INTO bans (user_id, reason, expires_at)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (user_id)
+                DO UPDATE SET reason=EXCLUDED.reason, expires_at=EXCLUDED.expires_at, created_at=CURRENT_TIMESTAMP
+            """, user_id, reason, expires_at)
+        # подчистим кэш
+        await self._clear_user_cache(user_id)
+        return True
 
-    async def unban_user(self, user_id: int) -> bool:
+    async def unban_user(self, user_id: int):
         async with self._pg_pool.acquire() as conn:
             await conn.execute("DELETE FROM bans WHERE user_id = $1", user_id)
-            await self._clear_user_cache(user_id)
-            return True
+        await self._clear_user_cache(user_id)
+        return True
 
     # === ЖАЛОБЫ ===
 
@@ -516,17 +528,12 @@ class Database:
             except:
                 return False
 
-    async def get_pending_reports(self) -> List[Dict]:
+    async def get_pending_reports(self):
         async with self._pg_pool.acquire() as conn:
             rows = await conn.fetch(
-                '''SELECT r.*, p.name, p.nickname, p.photo_id, u.username
-                   FROM reports r
-                   JOIN profiles p ON r.reported_user_id = p.telegram_id AND r.game = p.game
-                   LEFT JOIN users u ON p.telegram_id = u.telegram_id
-                   WHERE r.status = 'pending'
-                   ORDER BY r.created_at DESC'''
+                "SELECT * FROM reports WHERE status = 'pending' ORDER BY created_at ASC LIMIT 100"
             )
-            return [dict(row) for row in rows]
+        return [dict(r) for r in rows]
 
     async def get_report_info(self, report_id: int) -> Optional[Dict]:
         async with self._pg_pool.acquire() as conn:
@@ -565,3 +572,11 @@ class Database:
                 )
 
                 return True
+
+    async def update_report_status(self, report_id: int, status: str, admin_id: int):
+        async with self._pg_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE reports SET status=$1, reviewed_at=CURRENT_TIMESTAMP, admin_id=$2 WHERE id=$3",
+                status, admin_id, report_id
+            )
+        return True

@@ -1,3 +1,5 @@
+import contextlib
+from datetime import datetime, timedelta
 import logging
 import keyboards.keyboards as kb
 import config.settings as settings
@@ -151,6 +153,27 @@ def get_main_menu_text(game: str, has_profile: bool) -> str:
 
     return text
 
+async def _refresh_reports_after_action(callback: CallbackQuery, db, just_id: int | None = None):
+    reports = await db.get_pending_reports()
+    if not reports:
+        await safe_edit_message(callback, "✅ Больше жалоб нет", kb.admin_back_menu())
+        await callback.answer()
+        return
+
+    # если передан just_id — показать следующую после обработанной
+    idx = 0
+    if just_id is not None:
+        for i, r in enumerate(reports):
+            if r["id"] == just_id:
+                idx = i + 1
+                break
+        if idx >= len(reports):
+            await safe_edit_message(callback, "✅ Больше жалоб нет", kb.admin_back_menu())
+            await callback.answer()
+            return
+
+    await show_admin_report(callback, reports, idx, db=db)
+
 # ==================== ОСНОВНЫЕ КОМАНДЫ ====================
 
 @router.message(Command("start"))
@@ -270,6 +293,42 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db
         return
 
     await show_matches(callback, user_id, game)
+
+async def show_matches(callback: CallbackQuery, user_id: int, game: str, db):
+    """Показ матчей пользователя"""
+    matches = await db.get_matches(user_id, game)
+    game_name = settings.GAMES.get(game, game)
+
+    if not matches:
+        text = f"💔 У вас пока нет матчей в {game_name}\n\n"
+        text += "Чтобы получить матчи:\n"
+        text += "• Лайкайте анкеты в поиске\n"
+        text += "• Отвечайте на лайки других игроков"
+        await safe_edit_message(callback, text, kb.back())
+        await callback.answer(f"✅ Переключено на {game_name}")
+        return
+
+    text = f"💖 Ваши матчи в {game_name} ({len(matches)}):\n\n"
+    for i, match in enumerate(matches, 1):
+        name = match['name']
+        username = match.get('username', 'нет username')
+        text += f"{i}. {name} (@{username})\n"
+
+    text += "\n💬 Вы можете связаться с любым из них!"
+
+    buttons = []
+    for i, match in enumerate(matches[:5]):
+        name = match['name'][:15] + "..." if len(match['name']) > 15 else match['name']
+        buttons.append([kb.InlineKeyboardButton(
+            text=f"💬 {name}", 
+            callback_data=f"contact_{match['telegram_id']}"
+        )])
+
+    buttons.append([kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=buttons)
+
+    await safe_edit_message(callback, text, keyboard)
+    await callback.answer(f"✅ Переключено на {game_name}")
 
 @router.callback_query(F.data.startswith("switch_"))
 async def switch_game(callback: CallbackQuery, db):
@@ -402,7 +461,7 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
 
     await callback.answer()
 
-@router.callback_query(F.data == "back_to_search")  
+@router.callback_query(F.data == "back_to_search")
 @check_ban_and_profile()
 async def back_to_search_handler(callback: CallbackQuery, state: FSMContext, db):
     user_id = callback.from_user.id
@@ -520,17 +579,145 @@ async def show_admin_bans(callback: CallbackQuery, db):
 @router.callback_query(F.data.startswith("admin_approve_"))
 @admin_only
 async def admin_approve_report(callback: CallbackQuery, db):
-    await process_report_action(callback, "approve", db)
+    # admin_approve_report_{report_id}_{user_id}
+    parts = callback.data.split("_")
+    report_id = int(parts[-2])
+    user_id   = int(parts[-1])   # не используем, но полезно для логов
+    ok = await db.update_report_status(report_id, status="resolved", admin_id=callback.from_user.id)
+    await callback.answer("✅ Жалоба одобрена" if ok else "❌ Не удалось обновить", show_alert=not ok)
 
-@router.callback_query(F.data.startswith("admin_ban_"))
+def _fmt_until(dt: datetime | None) -> str:
+    if not dt:
+        return "перманентно"
+    try:
+        return dt.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return str(dt)
+
+@router.callback_query(F.data.startswith("admin_ban_user_"))
 @admin_only
 async def admin_ban_user(callback: CallbackQuery, db):
-    await process_report_action(callback, "ban", db)
+    # формат: admin_ban_user_{report_id}_{user_id}_{days}
+    try:
+        parts = callback.data.split("_")
+        report_id = int(parts[-3])
+        user_id   = int(parts[-2])
+        days      = int(parts[-1])
+    except Exception as e:
+        logger.error(f"admin_ban_user: bad callback_data {callback.data} → {e}")
+        await callback.answer("❌ Неверные данные кнопки", show_alert=True)
+        return
 
-@router.callback_query(F.data.startswith("admin_dismiss_"))
+    until = datetime.utcnow() + timedelta(days=days)
+
+    ok_ban = await db.ban_user(user_id, f"нарушение правил (жалоба), {days}d", until)
+    ok_rep = await db.update_report_status(report_id, status="resolved", admin_id=callback.from_user.id)
+
+    # 🔔 уведомление пользователю
+    if ok_ban:
+        try:
+            await callback.bot.send_message(
+                chat_id=user_id,
+                text=texts.USER_BANNED.format(until_date=_fmt_until(until))
+            )
+        except Exception as e:
+            logger.warning(f"notify banned user {user_id} failed: {e}")
+
+    await callback.answer("🚫 Бан применён, жалоба закрыта" if (ok_ban and ok_rep) else "❌ Ошибка при бане/закрытии",
+                          show_alert=not (ok_ban and ok_rep))
+
+    # 🔄 обновляем панель на следующую жалобу
+    await _refresh_reports_after_action(callback, db, just_id=report_id)
+
+@router.callback_query(F.data.startswith("admin_dismiss_report_"))
 @admin_only
 async def admin_dismiss_report(callback: CallbackQuery, db):
-    await process_report_action(callback, "dismiss", db)
+    # admin_dismiss_report_{report_id}
+    report_id = int(callback.data.rsplit("_", 1)[-1])
+
+    ok = await db.update_report_status(report_id, status="ignored", admin_id=callback.from_user.id)
+    await callback.answer("🙈 Жалоба отклонена" if ok else "❌ Не удалось обновить", show_alert=not ok)
+
+    # 🔄 обновить панель жалоб
+    await _refresh_reports_after_action(callback, db, just_id=report_id)
+
+
+@router.callback_query(F.data.startswith("admin_delete_profile_"))
+@admin_only
+async def admin_delete_profile(callback: CallbackQuery, db):
+    # admin_delete_profile_{report_id}_{user_id}
+    parts = callback.data.split("_")
+    report_id = int(parts[-2])
+    user_id   = int(parts[-1])
+
+    user = await db.get_user(user_id)
+    game = (user.get("current_game") if user else "dota") or "dota"
+
+    ok_del = await db.delete_profile(user_id, game)
+    ok_rep = await db.update_report_status(report_id, status="resolved", admin_id=callback.from_user.id)
+
+    # 🔔 уведомление пользователю об удалении анкеты
+    if ok_del:
+        try:
+            await callback.bot.send_message(user_id, texts.PROFILE_DELETED_BY_ADMIN)
+        except Exception:
+            pass
+
+    await callback.answer("🗑️ Анкета удалена, жалоба закрыта" if (ok_del and ok_rep) else "❌ Ошибка",
+                          show_alert=not (ok_del and ok_rep))
+
+    # 🔄 обновить панель жалоб
+    await _refresh_reports_after_action(callback, db, just_id=report_id)
+
+@router.callback_query(F.data.startswith("admin_next_report"))
+@admin_only
+async def admin_next_report(callback: CallbackQuery, db):
+    parts = callback.data.split("_")
+    current_id = int(parts[-1]) if len(parts) > 3 and parts[-1].isdigit() else None
+
+    reports = await db.get_pending_reports()
+    if not reports:
+        await safe_edit_message(callback, "✅ Больше жалоб нет", kb.admin_back_menu())
+        return
+
+    idx = 0
+    if current_id is not None:
+        for i, r in enumerate(reports):
+            if r["id"] == current_id:
+                idx = i + 1
+                break
+        if idx >= len(reports):
+            await safe_edit_message(callback, "✅ Больше жалоб нет", kb.admin_back_menu())
+            await callback.answer()
+            return
+
+    await show_admin_report(callback, reports, idx, db=db)
+
+@router.callback_query(F.data == "admin_back")
+@admin_only
+async def admin_back(callback: CallbackQuery):
+    await safe_edit_message(callback, "👑 Админ панель", kb.admin_main_menu())
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("admin_prev_report"))
+@admin_only
+async def admin_prev_report(callback: CallbackQuery, db):
+    parts = callback.data.split("_")
+    current_id = int(parts[-1]) if parts[-1].isdigit() else None
+
+    reports = await db.get_pending_reports()
+    if not reports:
+        await safe_edit_message(callback, "🚩 Жалоб нет", kb.admin_back_menu())
+        return
+
+    idx = 0
+    if current_id is not None:
+        for i, r in enumerate(reports):
+            if r["id"] == current_id:
+                idx = max(0, i - 1)
+                break
+
+    await show_admin_report(callback, reports, idx, db=db)
 
 @router.callback_query(F.data.startswith("admin_unban_"))
 @admin_only
@@ -600,120 +787,66 @@ async def navigate_bans(callback: CallbackQuery, db):
 
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ АДМИНКИ ====================
 
-async def process_report_action(callback: CallbackQuery, action: str):
-    """Обработка действий с жалобами"""
+from aiogram.types import InputMediaPhoto
+
+def _truncate_caption(s: str, limit: int = 1024) -> str:
+    s = s or ""
+    return s if len(s) <= limit else s[:limit-1] + "…"
+
+def _fmt_dt(dt):
+    if dt is None:
+        return "—"
+    if isinstance(dt, str):
+        return dt[:16]
     try:
-        report_id = int(callback.data.split("_")[2])
-    except (ValueError, IndexError):
-        await callback.answer("❌ Ошибка", show_alert=True)
-        return
+        return dt.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return str(dt)
 
-    db = callback.__dict__.get('db') or getattr(callback, '_db', None)
-    if not db:
-        from aiogram.fsm.context import FSMContext
-        state = FSMContext(bot=callback.bot, user_id=callback.from_user.id, chat_id=callback.message.chat.id)
-        data = await state.get_data()
-        db = data.get('db')
+async def show_admin_report(callback: CallbackQuery, reports: list[dict], idx: int, *, db):
+    rep = reports[idx]
+    game = rep.get("game", "dota")
+    profile = await db.get_user_profile(rep["reported_user_id"], game)
+    game_name = settings.GAMES.get(game, game)
 
-    if not db:
-        await callback.answer("❌ Ошибка подключения к БД", show_alert=True)
-        return
-
-    report_info = await db.get_report_info(report_id)
-    if not report_info:
-        await callback.answer("❌ Жалоба не найдена", show_alert=True)
-        return
-
-    success = await db.process_report(report_id, action, settings.ADMIN_ID)
-
-    if success:
-        action_messages = {
-            "approve": "✅ Профиль удален",
-            "ban": "✅ Пользователь забанен", 
-            "dismiss": "❌ Жалоба отклонена"
-        }
-
-        await callback.answer(action_messages[action])
-        logger.info(f"Админ {settings.ADMIN_ID} выполнил действие {action} для жалобы {report_id}")
-
-        if action in ["approve", "ban"]:
-            from .notifications import notify_profile_deleted, notify_user_banned
-            await notify_profile_deleted(callback.bot, report_info['reported_user_id'], report_info['game'])
-
-            if action == "ban":
-                ban_info = await db.get_user_ban(report_info['reported_user_id'])
-                if ban_info:
-                    await notify_user_banned(callback.bot, report_info['reported_user_id'], ban_info['expires_at'])
-
-        reports = await db.get_pending_reports()
-        if not reports:
-            text = "✅ Жалоба обработана! Больше жалоб нет."
-            await safe_edit_message(callback, text, kb.admin_main_menu())
-        else:
-            await show_admin_report(callback, reports, 0, db=db)
+    header = (
+        f"🚩 Жалоба #{rep['id']} | {game_name}\n"
+        f"Статус: {rep.get('status','pending')}\n"
+        f"Причина: {rep.get('report_reason','inappropriate_content')}\n"
+    )
+    if profile:
+        body = "👤 Объект жалобы:\n\n" + texts.format_profile(profile, show_contact=True)
     else:
-        await callback.answer("❌ Ошибка обработки жалобы", show_alert=True)
+        body = f"❌ Анкета {rep['reported_user_id']} не найдена"
 
-async def show_admin_report(callback: CallbackQuery, reports: list, current_index: int, db):
-    """Показ жалобы админу"""
-    if current_index >= len(reports):
-        text = "✅ Все жалобы просмотрены!"
-        await safe_edit_message(callback, text, kb.admin_main_menu())
-        await callback.answer()
-        return
+    markup = kb.admin_report_actions(reported_user_id=rep["reported_user_id"], report_id=rep["id"])
+    caption = _truncate_caption(header + "\n\n" + body)
 
-    report = reports[current_index]
-    profile = await db.get_user_profile(report['reported_user_id'], report['game'])
-
-    if not profile:
-        game_name = settings.GAMES.get(report['game'], report['game'])
-        report_text = f"""🚩 Жалоба #{report['id']} ({current_index + 1}/{len(reports)})
-
-⚠️ ПРОФИЛЬ УЖЕ УДАЛЕН
-
-🎮 Игра: {game_name}
-👤 Пользователь: {report.get('name', 'N/A')} (@{report.get('username', 'нет username')})
-🎯 Никнейм: {report.get('nickname', 'N/A')}
-📅 Дата жалобы: {report['created_at'][:16]}
-
-Профиль уже недоступен (возможно, удален пользователем)."""
-
-        await safe_edit_message(callback, report_text, 
-                               kb.admin_report_actions_with_nav(report['id'], current_index, len(reports)))
-        await callback.answer()
-        return
-
-    created_at = report['created_at'].strftime("%d.%m.%Y %H:%M")
-
-    game_name = settings.GAMES.get(report['game'], report['game'])
-    report_text = f"🚩 Жалоба #{report['id']} ({current_index + 1}/{len(reports)})\n\n"
-    report_text += f"🎮 Игра: {game_name}\n"
-    report_text += f"📅 Дата жалобы: {created_at}\n\n"
-    report_text += "👤 АНКЕТА НАРУШИТЕЛЯ:\n"
-    report_text += "━━━━━━━━━━━━━━━━━━\n"
-    report_text += texts.format_profile(profile, show_contact=False)
-    report_text += "\n━━━━━━━━━━━━━━━━━━\n"
-    report_text += "⚖️ Что делать с этой анкетой?"
+    # если есть фото у анкеты — редактируем медиа
+    photo_id = None
+    if profile:
+        photo_id = profile.get("photo_file_id") or profile.get("photo") or profile.get("photo_id")
 
     try:
-        if profile.get('photo_id'):
-            try:
-                await callback.message.delete()
-            except:
-                pass
-            await callback.message.answer_photo(
-                photo=profile['photo_id'],
-                caption=report_text,
-                reply_markup=kb.admin_report_actions_with_nav(report['id'], current_index, len(reports))
-            )
+        if photo_id:
+            media = InputMediaPhoto(media=photo_id, caption=caption)
+            await callback.message.edit_media(media=media, reply_markup=markup)
         else:
-            await safe_edit_message(callback, report_text, 
-                                   kb.admin_report_actions_with_nav(report['id'], current_index, len(reports)))
-        await callback.answer()
-    except Exception as e:
-        logger.error(f"Ошибка показа жалобы: {e}")
-        await callback.answer("❌ Ошибка загрузки")
+            # фоллбек: просто текст
+            await safe_edit_message(callback, caption, markup)
+    except Exception:
+        # если media нельзя отредактировать (например, предыдущее сообщение было текстом/другим типом) — пошлём новое фото
+        if photo_id:
+            await callback.message.answer_photo(photo_id, caption=caption, reply_markup=markup)
+            # опционально: старое сообщение убрать
+            with contextlib.suppress(Exception):
+                await callback.message.delete()
+        else:
+            await safe_edit_message(callback, caption, markup)
 
+    await callback.answer()
+
+    
 async def show_admin_ban(callback: CallbackQuery, bans: list, current_index: int):
     """Показ бана админу"""
     if current_index >= len(bans):
@@ -727,8 +860,8 @@ async def show_admin_ban(callback: CallbackQuery, bans: list, current_index: int
 
 👤 Пользователь: {ban.get('name', 'N/A')} (@{ban.get('username', 'нет username')})
 🎯 Никнейм: {ban.get('nickname', 'N/A')}
-📅 Дата бана: {ban['created_at'][:16]}
-⏰ Истекает: {ban['expires_at'][:16]}
+📅 Дата бана: {_fmt_dt(ban.get('created_at'))}
+⏰ Истекает: {_fmt_dt(ban.get('expires_at'))}
 📝 Причина: {ban['reason']}
 
 Что делать с этим баном?"""
@@ -736,39 +869,3 @@ async def show_admin_ban(callback: CallbackQuery, bans: list, current_index: int
     await safe_edit_message(callback, ban_text, 
                            kb.admin_ban_actions_with_nav(ban['user_id'], current_index, len(bans)))
     await callback.answer()
-
-async def show_matches(callback: CallbackQuery, user_id: int, game: str, db):
-    """Показ матчей пользователя"""
-    matches = await db.get_matches(user_id, game)
-    game_name = settings.GAMES.get(game, game)
-
-    if not matches:
-        text = f"💔 У вас пока нет матчей в {game_name}\n\n"
-        text += "Чтобы получить матчи:\n"
-        text += "• Лайкайте анкеты в поиске\n"
-        text += "• Отвечайте на лайки других игроков"
-        await safe_edit_message(callback, text, kb.back())
-        await callback.answer(f"✅ Переключено на {game_name}")
-        return
-
-    text = f"💖 Ваши матчи в {game_name} ({len(matches)}):\n\n"
-    for i, match in enumerate(matches, 1):
-        name = match['name']
-        username = match.get('username', 'нет username')
-        text += f"{i}. {name} (@{username})\n"
-
-    text += "\n💬 Вы можете связаться с любым из них!"
-
-    buttons = []
-    for i, match in enumerate(matches[:5]):
-        name = match['name'][:15] + "..." if len(match['name']) > 15 else match['name']
-        buttons.append([kb.InlineKeyboardButton(
-            text=f"💬 {name}", 
-            callback_data=f"contact_{match['telegram_id']}"
-        )])
-
-    buttons.append([kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
-    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=buttons)
-
-    await safe_edit_message(callback, text, keyboard)
-    await callback.answer(f"✅ Переключено на {game_name}")
