@@ -75,28 +75,34 @@ async def show_admin_stats(callback: CallbackQuery, db):
         await callback.answer()
         return
 
-    # Статистика из базы данных
     try:
         async with db._pg_pool.acquire() as conn:
-            stats_queries = [
-                ("👥 Пользователи", "SELECT COUNT(*) FROM users"),
-                ("📝 Анкеты", "SELECT COUNT(*) FROM profiles"), 
-                ("💖 Матчи", "SELECT COUNT(*) FROM matches"),
-                ("❤️ Лайки", "SELECT COUNT(*) FROM likes"),
-                ("🚩 Жалобы (всего)", "SELECT COUNT(*) FROM reports"),
-                ("⏳ Ожидающие жалобы", "SELECT COUNT(*) FROM reports WHERE status = 'pending'"),
-                ("🚫 Заблокированы", "SELECT COUNT(*) FROM bans WHERE expires_at > NOW()"),
+            stats = await db.get_database_stats()
+
+            main_stats = [
+                ("👥 Всего пользователей", "users_total"),
+                ("👤 Пользователи с анкетами", "users_with_profiles"), 
+                ("📝 Всего анкет", "profiles_total"),
+                ("💖 Матчи", "matches_total"),
+                ("❤️ Лайки", "likes_total"),
+                ("🚩 Жалобы (всего)", "reports_total"),
+                ("⏳ Ожидающие жалобы", "reports_pending"),
+                ("🚫 Заблокированы", "active_bans"),
             ]
 
-            for name, query in stats_queries:
-                try:
-                    count = await conn.fetchval(query)
-                    lines.append(f"{name}: {count or 0}")
-                except Exception as e:
-                    logger.warning(f"Ошибка получения статистики {name}: {e}")
-                    lines.append(f"{name}: ошибка")
+            for name, key in main_stats:
+                value = stats.get(key, "ошибка")
+                lines.append(f"{name}: {value}")
 
-            # Статистика по играм
+            games_data = stats.get("games_breakdown", {})
+            if games_data:
+                lines.append("\n📊 Статистика по играм:")
+                for game, data in games_data.items():
+                    game_name = settings.GAMES.get(game, game)
+                    lines.append(f"  • {game_name}:")
+                    lines.append(f"    👤 Пользователей: {data['users']}")
+                    lines.append(f"    📝 Анкет: {data['profiles']}")
+
             try:
                 rows = await conn.fetch("SELECT game, COUNT(*) AS cnt FROM profiles GROUP BY game")
                 if rows:
