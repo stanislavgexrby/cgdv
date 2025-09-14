@@ -63,7 +63,7 @@ async def process_like_action(callback: CallbackQuery, target_user_id: int, acti
 async def handle_match_created(callback: CallbackQuery, target_user_id: int, game: str, db):
     """Обработка создания матча"""
     user_id = callback.from_user.id
-    await notify_about_match(callback.bot, user_id, target_user_id, game, db)
+    # await notify_about_match(callback.bot, user_id, target_user_id, game, db)
     await notify_about_match(callback.bot, target_user_id, user_id, game, db)
     
     target_profile = await db.get_user_profile(target_user_id, game)
@@ -119,20 +119,12 @@ async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
 
     await show_profile_with_photo(callback, profile, text, keyboard)
 
-# ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ ====================
-
-@router.callback_query(F.data == "my_likes")
-@check_ban_and_profile()
-async def show_my_likes(callback: CallbackQuery, state: FSMContext, db):
-    """Показ входящих лайков"""
+async def _show_likes_internal(callback: CallbackQuery, user_id: int, game: str, state: FSMContext, db):
+    """Внутренняя функция показа лайков"""
     await state.clear()
-
-    user_id = callback.from_user.id
-    user = await db.get_user(user_id)
-    game = user['current_game']
-
+    
     likes = await db.get_likes_for_user(user_id, game)
-
+    
     if not likes:
         game_name = settings.GAMES.get(game, game)
         text = f"Пока никто не лайкнул вашу анкету в {game_name}\n\n"
@@ -146,16 +138,10 @@ async def show_my_likes(callback: CallbackQuery, state: FSMContext, db):
 
     await show_like_profile(callback, likes, 0)
 
-@router.callback_query(F.data == "my_matches")
-@check_ban_and_profile()
-async def show_my_matches(callback: CallbackQuery, state: FSMContext, db):
-    """Показ матчей пользователя"""
+async def _show_matches_internal(callback: CallbackQuery, user_id: int, game: str, state: FSMContext, db):
+    """Внутренняя функция показа матчей"""
     await state.clear()
-
-    user_id = callback.from_user.id
-    user = await db.get_user(user_id)
-    game = user['current_game']
-
+    
     matches = await db.get_matches(user_id, game)
     game_name = settings.GAMES.get(game, game)
 
@@ -188,6 +174,29 @@ async def show_my_matches(callback: CallbackQuery, state: FSMContext, db):
     keyboard = kb.InlineKeyboardMarkup(inline_keyboard=buttons)
 
     await safe_edit_message(callback, text, keyboard)
+
+# ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ ====================
+
+@router.callback_query(F.data == "my_likes")
+@check_ban_and_profile()
+async def show_my_likes(callback: CallbackQuery, state: FSMContext, db):
+    """Показ входящих лайков"""
+    user_id = callback.from_user.id
+    user = await db.get_user(user_id)
+    game = user['current_game']
+    
+    await _show_likes_internal(callback, user_id, game, state, db)
+    await callback.answer()
+
+@router.callback_query(F.data == "my_matches")
+@check_ban_and_profile()
+async def show_my_matches(callback: CallbackQuery, state: FSMContext, db):
+    """Показ матчей пользователя"""
+    user_id = callback.from_user.id
+    user = await db.get_user(user_id)
+    game = user['current_game']
+    
+    await _show_matches_internal(callback, user_id, game, state, db)
     await callback.answer()
 
 # ==================== ОБРАБОТЧИКИ ДЕЙСТВИЙ С ЛАЙКАМИ ====================

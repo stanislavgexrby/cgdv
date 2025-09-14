@@ -153,10 +153,17 @@ async def notify_about_like(bot: Bot, user_id: int, game: str, db=None) -> bool:
             game_name = settings.GAMES.get(actual_game, actual_game)
             text = f"Кто-то лайкнул вашу анкету в {game_name}! Зайдите в «Лайки», чтобы посмотреть."
 
-            keyboard = kb.create_navigation_keyboard([
-                ("Посмотреть лайки", "my_likes"),
-                ("Главное меню", "main_menu"),
-            ])
+            current_user = await db.get_user(user_id)
+            buttons: List[Tuple[str, str]] = []
+
+            if current_user and current_user.get('current_game') != actual_game:
+                buttons.append((f"Перейти к лайкам в {game_name}", f"switch_and_likes_{actual_game}"))
+            else:
+                buttons.append(("Посмотреть лайки", "my_likes"))
+
+            buttons.append(("Главное меню", "main_menu"))
+
+            keyboard = kb.create_navigation_keyboard(buttons)
 
             return await _send_notification_internal(bot, user_id, text, None, keyboard)
 
@@ -164,9 +171,8 @@ async def notify_about_like(bot: Bot, user_id: int, game: str, db=None) -> bool:
             logger.error(f"Ошибка отправки уведомления о лайке: {e}")
             return False
 
-    # Добавляем в очередь для асинхронной обработки
     await _notification_queue.add_notification(
-        _notify(), 
+        _notify(),
         f"like notification to {user_id}"
     )
     return True

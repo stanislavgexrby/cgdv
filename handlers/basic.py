@@ -257,6 +257,53 @@ async def select_game(callback: CallbackQuery, db):
     await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
     await callback.answer()
 
+@router.callback_query(F.data.startswith("switch_and_likes_"))
+async def switch_and_show_likes(callback: CallbackQuery, state: FSMContext, db):
+    """Переключение игры и показ лайков из уведомления"""
+    parts = callback.data.split("_")
+
+    if len(parts) < 4:
+        logger.error(f"Неверный формат callback_data: {callback.data}")
+        await callback.answer("Ошибка данных", show_alert=True)
+        return
+
+    game = parts[3]
+    user_id = callback.from_user.id
+
+    if game not in settings.GAMES:
+        logger.error(f"Неверная игра в callback: {game}")
+        await callback.answer("Неверная игра", show_alert=True)
+        return
+
+    logger.info(f"Переключение на игру {game} для показа лайков пользователя {user_id}")
+
+    if not await db.switch_game(user_id, game):
+        await callback.answer("Ошибка переключения игры", show_alert=True)
+        return
+
+    if await db.is_user_banned(user_id):
+        ban_info = await db.get_user_ban(user_id)
+        game_name = settings.GAMES.get(game, game)
+        text = f"Вы заблокированы в {game_name}"
+        if ban_info:
+            expires_at = ban_info['expires_at']
+            ban_end = _format_expire_date(expires_at)
+            text += f" до {ban_end}"
+
+        await safe_edit_message(callback, text, kb.back())
+        await callback.answer()
+        return
+
+    profile = await db.get_user_profile(user_id, game)
+    if not profile:
+        game_name = settings.GAMES.get(game, game)
+        await callback.answer(f"Сначала создайте анкету для {game_name}", show_alert=True)
+        return
+
+    from handlers.likes import _show_likes_internal
+    await _show_likes_internal(callback, user_id, game, state, db)
+    await callback.answer(f"Переключено на {settings.GAMES.get(game, game)}")
+
 @router.callback_query(F.data.startswith("switch_and_matches_"))
 async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db):
     """Переключение игры и показ матчей из уведомления"""
@@ -281,8 +328,6 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db
         await callback.answer("Ошибка переключения игры", show_alert=True)
         return
 
-    await state.clear()
-
     if await db.is_user_banned(user_id):
         ban_info = await db.get_user_ban(user_id)
         game_name = settings.GAMES.get(game, game)
@@ -302,43 +347,9 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db
         await callback.answer(f"Сначала создайте анкету для {game_name}", show_alert=True)
         return
 
-    await show_matches(callback, user_id, game, db)
-
-async def show_matches(callback: CallbackQuery, user_id: int, game: str, db):
-    """Показ матчей пользователя"""
-    matches = await db.get_matches(user_id, game)
-    game_name = settings.GAMES.get(game, game)
-
-    if not matches:
-        text = f"У вас пока нет матчей в {game_name}\n\n"
-        text += "Чтобы получить мэтчи:\n"
-        text += "• Лайкайте анкеты в поиске\n"
-        text += "• Отвечайте на лайки других игроков"
-        await safe_edit_message(callback, text, kb.back())
-        await callback.answer(f"Переключено на {game_name}")
-        return
-
-    text = f"Ваши мэтчи в {game_name} ({len(matches)}):\n\n"
-    for i, match in enumerate(matches, 1):
-        name = match['name']
-        username = match.get('username', 'нет username')
-        text += f"{i}. {name} (@{username})\n"
-
-    text += "\n Вы можете связаться с любым из них!"
-
-    buttons = []
-    for i, match in enumerate(matches[:5]):
-        name = match['name'][:15] + "..." if len(match['name']) > 15 else match['name']
-        buttons.append([kb.InlineKeyboardButton(
-            text=f" {name}", 
-            callback_data=f"contact_{match['telegram_id']}"
-        )])
-
-    buttons.append([kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")])
-    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=buttons)
-
-    await safe_edit_message(callback, text, keyboard)
-    await callback.answer(f"Переключено на {game_name}")
+    from handlers.likes import _show_matches_internal
+    await _show_matches_internal(callback, user_id, game, state, db)
+    await callback.answer(f"Переключено на {settings.GAMES.get(game, game)}")
 
 @router.callback_query(F.data.startswith("switch_"))
 async def switch_game(callback: CallbackQuery, db):

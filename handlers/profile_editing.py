@@ -84,42 +84,6 @@ def validate_input(field: str, value, game: str = None) -> tuple[bool, str]:
 
 # ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ ====================
 
-@router.callback_query(F.data == "view_profile")
-@check_ban_and_profile()
-async def view_profile(callback: CallbackQuery, db):
-    """Показ анкеты пользователя"""
-    user_id = callback.from_user.id
-    user = await db.get_user(user_id)
-    game = user['current_game']
-    profile = await db.get_user_profile(user_id, game)
-
-    game_name = settings.GAMES.get(game, game)
-    profile_text = texts.format_profile(profile, show_contact=True)
-    text = f"Ваша анкета в {game_name}:\n\n{profile_text}"
-
-    keyboard = kb.view_profile_menu()
-
-    try:
-        if profile.get('photo_id'):
-            await callback.message.delete()
-            await callback.message.answer_photo(
-                photo=profile['photo_id'],
-                caption=text,
-                reply_markup=keyboard,
-                parse_mode='HTML'
-            )
-        else:
-            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
-    except Exception as e:
-        logger.error(f"Ошибка отображения профиля: {e}")
-        try:
-            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
-        except:
-            await callback.message.delete()
-            await callback.message.answer(text, reply_markup=keyboard, parse_mode='HTML')
-
-    await callback.answer()
-
 @router.callback_query(F.data == "edit_profile")
 @check_ban_and_profile()
 async def edit_profile(callback: CallbackQuery, db):
