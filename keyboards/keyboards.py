@@ -76,7 +76,9 @@ def ratings(game: str, for_profile: bool = True, with_cancel: bool = False) -> I
         buttons.append([InlineKeyboardButton(text="Любой рейтинг", callback_data="rating_any")])
 
     if with_cancel:
-        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
+        # Для редактирования используем cancel_edit
+        cancel_callback = "cancel_edit" if not for_profile else "cancel"
+        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=cancel_callback)])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -91,11 +93,13 @@ def regions(for_profile: bool = True, with_cancel: bool = False) -> InlineKeyboa
         buttons.append([InlineKeyboardButton(text="Любой регион", callback_data="region_any")])
 
     if with_cancel:
-        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
+        # Для редактирования используем cancel_edit
+        cancel_callback = "cancel_edit" if not for_profile else "cancel"
+        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=cancel_callback)])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def positions(game: str, selected: List[str] = None, for_profile: bool = True) -> InlineKeyboardMarkup:
+def positions(game: str, selected: List[str] = None, for_profile: bool = True, editing: bool = False) -> InlineKeyboardMarkup:
     """Выбор позиций"""
     if selected is None:
         selected = []
@@ -122,7 +126,10 @@ def positions(game: str, selected: List[str] = None, for_profile: bool = True) -
     else:
         buttons.append([InlineKeyboardButton(text="⚠️ Выберите позицию", callback_data="pos_need")])
 
-    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
+    if editing:
+        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")])
+    else:
+        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
