@@ -3,6 +3,8 @@ import logging
 from typing import Optional, List, Tuple, Dict, Any
 from aiogram import Bot
 from aiogram.types import InlineKeyboardMarkup
+from datetime import datetime
+
 import utils.texts as texts
 import config.settings as settings
 import keyboards.keyboards as kb
@@ -176,16 +178,16 @@ async def notify_profile_deleted(bot: Bot, user_id: int, game: str) -> bool:
     async def _notify():
         try:
             game_name = settings.GAMES.get(game, game)
-            text = (f"⚠️ Ваша анкета в {game_name} была удалена модератором\n\n"
-                    f"📋 Причина: нарушение правил сообщества\n\n"
-                    f"✅ Что можно сделать:\n"
+            text = (f"Ваша анкета в {game_name} была удалена модератором\n\n"
+                    f"Причина: нарушение правил сообщества\n\n"
+                    f"Что можно сделать:\n"
                     f"• Создать новую анкету\n"
                     f"• Соблюдать правила сообщества\n"
                     f"• Быть вежливыми с другими игроками")
 
             keyboard = kb.create_navigation_keyboard([
-                ("📝 Создать новую анкету", "create_profile"),
-                ("🏠 Главное меню", "main_menu"),
+                ("Создать новую анкету", "create_profile"),
+                ("Главное меню", "main_menu"),
             ])
 
             return await _send_notification_internal(bot, user_id, text, None, keyboard)
@@ -201,11 +203,13 @@ async def notify_profile_deleted(bot: Bot, user_id: int, game: str) -> bool:
     )
     return True
 
-async def notify_user_banned(bot: Bot, user_id: int, expires_at: str) -> bool:
+async def notify_user_banned(bot: Bot, user_id: int, expires_at: datetime) -> bool:
     """Уведомление о бане пользователя (асинхронное)"""
     async def _notify():
         try:
-            text = (f"🚫 Вы заблокированы до {expires_at[:16]} за нарушение правил сообщества.\n\n"
+            formatted_date = expires_at.strftime("%d.%m.%Y %H:%M (UTC)")
+
+            text = (f"Вы заблокированы до {formatted_date} за нарушение правил сообщества.\n\n"
                     f"Во время блокировки вы не можете:\n"
                     f"• Создавать анкеты\n"
                     f"• Искать игроков\n"
@@ -217,9 +221,8 @@ async def notify_user_banned(bot: Bot, user_id: int, expires_at: str) -> bool:
             logger.error(f"Ошибка отправки уведомления о бане: {e}")
             return False
 
-    # Добавляем в очередь для асинхронной обработки
     await _notification_queue.add_notification(
-        _notify(), 
+        _notify(),
         f"ban notification to {user_id}"
     )
     return True
@@ -228,17 +231,16 @@ async def notify_user_unbanned(bot: Bot, user_id: int) -> bool:
     """Уведомление о снятии бана (асинхронное)"""
     async def _notify():
         try:
-            text = "✅ Блокировка снята! Теперь вы можете снова пользоваться ботом."
-            keyboard = kb.create_navigation_keyboard([("🏠 Главное меню", "main_menu")])
+            text = "Блокировка снята! Теперь вы можете снова пользоваться ботом."
+            keyboard = kb.create_navigation_keyboard([("Главное меню", "main_menu")])
             return await _send_notification_internal(bot, user_id, text, None, keyboard)
 
         except Exception as e:
             logger.error(f"Ошибка отправки уведомления о снятии бана: {e}")
             return False
 
-    # Добавляем в очередь для асинхронной обработки  
     await _notification_queue.add_notification(
-        _notify(), 
+        _notify(),
         f"unban notification to {user_id}"
     )
     return True

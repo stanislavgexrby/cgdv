@@ -37,7 +37,6 @@ def check_ban_and_profile(require_profile=True):
 
             user_id = callback.from_user.id
             
-            # СНАЧАЛА проверяем бан
             if await db.is_user_banned(user_id):
                 ban_info = await db.get_user_ban(user_id)
                 if ban_info:
@@ -54,7 +53,6 @@ def check_ban_and_profile(require_profile=True):
                 await callback.answer()
                 return
 
-            # Затем проверяем пользователя и игру
             user = await db.get_user(user_id)
             if not user or not user.get('current_game'):
                 await callback.answer("Ошибка", show_alert=True)
@@ -143,6 +141,22 @@ async def check_subscription(user_id: int, game: str, bot: Bot) -> bool:
     except Exception as e:
         logger.error(f"Ошибка проверки подписки для канала {channel}: {e}")
         return False
+
+def _format_expire_date(expires_at: str | datetime) -> str:
+    """Приводим expires_at (str или datetime) к красивому виду"""
+    if isinstance(expires_at, str):
+        try:
+            # Парсим ISO-строку
+            dt = datetime.fromisoformat(expires_at)
+        except ValueError:
+            # На всякий случай, если формат кривой — показываем как есть
+            return expires_at
+    else:
+        dt = expires_at
+
+    # Красивый формат: 14.09.2025 18:40 (UTC)
+    return dt.strftime("%d.%m.%Y %H:%M (UTC)")
+
 
 def get_main_menu_text(game: str, has_profile: bool) -> str:
     """Генерация текста главного меню"""
@@ -281,10 +295,7 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db
         text = f"Вы заблокированы в {game_name}"
         if ban_info:
             expires_at = ban_info['expires_at']
-            if isinstance(expires_at, str):
-                ban_end = expires_at[:16]
-            else:
-                ban_end = expires_at.strftime("%Y-%m-%d %H:%M")
+            ban_end = _format_expire_date(expires_at)
             text += f" до {ban_end}"
 
         await safe_edit_message(callback, text, kb.back())

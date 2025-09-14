@@ -234,14 +234,12 @@ async def _ban_user_action(callback: CallbackQuery, report_id: int, user_id: int
     success_report = await db.update_report_status(report_id, status="resolved", admin_id=callback.from_user.id)
     
     if success_ban:
-        # Отправляем уведомление пользователю
-        await notify_user_banned(callback.bot, user_id, expires_at.isoformat())
+        await notify_user_banned(callback.bot, user_id, expires_at)
         logger.info(f"Админ забанил пользователя {user_id} на {days} дней по жалобе {report_id}")
     
-    message = f"🚫 Бан на {days} дней применен, пользователь уведомлен" if (success_ban and success_report) else "❌ Ошибка выполнения"
+    message = f"Бан на {days} дней применен, пользователь уведомлен" if (success_ban and success_report) else "❌ Ошибка выполнения"
     await callback.answer(message, show_alert=not (success_ban and success_report))
     
-    # Очищаем кэш поиска для всех пользователей этой игры
     user = await db.get_user(user_id)
     if user and user.get('current_game'):
         await db._clear_pattern_cache(f"search:*:{user['current_game']}:*")
@@ -261,11 +259,11 @@ async def unban_user(callback: CallbackQuery, db):
     if success:
         notify_user_unbanned(callback.bot, user_id)
         logger.info(f"Админ снял бан с пользователя {user_id}")
-        await callback.answer("✅ Бан снят")
+        await callback.answer("Бан снят")
         
         bans = await db.get_all_bans()
         if not bans:
-            text = "✅ Бан снят!\n\nБольше активных банов нет."
+            text = "Бан снят!\n\nБольше активных банов нет."
             await safe_edit_message(callback, text, kb.admin_back_menu())
         else:
             await _show_ban(callback, bans[0], 0, len(bans))
