@@ -83,7 +83,7 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
 
         if is_match:
             target_profile = await db.get_user_profile(target_user_id, game)
-            await notify_about_match(callback.bot, target_user_id, user_id, game, db)
+            notify_about_match(callback.bot, target_user_id, user_id, game, db)
 
             if target_profile:
                 match_text = texts.format_profile(target_profile, show_contact=True)
@@ -111,7 +111,7 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
                     [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
                 ])
             )
-            await notify_about_like(callback.bot, target_user_id, game, db)
+            notify_about_like(callback.bot, target_user_id, game, db)
             logger.info(f"Лайк: {user_id} -> {target_user_id}")
 
     elif action == "skip":

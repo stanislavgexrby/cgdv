@@ -212,7 +212,7 @@ async def _delete_profile_action(callback: CallbackQuery, report_id: int, user_i
     success_report = await db.update_report_status(report_id, status="resolved", admin_id=callback.from_user.id)
     
     if success_delete:
-        await notify_profile_deleted(callback.bot, user_id, game)
+        notify_profile_deleted(callback.bot, user_id, game)
         logger.info(f"Админ удалил профиль {user_id} по жалобе {report_id}")
     
     message = "🗑️ Профиль удален, жалоба закрыта" if (success_delete and success_report) else "❌ Ошибка выполнения"
@@ -229,7 +229,7 @@ async def _ban_user_action(callback: CallbackQuery, report_id: int, user_id: int
     success_report = await db.update_report_status(report_id, status="resolved", admin_id=callback.from_user.id)
     
     if success_ban:
-        await notify_user_banned(callback.bot, user_id, expires_at.isoformat())
+        notify_user_banned(callback.bot, user_id, expires_at.isoformat())
         logger.info(f"Админ забанил пользователя {user_id} на {days} дней по жалобе {report_id}")
     
     message = f"🚫 Бан на {days} дней применен" if (success_ban and success_report) else "❌ Ошибка выполнения"
@@ -311,7 +311,7 @@ async def unban_user(callback: CallbackQuery, db):
     success = await db.unban_user(user_id)
     
     if success:
-        await notify_user_unbanned(callback.bot, user_id)
+        notify_user_unbanned(callback.bot, user_id)
         logger.info(f"Админ снял бан с пользователя {user_id}")
         await callback.answer("✅ Бан снят")
         

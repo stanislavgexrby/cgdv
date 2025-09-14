@@ -6,6 +6,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv, find_dotenv
 
 from handlers import register_handlers
+from handlers.notifications import wait_all_notifications
 from database.database import Database
 from config.settings import ADMIN_ID
 from middleware.database import DatabaseMiddleware
@@ -53,6 +54,7 @@ async def main():
     except (asyncio.CancelledError, KeyboardInterrupt):
         logger.info("🛑 Остановка поллинга по запросу пользователя/ОС")
     finally:
+        await wait_all_notifications()
         await db.close()
         await bot.session.close()
         logger.info("👋 CGDV остановлен")
