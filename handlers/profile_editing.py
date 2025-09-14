@@ -6,6 +6,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 from handlers.notifications import update_user_activity
 from handlers.basic import check_ban_and_profile, safe_edit_message
+from handlers.validation import validate_profile_input
 
 import keyboards.keyboards as kb
 import utils.texts as texts
@@ -57,32 +58,6 @@ async def update_profile_field(user_id: int, field: str, value, db) -> bool:
         await db._clear_user_cache(user_id)
 
     return success
-
-def validate_input(field: str, value, game: str = None) -> tuple[bool, str]:
-    """Валидация ввода пользователя"""
-    if field == 'name':
-        if len(value) < 2 or len(value) > settings.MAX_NAME_LENGTH:
-            return False, f"Имя должно быть от 2 до {settings.MAX_NAME_LENGTH} символов"
-        if len(value.split()) < 2:
-            return False, "Введите имя и фамилию"
-
-    elif field == 'nickname':
-        if len(value) < 2 or len(value) > settings.MAX_NICKNAME_LENGTH:
-            return False, f"Никнейм должен быть от 2 до {settings.MAX_NICKNAME_LENGTH} символов"
-
-    elif field == 'age':
-        try:
-            age = int(value)
-            if age < settings.MIN_AGE:
-                return False, f"Возраст должен быть больше {settings.MIN_AGE}"
-        except ValueError:
-            return False, "Введите число"
-
-    elif field == 'info':
-        if len(value) > settings.MAX_INFO_LENGTH:
-            return False, f"Слишком длинный текст (максимум {settings.MAX_INFO_LENGTH} символов)"
-
-    return True, ""
 
 # ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ ====================
 
@@ -282,7 +257,7 @@ async def process_edit_name(message: Message, state: FSMContext, db):
         return
 
     name = message.text.strip()
-    is_valid, error_msg = validate_input('name', name)
+    is_valid, error_msg = validate_profile_input('name', name)
     if not is_valid:
         await message.answer(error_msg, parse_mode='HTML')
         return
@@ -305,7 +280,7 @@ async def process_edit_nickname(message: Message, state: FSMContext, db):
         return
 
     nickname = message.text.strip()
-    is_valid, error_msg = validate_input('nickname', nickname)
+    is_valid, error_msg = validate_profile_input('nickname', nickname)
     if not is_valid:
         await message.answer(error_msg, parse_mode='HTML')
         return
@@ -326,7 +301,7 @@ async def process_edit_age(message: Message, state: FSMContext, db):
         await message.answer("Отправьте число", parse_mode='HTML')
         return
 
-    is_valid, error_msg = validate_input('age', message.text.strip())
+    is_valid, error_msg = validate_profile_input('age', message.text.strip())
     if not is_valid:
         await message.answer(error_msg, parse_mode='HTML')
         return
@@ -349,7 +324,7 @@ async def process_edit_info(message: Message, state: FSMContext, db):
         return
 
     info = message.text.strip()
-    is_valid, error_msg = validate_input('info', info)
+    is_valid, error_msg = validate_profile_input('info', info)
     if not is_valid:
         await message.answer(error_msg, parse_mode='HTML')
         return

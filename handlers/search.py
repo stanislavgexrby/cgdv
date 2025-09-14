@@ -5,6 +5,7 @@ from aiogram.fsm.context import FSMContext
 
 from handlers.basic import check_ban_and_profile, safe_edit_message, SearchForm
 from handlers.notifications import notify_about_match, notify_about_like, update_user_activity
+from handlers.likes import show_profile_with_photo
 
 import keyboards.keyboards as kb
 import utils.texts as texts
@@ -52,27 +53,6 @@ async def update_filter_display(callback: CallbackQuery, state: FSMContext, mess
 
     if message:
         await callback.answer(message)
-
-async def show_profile_in_search(callback: CallbackQuery, profile: dict, text: str, keyboard):
-    """Универсальная функция показа профиля в поиске"""
-    try:
-        if profile.get('photo_id'):
-            try:
-                await callback.message.delete()
-            except:
-                pass
-            await callback.message.answer_photo(
-                photo=profile['photo_id'],
-                caption=text,
-                reply_markup=keyboard,
-                parse_mode='HTML'
-            )
-        else:
-            await safe_edit_message(callback, text, keyboard)
-        await callback.answer()
-    except Exception as e:
-        logger.error(f"Ошибка показа профиля в поиске: {e}")
-        await callback.answer("Ошибка загрузки")
 
 async def handle_search_action(callback: CallbackQuery, action: str, target_user_id: int, state: FSMContext, db):
     """Универсальная обработка действий в поиске"""
@@ -168,7 +148,7 @@ async def show_current_profile(callback: CallbackQuery, state: FSMContext):
     profile = profiles[index]
     profile_text = texts.format_profile(profile)
 
-    await show_profile_in_search(
+    await show_profile_with_photo(
         callback,
         profile,
         profile_text,
@@ -367,6 +347,7 @@ async def skip_profile(callback: CallbackQuery, state: FSMContext, db):
     try:
         target_user_id = int(callback.data.split("_")[1])
     except Exception:
+        await state.clear()
         await callback.answer("Ошибка данных", show_alert=True)
         return
     await handle_search_action(callback, "skip", target_user_id, state, db)
@@ -376,6 +357,7 @@ async def like_profile(callback: CallbackQuery, state: FSMContext, db):
     try:
         target_user_id = int(callback.data.split("_")[1])
     except Exception:
+        await state.clear()
         await callback.answer("Ошибка данных", show_alert=True)
         return
     await handle_search_action(callback, "like", target_user_id, state, db)

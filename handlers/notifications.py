@@ -310,13 +310,6 @@ async def notify_admin_new_report(bot: Bot, reporter_id: int, reported_user_id: 
 
 # ==================== СЛУЖЕБНЫЕ ФУНКЦИИ ====================
 
-async def get_notification_stats() -> Dict[str, Any]:
-    """Получить статистику очереди уведомлений"""
-    return {
-        "active_notifications": len(_notification_queue._active_tasks),
-        "max_concurrent": _notification_queue._max_concurrent
-    }
-
 async def wait_all_notifications():
     """Дождаться завершения всех уведомлений (для graceful shutdown)"""
     if _notification_queue._active_tasks:

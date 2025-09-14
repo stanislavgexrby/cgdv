@@ -280,12 +280,6 @@ def position_filter_menu(game: str) -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def back_to_search() -> InlineKeyboardMarkup:
-    """Возврат к поиску"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔍 Поиск", callback_data="back_to_search")]
-    ])
-
 def profile_actions(user_id: int) -> InlineKeyboardMarkup:
     """Действия с профилем в поиске"""
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -335,35 +329,6 @@ def admin_main_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Баны", callback_data="admin_bans")],
         [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
     ])
-
-def admin_report_actions_with_nav(report_id: int, current_index: int, total_count: int) -> InlineKeyboardMarkup:
-    """Действия с жалобой с навигацией"""
-    buttons = [
-        [
-            InlineKeyboardButton(text="Удалить профиль", callback_data=f"admin_approve_{report_id}"),
-            InlineKeyboardButton(text="Забанить", callback_data=f"admin_ban_{report_id}")
-        ],
-        [InlineKeyboardButton(text="Отклонить", callback_data=f"admin_dismiss_{report_id}")]
-    ]
-
-    if total_count > 1:
-        nav_buttons = []
-        if current_index > 0:
-            nav_buttons.append(InlineKeyboardButton(
-                text="Предыдущая", 
-                callback_data=f"admin_report_prev_{current_index}"
-            ))
-        if current_index < total_count - 1:
-            nav_buttons.append(InlineKeyboardButton(
-                text="Следующая", 
-                callback_data=f"admin_report_next_{current_index}"
-            ))
-        if nav_buttons:
-            buttons.append(nav_buttons)
-
-    buttons.append([InlineKeyboardButton(text="Админ меню", callback_data="admin_stats")])
-
-    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def admin_report_actions(reported_user_id: int, report_id: int) -> InlineKeyboardMarkup:
     """Действия с жалобой"""

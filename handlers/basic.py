@@ -389,16 +389,6 @@ async def switch_game(callback: CallbackQuery, db):
 
 # ==================== НАВИГАЦИЯ ПО МЕНЮ ====================
 
-@router.callback_query(F.data == "dismiss_notification")
-async def dismiss_notification(callback: CallbackQuery):
-    """Удаление уведомления"""
-    try:
-        await callback.message.delete()
-        await callback.answer()
-    except Exception as e:
-        logger.warning(f"Не удалось удалить уведомление: {e}")
-        await callback.answer()
-
 @router.callback_query(F.data.in_(["main_menu", "back_to_main"]))
 async def show_main_menu(callback: CallbackQuery, db):
     user_id = callback.from_user.id
