@@ -18,7 +18,7 @@ def main_menu(has_profile: bool = False, current_game: str = None) -> InlineKeyb
     if has_profile:
         buttons.extend([
             [InlineKeyboardButton(text="Поиск", callback_data="search")],
-            [InlineKeyboardButton(text="Моя анкета", callback_data="edit_profile")],
+            [InlineKeyboardButton(text="Моя анкета", callback_data="view_profile")],
             [InlineKeyboardButton(text="Лайки", callback_data="my_likes")],
             [InlineKeyboardButton(text="Мэтчи", callback_data="my_matches")]
         ])
@@ -31,6 +31,16 @@ def main_menu(has_profile: bool = False, current_game: str = None) -> InlineKeyb
         buttons.append([InlineKeyboardButton(text=f"Переключить на {other_name}", callback_data=f"switch_{other_game}")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def view_profile_menu() -> InlineKeyboardMarkup:
+    """Меню просмотра профиля"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Редактировать", callback_data="edit_profile")],
+        [InlineKeyboardButton(text="Создать заново", callback_data="recreate_profile")],
+        [InlineKeyboardButton(text="Удалить анкету", callback_data="delete_profile")],
+        [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+    ])
+
 
 def back() -> InlineKeyboardMarkup:
     """Простая кнопка назад"""
@@ -156,7 +166,7 @@ def cancel_profile_creation() -> InlineKeyboardMarkup:
 # ==================== РЕДАКТИРОВАНИЕ ПРОФИЛЕЙ ====================
 
 def edit_profile_menu() -> InlineKeyboardMarkup:
-    """Основное меню редактирования профиля"""
+    """Меню редактирования профиля"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Изменить имя", callback_data="edit_name")],
         [InlineKeyboardButton(text="Изменить никнейм", callback_data="edit_nickname")],
@@ -166,8 +176,6 @@ def edit_profile_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Изменить позиции", callback_data="edit_positions")],
         [InlineKeyboardButton(text="Изменить описание", callback_data="edit_info")],
         [InlineKeyboardButton(text="Изменить фото", callback_data="edit_photo")],
-        [InlineKeyboardButton(text="Создать заново", callback_data="recreate_profile")],
-        [InlineKeyboardButton(text="Удалить анкету", callback_data="delete_profile")],
         [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
     ])
 

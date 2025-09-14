@@ -412,14 +412,17 @@ async def back_to_games(callback: CallbackQuery):
 @router.callback_query(F.data == "view_profile")
 @check_ban_and_profile()
 async def view_profile(callback: CallbackQuery, db):
+    """Показ анкеты пользователя"""
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
     game = user['current_game']
     profile = await db.get_user_profile(user_id, game)
 
-    profile_text = texts.format_profile(profile, show_contact=True)
     game_name = settings.GAMES.get(game, game)
+    profile_text = texts.format_profile(profile, show_contact=True)
     text = f"Ваша анкета в {game_name}:\n\n{profile_text}"
+
+    keyboard = kb.view_profile_menu()
 
     try:
         if profile.get('photo_id'):
@@ -427,14 +430,18 @@ async def view_profile(callback: CallbackQuery, db):
             await callback.message.answer_photo(
                 photo=profile['photo_id'],
                 caption=text,
-                reply_markup=kb.back(),
+                reply_markup=keyboard,
                 parse_mode='HTML'
             )
         else:
-            await safe_edit_message(callback, text, kb.back())
+            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
     except Exception as e:
         logger.error(f"Ошибка отображения профиля: {e}")
-        await safe_edit_message(callback, text, kb.back())
+        try:
+            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
+        except:
+            await callback.message.delete()
+            await callback.message.answer(text, reply_markup=keyboard, parse_mode='HTML')
 
     await callback.answer()
 
@@ -443,13 +450,14 @@ async def view_profile(callback: CallbackQuery, db):
 @router.callback_query(F.data == "back_to_editing")
 @check_ban_and_profile()
 async def back_to_editing_handler(callback: CallbackQuery, db):
+    """Возврат к меню редактирования"""
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
     game = user['current_game']
     profile = await db.get_user_profile(user_id, game)
 
     game_name = settings.GAMES.get(game, game)
-    current_info = f"Текущая анкета в {game_name}:\n\n"
+    current_info = f"Редактирование анкеты в {game_name}:\n\n"
     current_info += texts.format_profile(profile, show_contact=True)
     current_info += "\n\nЧто хотите изменить?"
 
