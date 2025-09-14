@@ -345,6 +345,28 @@ def admin_report_actions_with_nav(report_id: int, current_index: int, total_coun
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def admin_report_actions(reported_user_id: int, report_id: int) -> InlineKeyboardMarkup:
+    """Действия с жалобой"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="🗑️ Удалить профиль", callback_data=f"rep:del:{report_id}:{reported_user_id}"),
+            InlineKeyboardButton(text="🚫 Бан 7д", callback_data=f"rep:ban:{report_id}:{reported_user_id}:7")
+        ],
+        [
+            InlineKeyboardButton(text="🚫 Бан 30д", callback_data=f"rep:ban:{report_id}:{reported_user_id}:30"),
+            InlineKeyboardButton(text="✅ Одобрить", callback_data=f"rep:ok:{report_id}:{reported_user_id}")
+        ],
+        [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"rep:ignore:{report_id}")],
+        [InlineKeyboardButton(text="➡️ Следующая", callback_data=f"rep:next")],
+        [InlineKeyboardButton(text="⬅️ Админ меню", callback_data="admin_back")]
+    ])
+
+def admin_back_menu() -> InlineKeyboardMarkup:
+    """Возврат в админ меню"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⬅️ Админ меню", callback_data="admin_back")]
+    ])
+
 def admin_ban_actions_with_nav(user_id: int, current_index: int, total_count: int) -> InlineKeyboardMarkup:
     """Действия с баном с навигацией"""
     buttons = [

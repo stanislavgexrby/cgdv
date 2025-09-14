@@ -1,83 +1,347 @@
-from aiogram import Router, F
-from aiogram.types import CallbackQuery
-from datetime import datetime, timedelta
 import logging
+import contextlib
+from datetime import datetime, timedelta
+from aiogram import Router, F
+from aiogram.types import CallbackQuery, InputMediaPhoto
 
 import keyboards.keyboards as kb
-import config.settings as settings
 import utils.texts as texts
+import config.settings as settings
 from handlers.basic import admin_only, safe_edit_message
+from handlers.notifications import notify_user_banned, notify_user_unbanned, notify_profile_deleted
 
-router = Router()
 logger = logging.getLogger(__name__)
+router = Router()
 
-def _parse(data: str):
-    # rep:<action>:<report_id>[:<user_id>[:<days>]]
+# ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+
+def _parse_rep_data(data: str):
+    """Парсинг данных жалобы: rep:<action>:<report_id>[:<user_id>[:<days>]]"""
     parts = data.split(":")
-    action = parts[1]
-    rep_id = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
-    uid = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None
-    days = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else None
-    return action, rep_id, uid, days
+    action = parts[1] if len(parts) > 1 else None
+    report_id = int(parts[2]) if len(parts) > 2 and parts[2].isdigit() else None
+    user_id = int(parts[3]) if len(parts) > 3 and parts[3].isdigit() else None
+    days = int(parts[4]) if len(parts) > 4 and parts[4].isdigit() else 7
+    return action, report_id, user_id, days
+
+def _format_datetime(dt):
+    """Форматирование даты и времени"""
+    if dt is None:
+        return "—"
+    if isinstance(dt, str):
+        return dt[:16]
+    try:
+        return dt.strftime("%Y-%m-%d %H:%M")
+    except Exception:
+        return str(dt)
+
+def _truncate_text(text: str, limit: int = 1024) -> str:
+    """Обрезка текста для Telegram"""
+    if not text or len(text) <= limit:
+        return text or ""
+    return text[:limit-1] + "…"
+
+# ==================== ГЛАВНОЕ МЕНЮ АДМИНКИ ====================
+
+@router.callback_query(F.data == "admin_back")
+@admin_only
+async def admin_main_menu(callback: CallbackQuery):
+    """Главное меню админ панели"""
+    await safe_edit_message(callback, "👑 Админ панель", kb.admin_main_menu())
+    await callback.answer()
+
+# ==================== СТАТИСТИКА ====================
+
+@router.callback_query(F.data == "admin_stats")
+@admin_only
+async def show_admin_stats(callback: CallbackQuery, db):
+    """Показ статистики бота"""
+    lines = ["📊 Статистика бота", "", "🗄 База данных: PostgreSQL"]
+
+    # Redis статус
+    try:
+        if hasattr(db, '_redis'):
+            pong = await db._redis.ping()
+            lines.append(f"⚡ Redis: {'✅ OK' if pong else '❌ Недоступен'}")
+        else:
+            lines.append("⚡ Redis: ❌ Не подключен")
+    except Exception:
+        lines.append("⚡ Redis: ❌ Ошибка")
+
+    # Проверка подключения к PostgreSQL
+    if not hasattr(db, '_pg_pool') or db._pg_pool is None:
+        lines.append("⚠️ Нет подключения к PostgreSQL.")
+        await safe_edit_message(callback, "\n".join(lines), kb.admin_back_menu())
+        await callback.answer()
+        return
+
+    # Статистика из базы данных
+    try:
+        async with db._pg_pool.acquire() as conn:
+            stats_queries = [
+                ("👥 Пользователи", "SELECT COUNT(*) FROM users"),
+                ("📝 Анкеты", "SELECT COUNT(*) FROM profiles"), 
+                ("💖 Матчи", "SELECT COUNT(*) FROM matches"),
+                ("❤️ Лайки", "SELECT COUNT(*) FROM likes"),
+                ("🚩 Жалобы (всего)", "SELECT COUNT(*) FROM reports"),
+                ("⏳ Ожидающие жалобы", "SELECT COUNT(*) FROM reports WHERE status = 'pending'"),
+                ("🚫 Заблокированы", "SELECT COUNT(*) FROM bans WHERE expires_at > NOW()"),
+            ]
+
+            for name, query in stats_queries:
+                try:
+                    count = await conn.fetchval(query)
+                    lines.append(f"{name}: {count or 0}")
+                except Exception as e:
+                    logger.warning(f"Ошибка получения статистики {name}: {e}")
+                    lines.append(f"{name}: ошибка")
+
+            # Статистика по играм
+            try:
+                rows = await conn.fetch("SELECT game, COUNT(*) AS cnt FROM profiles GROUP BY game")
+                if rows:
+                    lines.append("\n📊 Анкеты по играм:")
+                    for row in rows:
+                        game_name = settings.GAMES.get(row["game"], row["game"])
+                        lines.append(f"  • {game_name}: {row['cnt']}")
+            except Exception as e:
+                logger.warning(f"Ошибка получения статистики по играм: {e}")
+
+    except Exception as e:
+        lines.append(f"❌ Не удалось получить статистику: {e}")
+
+    text = "\n".join(lines)
+    await safe_edit_message(callback, text, kb.admin_back_menu())
+    await callback.answer()
+
+# ==================== ЖАЛОБЫ ====================
+
+@router.callback_query(F.data == "admin_reports")
+@admin_only
+async def show_admin_reports(callback: CallbackQuery, db):
+    """Показ жалоб"""
+    reports = await db.get_pending_reports()
+    
+    if not reports:
+        text = "🚩 Нет ожидающих жалоб"
+        await safe_edit_message(callback, text, kb.admin_back_menu())
+        await callback.answer()
+        return
+
+    await _show_report(callback, reports[0], db)
+
+async def _show_report(callback: CallbackQuery, report: dict, db):
+    """Показ отдельной жалобы"""
+    report_id = report['id']
+    reported_user_id = report['reported_user_id']
+    game = report.get('game', 'dota')
+    
+    # Получаем профиль нарушителя
+    profile = await db.get_user_profile(reported_user_id, game)
+    game_name = settings.GAMES.get(game, game)
+    
+    # Формируем текст
+    header = (
+        f"🚩 Жалоба #{report_id} | {game_name}\n"
+        f"📅 Дата: {_format_datetime(report.get('created_at'))}\n"
+        f"👤 Жалобщик: {report['reporter_id']}\n"
+        f"🎯 На пользователя: {reported_user_id}\n"
+        f"📋 Причина: {report.get('report_reason', 'inappropriate_content')}\n"
+    )
+    
+    if profile:
+        body = "\n👤 Анкета нарушителя:\n\n" + texts.format_profile(profile, show_contact=True)
+    else:
+        body = f"\n❌ Анкета пользователя {reported_user_id} не найдена"
+    
+    text = _truncate_text(header + body)
+    keyboard = kb.admin_report_actions(reported_user_id, report_id)
+    
+    # Отправляем с фото если есть
+    photo_id = profile.get('photo_id') if profile else None
+    
+    try:
+        if photo_id:
+            media = InputMediaPhoto(media=photo_id, caption=text)
+            await callback.message.edit_media(media=media, reply_markup=keyboard)
+        else:
+            await safe_edit_message(callback, text, keyboard)
+    except Exception:
+        # Fallback для случаев несовместимости типов сообщений
+        try:
+            if photo_id:
+                await callback.message.delete()
+                await callback.message.answer_photo(photo_id, caption=text, reply_markup=keyboard)
+            else:
+                await safe_edit_message(callback, text, keyboard)
+        except Exception as e:
+            logger.error(f"Ошибка показа жалобы: {e}")
+            await safe_edit_message(callback, text, keyboard)
+    
+    await callback.answer()
 
 @router.callback_query(F.data.startswith("rep:"))
 @admin_only
-async def admin_report_router(callback: CallbackQuery, db):
-    action, report_id, user_id, days = _parse(callback.data)
-
-    if action not in {"del", "ban", "ok", "ignore", "next"}:
+async def handle_report_action(callback: CallbackQuery, db):
+    """Обработка действий с жалобами"""
+    action, report_id, user_id, days = _parse_rep_data(callback.data)
+    
+    if not action:
         await callback.answer("❌ Неизвестное действие", show_alert=True)
         return
-    if action in {"del", "ban", "ok"} and (not report_id or not user_id):
-        await callback.answer("❌ Нет данных жалобы (report_id/user_id)", show_alert=True)
-        return
-    if action == "ban" and not days:
-        days = 7
-
+    
     if action == "del":
-        user = await db.get_user(user_id)
-        game = (user.get("current_game") if user else "dota") or "dota"
-        ok1 = await db.delete_profile(user_id, game)
-        ok2 = await db.update_report_status(report_id, status="resolved", admin_id=callback.from_user.id)
-        await callback.answer("🗑️ Анкета удалена, жалоба закрыта" if (ok1 and ok2) else "❌ Ошибка удаления/обновления", show_alert=not (ok1 and ok2))
-
+        await _delete_profile_action(callback, report_id, user_id, db)
     elif action == "ban":
-        until = datetime.utcnow() + timedelta(days=days)
-        ok1 = await db.ban_user(user_id, f"нарушение правил (жалоба), {days}d", until)
-        ok2 = await db.update_report_status(report_id, status="resolved", admin_id=callback.from_user.id)
-        await callback.answer(f"🚫 Бан {days}д, жалоба закрыта" if (ok1 and ok2) else "❌ Ошибка при бане/закрытии", show_alert=not (ok1 and ok2))
-
+        await _ban_user_action(callback, report_id, user_id, days, db)
     elif action == "ok":
-        ok = await db.update_report_status(report_id, status="resolved", admin_id=callback.from_user.id)
-        await callback.answer("✅ Жалоба одобрена" if ok else "❌ Не удалось обновить", show_alert=not ok)
-
+        await _approve_report_action(callback, report_id, db)
     elif action == "ignore":
-        if not report_id:
-            await callback.answer("❌ Нет report_id", show_alert=True)
-            return
-        ok = await db.update_report_status(report_id, status="ignored", admin_id=callback.from_user.id)
-        await callback.answer("🙈 Жалоба проигнорирована" if ok else "❌ Не удалось обновить", show_alert=not ok)
-
+        await _dismiss_report_action(callback, report_id, db)
     elif action == "next":
-        reports = await db.get_pending_reports()
-        if not reports:
-            await safe_edit_message(callback, "✅ Больше жалоб нет", kb.admin_back_menu())
-            return
-        rep = reports[0]
-        game = rep.get("game", "dota")
-        prof = await db.get_user_profile(rep["reported_user_id"], game)
-        game_name = settings.GAMES.get(game, game)
+        await _show_next_report(callback, db)
+    else:
+        await callback.answer("❌ Неподдерживаемое действие", show_alert=True)
 
-        header = f"🚩 Жалоба #{rep['id']} | {game_name}\nСтатус: {rep.get('status','pending')}\nПричина: {rep.get('report_reason','inappropriate_content')}\n"
-        if prof:
-            body = "👤 Объект жалобы:\n\n" + texts.format_profile(prof, show_contact=True)
-        else:
-            body = f"❌ Анкета {rep['reported_user_id']} не найдена"
-        text = header + "\n\n" + body
+async def _delete_profile_action(callback: CallbackQuery, report_id: int, user_id: int, db):
+    """Удаление профиля по жалобе"""
+    user = await db.get_user(user_id)
+    game = (user.get("current_game") if user else "dota") or "dota"
+    
+    success_delete = await db.delete_profile(user_id, game)
+    success_report = await db.update_report_status(report_id, status="resolved", admin_id=callback.from_user.id)
+    
+    if success_delete:
+        await notify_profile_deleted(callback.bot, user_id, game)
+        logger.info(f"Админ удалил профиль {user_id} по жалобе {report_id}")
+    
+    message = "🗑️ Профиль удален, жалоба закрыта" if (success_delete and success_report) else "❌ Ошибка выполнения"
+    await callback.answer(message, show_alert=not (success_delete and success_report))
+    
+    await _show_next_report(callback, db)
 
-        await safe_edit_message(
-            callback,
-            text,
-            kb.admin_report_actions(rep["reported_user_id"], rep["id"])
-        )
+async def _ban_user_action(callback: CallbackQuery, report_id: int, user_id: int, days: int, db):
+    """Бан пользователя по жалобе"""
+    expires_at = datetime.utcnow() + timedelta(days=days)
+    reason = f"Нарушение правил (жалоба #{report_id})"
+    
+    success_ban = await db.ban_user(user_id, reason, expires_at)
+    success_report = await db.update_report_status(report_id, status="resolved", admin_id=callback.from_user.id)
+    
+    if success_ban:
+        await notify_user_banned(callback.bot, user_id, expires_at.isoformat())
+        logger.info(f"Админ забанил пользователя {user_id} на {days} дней по жалобе {report_id}")
+    
+    message = f"🚫 Бан на {days} дней применен" if (success_ban and success_report) else "❌ Ошибка выполнения"
+    await callback.answer(message, show_alert=not (success_ban and success_report))
+    
+    await _show_next_report(callback, db)
+
+async def _approve_report_action(callback: CallbackQuery, report_id: int, db):
+    """Одобрение жалобы без действий"""
+    success = await db.update_report_status(report_id, status="resolved", admin_id=callback.from_user.id)
+    
+    message = "✅ Жалоба одобрена" if success else "❌ Ошибка обновления"
+    await callback.answer(message, show_alert=not success)
+    
+    await _show_next_report(callback, db)
+
+async def _dismiss_report_action(callback: CallbackQuery, report_id: int, db):
+    """Отклонение жалобы"""
+    success = await db.update_report_status(report_id, status="ignored", admin_id=callback.from_user.id)
+    
+    message = "❌ Жалоба отклонена" if success else "❌ Ошибка обновления"
+    await callback.answer(message, show_alert=not success)
+    
+    await _show_next_report(callback, db)
+
+async def _show_next_report(callback: CallbackQuery, db):
+    """Показ следующей жалобы"""
+    reports = await db.get_pending_reports()
+    
+    if not reports:
+        text = "✅ Больше жалоб нет"
+        await safe_edit_message(callback, text, kb.admin_back_menu())
+        return
+    
+    await _show_report(callback, reports[0], db)
+
+# ==================== БАНЫ ====================
+
+@router.callback_query(F.data == "admin_bans")
+@admin_only
+async def show_admin_bans(callback: CallbackQuery, db):
+    """Показ активных банов"""
+    bans = await db.get_all_bans()
+    
+    if not bans:
+        text = "✅ Нет активных банов"
+        await safe_edit_message(callback, text, kb.admin_back_menu())
         await callback.answer()
+        return
+    
+    await _show_ban(callback, bans[0], 0, len(bans))
+
+async def _show_ban(callback: CallbackQuery, ban: dict, current_index: int, total_bans: int):
+    """Показ отдельного бана"""
+    ban_text = f"""🚫 Бан #{ban['id']} ({current_index + 1}/{total_bans})
+
+👤 Пользователь: {ban.get('name', 'N/A')} (@{ban.get('username', 'нет username')})
+🎯 Никнейм: {ban.get('nickname', 'N/A')}
+📅 Дата бана: {_format_datetime(ban.get('created_at'))}
+⏰ Истекает: {_format_datetime(ban.get('expires_at'))}
+📝 Причина: {ban['reason']}
+
+Что делать с этим баном?"""
+
+    keyboard = kb.admin_ban_actions_with_nav(ban['user_id'], current_index, total_bans)
+    await safe_edit_message(callback, ban_text, keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("admin_unban_"))
+@admin_only
+async def unban_user(callback: CallbackQuery, db):
+    """Снятие бана"""
+    try:
+        user_id = int(callback.data.split("_")[2])
+    except (ValueError, IndexError):
+        await callback.answer("❌ Ошибка данных", show_alert=True)
+        return
+    
+    success = await db.unban_user(user_id)
+    
+    if success:
+        await notify_user_unbanned(callback.bot, user_id)
+        logger.info(f"Админ снял бан с пользователя {user_id}")
+        await callback.answer("✅ Бан снят")
+        
+        # Показываем обновленный список банов
+        bans = await db.get_all_bans()
+        if not bans:
+            text = "✅ Бан снят!\n\nБольше активных банов нет."
+            await safe_edit_message(callback, text, kb.admin_back_menu())
+        else:
+            await _show_ban(callback, bans[0], 0, len(bans))
+    else:
+        await callback.answer("❌ Ошибка снятия бана", show_alert=True)
+
+@router.callback_query(F.data.startswith("admin_ban_"))
+@admin_only
+async def navigate_bans(callback: CallbackQuery, db):
+    """Навигация по банам"""
+    parts = callback.data.split("_")
+    if len(parts) < 4:
+        return
+    
+    direction = parts[2]  # prev или next
+    current_index = int(parts[3])
+    
+    bans = await db.get_all_bans()
+    
+    if direction == "next" and current_index + 1 < len(bans):
+        await _show_ban(callback, bans[current_index + 1], current_index + 1, len(bans))
+    elif direction == "prev" and current_index > 0:
+        await _show_ban(callback, bans[current_index - 1], current_index - 1, len(bans))
+    else:
+        message = "Это последний бан" if direction == "next" else "Это первый бан"
+        await callback.answer(message, show_alert=True)
