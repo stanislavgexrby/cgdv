@@ -54,6 +54,14 @@ PROFILE_STEPS_ORDER = [
 
 async def save_profile_universal(user_id: int, data: dict, photo_id: str = None, db = None) -> bool:
     """Универсальная функция сохранения профиля"""
+    is_recreating = data.get('recreating', False)
+    
+    if is_recreating:
+        old_profile = await db.get_user_profile(user_id, data['game'])
+        if old_profile:
+            await db.delete_profile(user_id, data['game'])
+            logger.info(f"Старая анкета удалена при пересоздании: {user_id} в {data['game']}")
+    
     success = await db.update_user_profile(
         telegram_id=user_id,
         game=data['game'],
@@ -68,7 +76,8 @@ async def save_profile_universal(user_id: int, data: dict, photo_id: str = None,
     )
 
     if success:
-        logger.info(f"Профиль создан для {user_id} в {data['game']}")
+        action = "пересоздан" if is_recreating else "создан"
+        logger.info(f"Профиль {action} для {user_id} в {data['game']}")
 
     return success
 
@@ -813,6 +822,9 @@ async def confirm_cancel_profile(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "confirm_cancel")
 async def cancel_profile_confirmed(callback: CallbackQuery, state: FSMContext, db):
     """Подтвержденная отмена создания профиля"""
+    data = await state.get_data()
+    is_recreating = data.get('recreating', False)
+    
     await state.clear()
     
     user_id = callback.from_user.id
@@ -824,13 +836,38 @@ async def cancel_profile_confirmed(callback: CallbackQuery, state: FSMContext, d
         profile = await db.get_user_profile(user_id, game)
         has_profile = profile is not None
         
-        from handlers.basic import get_main_menu_text
-        text = get_main_menu_text(game, has_profile)
-        await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
+        if is_recreating and has_profile:
+            game_name = settings.GAMES.get(game, game)
+            profile_text = texts.format_profile(profile, show_contact=True)
+            text = f"Ваша анкета в {game_name}:\n\n{profile_text}"
+
+            keyboard = kb.view_profile_menu()
+
+            try:
+                if profile.get('photo_id'):
+                    await callback.message.delete()
+                    await callback.message.answer_photo(
+                        photo=profile['photo_id'],
+                        caption=text,
+                        reply_markup=keyboard,
+                        parse_mode='HTML'
+                    )
+                else:
+                    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
+            except Exception as e:
+                logger.error(f"Ошибка отображения профиля при отмене пересоздания: {e}")
+                await callback.message.delete()
+                await callback.message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+            
+            await callback.answer("Возвращение к анкете")
+        else:
+            from handlers.basic import get_main_menu_text
+            text = get_main_menu_text(game, has_profile)
+            await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
+            await callback.answer("Создание анкеты отменено")
     else:
         await safe_edit_message(callback, "Создание анкеты отменено", kb.back())
-    
-    await callback.answer("Создание анкеты отменено")
+        await callback.answer("Создание анкеты отменено")
 
 @router.callback_query(F.data == "continue_profile")
 async def continue_profile_creation(callback: CallbackQuery, state: FSMContext):
@@ -874,6 +911,7 @@ async def save_profile_flow(message: Message, state: FSMContext, photo_id: str |
     """Финал создания анкеты: сохранение и показ результата."""
     user_id = message.from_user.id
     data = await state.get_data()
+    is_recreating = data.get('recreating', False)
 
     payload = {
         'game': data.get('game'),
@@ -884,6 +922,7 @@ async def save_profile_flow(message: Message, state: FSMContext, photo_id: str |
         'region': data.get('region', 'eeu'),
         'positions': data.get('positions', []) or data.get('positions_selected', []),
         'additional_info': data.get('additional_info', '').strip(),
+        'recreating': is_recreating
     }
 
     if not payload['positions']:
@@ -901,27 +940,31 @@ async def save_profile_flow(message: Message, state: FSMContext, photo_id: str |
         return
 
     await state.clear()
-
     await update_user_activity(user_id, 'available', db)
 
     profile = await db.get_user_profile(user_id, payload['game'])
     game_name = settings.GAMES.get(payload['game'], payload['game'])
 
     if profile:
-        text = f"Анкета для {game_name} создана!\n\n" + texts.format_profile(profile, show_contact=True)
+        if is_recreating:
+            text = f"Новая анкета для {game_name} создана! Старая анкета была заменена.\n\n" + texts.format_profile(profile, show_contact=True)
+        else:
+            text = f"Анкета для {game_name} создана!\n\n" + texts.format_profile(profile, show_contact=True)
 
         if profile.get('photo_id'):
             await message.answer_photo(photo=profile['photo_id'], caption=text, reply_markup=kb.back(), parse_mode='HTML')
         else:
             await message.answer(text, reply_markup=kb.back(), parse_mode='HTML')
     else:
-        text = f"Анкета для {game_name} создана!"
+        action = "пересоздана" if is_recreating else "создана"
+        text = f"Анкета для {game_name} {action}!"
         await message.answer(text, reply_markup=kb.back(), parse_mode='HTML')
 
 async def save_profile_flow_callback(callback: CallbackQuery, state: FSMContext, photo_id: str, db):
     """Сохранение профиля через callback"""
     data = await state.get_data()
     user_id = data.get('user_id', callback.from_user.id)
+    is_recreating = data.get('recreating', False)
 
     success = await save_profile_universal(
         user_id=user_id,
@@ -933,7 +976,10 @@ async def save_profile_flow_callback(callback: CallbackQuery, state: FSMContext,
 
     if success:
         game_name = settings.GAMES.get(data['game'], data['game'])
-        text = f"Анкета для {game_name} создана! Теперь можете искать сокомандников."
+        if is_recreating:
+            text = f"Новая анкета для {game_name} создана! Старая анкета была заменена."
+        else:
+            text = f"Анкета для {game_name} создана! Теперь можете искать сокомандников."
         await safe_edit_message(callback, text, kb.back())
     else:
         await safe_edit_message(callback, "Ошибка сохранения", kb.back())

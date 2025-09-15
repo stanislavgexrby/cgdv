@@ -112,19 +112,14 @@ async def recreate_profile(callback: CallbackQuery, state: FSMContext, db):
         return
 
     game = user['current_game']
-
-    profile = await db.get_user_profile(user_id, game)
-    if profile:
-        await db.delete_profile(user_id, game)
-        logger.info(f"Профиль удален для пересоздания: {user_id} в {game}")
-
     game_name = settings.GAMES.get(game, game)
 
     await state.clear()
     await state.update_data(
         user_id=user_id,
         game=game,
-        positions_selected=[]
+        positions_selected=[],
+        recreating=True  # Флаг что мы пересоздаем анкету
     )
 
     from handlers.profile import ProfileForm
@@ -136,7 +131,7 @@ async def recreate_profile(callback: CallbackQuery, state: FSMContext, db):
     await callback.bot.send_message(
         chat_id=callback.message.chat.id,
         text=text,
-        reply_markup=kb.cancel_profile_creation(),
+        reply_markup=kb.profile_creation_navigation("name", False),
         parse_mode='HTML'
     )
     await callback.answer()
