@@ -86,7 +86,6 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
     """Безопасное редактирование сообщения"""
     try:
         message = callback.message
-
         has_photo = bool(message.photo)
         current_text = message.caption if has_photo else (message.text or "")
         current_markup = message.reply_markup
@@ -103,10 +102,16 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
                 chat_id=message.chat.id,
                 text=text,
                 reply_markup=reply_markup,
-                parse_mode='HTML'
+                parse_mode='HTML',
+                disable_web_page_preview=True
             )
         else:
-            await message.edit_text(text=text, reply_markup=reply_markup, parse_mode='HTML')
+            await message.edit_text(
+                text=text, 
+                reply_markup=reply_markup, 
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
 
     except Exception as e:
         logger.error(f"Ошибка редактирования сообщения: {e}")
@@ -119,7 +124,8 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
                 chat_id=callback.message.chat.id,
                 text=text,
                 reply_markup=reply_markup,
-                parse_mode='HTML'
+                parse_mode='HTML',
+                disable_web_page_preview=True
             )
         except Exception as e2:
             logger.error(f"Ошибка отправки нового сообщения: {e2}")
@@ -342,17 +348,18 @@ async def view_profile(callback: CallbackQuery, db):
                 photo=profile['photo_id'],
                 caption=text,
                 reply_markup=keyboard,
-                parse_mode='HTML'
+                parse_mode='HTML',
+                disable_web_page_preview=True
             )
         else:
-            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
+            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
     except Exception as e:
         logger.error(f"Ошибка отображения профиля: {e}")
         try:
-            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
+            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
         except:
             await callback.message.delete()
-            await callback.message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+            await callback.message.answer(text, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
 
     await callback.answer()
 
@@ -395,17 +402,18 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
                 photo=profile['photo_id'],
                 caption=current_info,
                 reply_markup=keyboard,
-                parse_mode='HTML'
+                parse_mode='HTML',
+                disable_web_page_preview=True
             )
         else:
-            await callback.message.edit_text(current_info, reply_markup=keyboard, parse_mode='HTML')
+            await callback.message.edit_text(current_info, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
     except Exception as e:
         logger.error(f"Ошибка отображения профиля для редактирования: {e}")
         try:
-            await callback.message.edit_text(current_info, reply_markup=keyboard, parse_mode='HTML')
+            await callback.message.edit_text(current_info, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
         except:
             await callback.message.delete()
-            await callback.message.answer(current_info, reply_markup=keyboard, parse_mode='HTML')
+            await callback.message.answer(current_info, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
 
     await callback.answer()
 

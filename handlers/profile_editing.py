@@ -20,6 +20,7 @@ class EditProfileForm(StatesGroup):
     edit_nickname = State()
     edit_age = State()
     edit_rating = State()
+    edit_profile_url = State()
     edit_region = State()
     edit_positions = State()
     edit_goals = State()
@@ -53,7 +54,8 @@ async def update_profile_field(user_id: int, field: str, value, db) -> bool:
         positions=profile['positions'] if field != 'positions' else value,
         goals=profile.get('goals', ['any']) if field != 'goals' else value,
         additional_info=profile['additional_info'] if field != 'additional_info' else value,
-        photo_id=profile.get('photo_id') if field != 'photo_id' else value
+        photo_id=profile.get('photo_id') if field != 'photo_id' else value,
+        profile_url=profile.get('profile_url', '') if field != 'profile_url' else value
     )
 
     if success:
@@ -88,17 +90,18 @@ async def edit_profile(callback: CallbackQuery, db):
                 photo=profile['photo_id'],
                 caption=current_info,
                 reply_markup=keyboard,
-                parse_mode='HTML'
+                parse_mode='HTML',
+                disable_web_page_preview=True
             )
         else:
-            await callback.message.edit_text(current_info, reply_markup=keyboard, parse_mode='HTML')
+            await callback.message.edit_text(current_info, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
     except Exception as e:
         logger.error(f"Ошибка отображения профиля для редактирования: {e}")
         try:
-            await callback.message.edit_text(current_info, reply_markup=keyboard, parse_mode='HTML')
+            await callback.message.edit_text(current_info, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
         except:
             await callback.message.delete()
-            await callback.message.answer(current_info, reply_markup=keyboard, parse_mode='HTML')
+            await callback.message.answer(current_info, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
 
     await callback.answer()
 
@@ -196,6 +199,28 @@ async def edit_rating(callback: CallbackQuery, state: FSMContext, db):
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_rating)
     await safe_edit_message(callback, "Выберите новый рейтинг:", kb.ratings(user['current_game'], for_profile=True, with_cancel=True))
+    await callback.answer()
+
+@router.callback_query(F.data == "edit_profile_url")
+@check_ban_and_profile()
+async def edit_profile_url(callback: CallbackQuery, state: FSMContext, db):
+    user_id = callback.from_user.id
+    user = await db.get_user(user_id)
+    await state.update_data(user_id=user_id, game=user['current_game'])
+    await state.set_state(EditProfileForm.edit_profile_url)
+    
+    game = user['current_game']
+    if game == 'dota':
+        text = "Введите новую ссылку на Dotabuff профиль:\n\nПример: https://www.dotabuff.com/players/123456789"
+    else:
+        text = "Введите новую ссылку на FACEIT профиль:\n\nПример: https://www.faceit.com/en/players/nickname"
+    
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+        [kb.InlineKeyboardButton(text="Удалить ссылку", callback_data="delete_profile_url")],
+        [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")]
+    ])
+    
+    await safe_edit_message(callback, text, keyboard)
     await callback.answer()
 
 @router.callback_query(F.data == "region_any", EditProfileForm.edit_region)
@@ -393,6 +418,33 @@ async def process_edit_age(message: Message, state: FSMContext, db):
     else:
         await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML')
 
+@router.message(EditProfileForm.edit_profile_url)
+async def process_edit_profile_url(message: Message, state: FSMContext, db):
+    if not message.text:
+        await message.answer("Отправьте ссылку на профиль или используйте кнопки", parse_mode='HTML')
+        return
+
+    data = await state.get_data()
+    game = data['game']
+
+    profile_url = message.text.strip()
+    is_valid, error_msg = validate_profile_input('profile_url', profile_url, game)
+
+    if not is_valid:
+        await message.answer(error_msg, parse_mode='HTML')
+        return
+
+    success = await update_profile_field(message.from_user.id, 'profile_url', profile_url, db)
+    await state.clear()
+
+    await update_user_activity(message.from_user.id, 'available', db)
+
+    if success:
+        game_name = "Dotabuff" if game == 'dota' else "FACEIT"
+        await message.answer(f"Ссылка на {game_name} обновлена!", reply_markup=kb.back_to_editing(), parse_mode='HTML', disable_web_page_preview=True)
+    else:
+        await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML', disable_web_page_preview=True)
+
 @router.message(EditProfileForm.edit_info)
 async def process_edit_info(message: Message, state: FSMContext, db):
     if not message.text:
@@ -442,6 +494,10 @@ async def wrong_edit_nickname_format(message: Message):
 async def wrong_edit_age_format(message: Message):
     await message.answer(f"Отправьте число больше {settings.MIN_AGE}", parse_mode='HTML')
 
+@router.message(EditProfileForm.edit_profile_url, ~F.text)
+async def wrong_edit_profile_url_format(message: Message):
+    await message.answer("Отправьте ссылку на профиль или используйте кнопки", parse_mode='HTML')
+
 @router.message(EditProfileForm.edit_info, ~F.text)
 async def wrong_edit_info_format(message: Message):
     await message.answer("Отправьте текстовое сообщение с описанием", parse_mode='HTML')
@@ -483,6 +539,20 @@ async def process_edit_region(callback: CallbackQuery, state: FSMContext, db):
         await safe_edit_message(callback, "Регион обновлён!", kb.back_to_editing())
     else:
         await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
+
+    await callback.answer()
+
+@router.callback_query(F.data == "delete_profile_url", EditProfileForm.edit_profile_url)
+async def delete_profile_url(callback: CallbackQuery, state: FSMContext, db):
+    success = await update_profile_field(callback.from_user.id, 'profile_url', "", db)
+    await state.clear()
+
+    await update_user_activity(callback.from_user.id, 'available', db)
+
+    if success:
+        await safe_edit_message(callback, "Ссылка на профиль удалена!", kb.back_to_editing())
+    else:
+        await safe_edit_message(callback, "Ошибка удаления", kb.back_to_editing())
 
     await callback.answer()
 

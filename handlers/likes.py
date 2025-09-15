@@ -27,7 +27,8 @@ async def show_profile_with_photo(callback: CallbackQuery, profile: dict, text: 
                 photo=profile['photo_id'],
                 caption=text,
                 reply_markup=keyboard,
-                parse_mode='HTML'
+                parse_mode='HTML',
+                disable_web_page_preview=True
             )
         else:
             await safe_edit_message(callback, text, keyboard)

@@ -263,6 +263,11 @@ class Database:
             except Exception as e:
                 logger.warning(f"Миграция поля goals: {e}")
 
+            try:
+                await conn.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS profile_url TEXT")
+            except Exception as e:
+                logger.warning(f"Миграция поля profile_url: {e}")
+
             for index_sql in optimized_indexes:
                 try:
                     await conn.execute(index_sql)
@@ -423,18 +428,19 @@ class Database:
 
     async def update_user_profile(self, telegram_id: int, game: str, name: str, nickname: str,
                         age: int, rating: str, region: str, positions: List[str],
-                        goals: List[str], additional_info: str, photo_id: str = None) -> bool:
+                        goals: List[str], additional_info: str, photo_id: str = None,
+                        profile_url: str = None) -> bool:
         """Создание/обновление профиля пользователя"""
         async with self._pg_pool.acquire() as conn:
             await conn.execute(
-                '''INSERT INTO profiles (telegram_id, game, name, nickname, age, rating, region, positions, goals, additional_info, photo_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+                '''INSERT INTO profiles (telegram_id, game, name, nickname, age, rating, region, positions, goals, additional_info, photo_id, profile_url)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
                 ON CONFLICT (telegram_id, game)
                 DO UPDATE SET
                     name = $3, nickname = $4, age = $5, rating = $6,
-                    region = $7, positions = $8, goals = $9, additional_info = $10, photo_id = $11''',
+                    region = $7, positions = $8, goals = $9, additional_info = $10, photo_id = $11, profile_url = $12''',
                 telegram_id, game, name, nickname, age, rating, region,
-                json.dumps(positions), json.dumps(goals), additional_info, photo_id
+                json.dumps(positions), json.dumps(goals), additional_info, photo_id, profile_url
             )
             await self._clear_user_cache(telegram_id)
             await self._clear_pattern_cache(f"search:*:{game}:*")

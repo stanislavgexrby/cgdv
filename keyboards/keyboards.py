@@ -302,6 +302,16 @@ def goals_filter() -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def skip_profile_url() -> InlineKeyboardMarkup:
+    """Пропуск ссылки профиля с навигацией"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="skip_profile_url")],
+        [
+            InlineKeyboardButton(text="◀️ Назад", callback_data="profile_back"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")
+        ]
+    ])
+
 def skip_photo() -> InlineKeyboardMarkup:
     """Пропуск загрузки фото с навигацией"""
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -343,6 +353,7 @@ def edit_profile_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Изменить регион", callback_data="edit_region")],
         [InlineKeyboardButton(text="Изменить позиции", callback_data="edit_positions")],
         [InlineKeyboardButton(text="Изменить цели", callback_data="edit_goals")],
+        [InlineKeyboardButton(text="Изменить профиль", callback_data="edit_profile_url")],
         [InlineKeyboardButton(text="Изменить описание", callback_data="edit_info")],
         [InlineKeyboardButton(text="Изменить фото", callback_data="edit_photo")],
         [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]

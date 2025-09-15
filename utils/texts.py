@@ -11,8 +11,11 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
     if len(name_parts) >= 2:
         first_name = name_parts[0]
         last_name = ' '.join(name_parts[1:])
-        # Формат: Жирное_имя жирный_никнейм жирная_фамилия, возраст лет
-        text = f"{first_name} <b>{user['nickname']}</b> {last_name}, {user['age']} лет\n\n"
+        profile_url = user.get('profile_url')
+        if profile_url and profile_url.strip():
+            text = f"{first_name} <a href='{profile_url}'><b>{user['nickname']}</b></a> {last_name}, {user['age']} лет\n\n"
+        else:
+            text = f"{first_name} <b>{user['nickname']}</b> {last_name}, {user['age']} лет\n\n"
     else:
         # Если только одно имя
         text = f"<b>{user['name']}</b> <b>{user['nickname']}</b>, {user['age']} лет\n\n"
@@ -20,12 +23,14 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
     # Рейтинг
     rating = user['rating']
     if rating == 'any':
-        text += f"<b>Рейтинг:</b> Любой\n"
+        rating_text = f"<b>Рейтинг:</b> Любой"
     elif rating in settings.RATINGS.get(game, {}):
         rating_desc = settings.RATINGS[game][rating]
-        text += f"<b>Рейтинг:</b> {rating_desc}\n"
+        rating_text = f"<b>Рейтинг:</b> {rating_desc}"
     else:
-        text += f"<b>Рейтинг:</b> {rating}\n"
+        rating_text = f"<b>Рейтинг:</b> {rating}"
+
+    text += f"{rating_text}\n"
 
     # Позиция
     if user['positions']:

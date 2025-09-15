@@ -23,6 +23,7 @@ class ProfileForm(StatesGroup):
     nickname = State()
     age = State()
     rating = State()
+    profile_url = State()
     region = State()
     positions = State()
     goals = State()
@@ -31,9 +32,10 @@ class ProfileForm(StatesGroup):
 
 class ProfileStep(Enum):
     NAME = "name"
-    NICKNAME = "nickname" 
+    NICKNAME = "nickname"
     AGE = "age"
     RATING = "rating"
+    PROFILE_URL = "profile_url"
     REGION = "region"
     POSITIONS = "positions"
     GOALS = "goals"
@@ -45,6 +47,7 @@ PROFILE_STEPS_ORDER = [
     ProfileStep.NICKNAME,
     ProfileStep.AGE,
     ProfileStep.RATING,
+    ProfileStep.PROFILE_URL,
     ProfileStep.REGION,
     ProfileStep.POSITIONS,
     ProfileStep.GOALS,
@@ -75,7 +78,8 @@ async def save_profile_universal(user_id: int, data: dict, photo_id: str = None,
         positions=data['positions'],
         goals=data.get('goals', ['any']),
         additional_info=data['additional_info'],
-        photo_id=photo_id
+        photo_id=photo_id,
+        profile_url=data.get('profile_url', '')
     )
 
     if success:
@@ -102,6 +106,19 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
                 game = data.get('game', 'dota')
                 rating_name = settings.RATINGS[game].get(current, current)
                 return f"Текущий рейтинг: <b>{rating_name}</b>\n\nВыберите новый рейтинг или продолжите с текущим:"
+        elif step == ProfileStep.PROFILE_URL:
+            current = data.get('profile_url', '')
+            game = data.get('game', 'dota')
+            if current:
+                if game == 'dota':
+                    return f"Текущая ссылка: <b>{current}</b>\n\nВведите новую ссылку на Dotabuff или нажмите 'Продолжить':"
+                else:
+                    return f"Текущая ссылка: <b>{current}</b>\n\nВведите новую ссылку на FACEIT или нажмите 'Продолжить':"
+            else:
+                if game == 'dota':
+                    return "Ссылка не задана.\n\nВведите ссылку на Dotabuff или нажмите 'Продолжить':"
+                else:
+                    return "Ссылка не задана.\n\nВведите ссылку на FACEIT или нажмите 'Продолжить':"
         elif step == ProfileStep.REGION:
             current = data.get('region', '')
             if current:
@@ -152,6 +169,12 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
         return texts.QUESTIONS['photo']
     elif step == ProfileStep.RATING:
         return "Выберите рейтинг:"
+    if step == ProfileStep.PROFILE_URL:
+        game = data.get('game', 'dota') if data else 'dota'
+        if game == 'dota':
+            return "Введите ссылку на ваш Dotabuff профиль или нажмите 'Пропустить':\n\nПример: https://www.dotabuff.com/players/123456789"
+        else:
+            return "Введите ссылку на ваш FACEIT профиль или нажмите 'Пропустить':\n\nПример: https://www.faceit.com/en/players/nickname"
     elif step == ProfileStep.REGION:
         return "Выберите регион:"
     elif step == ProfileStep.POSITIONS:
@@ -173,6 +196,8 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
     elif step == ProfileStep.AGE and data.get('age'):
         has_data = True
     elif step == ProfileStep.RATING and data.get('rating'):
+        has_data = True
+    elif step == ProfileStep.PROFILE_URL and data.get('profile_url') is not None:
         has_data = True
     elif step == ProfileStep.REGION and data.get('region'):
         has_data = True
@@ -212,6 +237,13 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
         current_rating = data.get('rating') if show_existing_data else None
         keyboard = kb.ratings(game, selected_rating=current_rating, with_navigation=True)
         
+    elif step == ProfileStep.PROFILE_URL:
+        await state.set_state(ProfileForm.profile_url)
+        if show_continue_button:
+            keyboard = kb.profile_creation_navigation(step.value, show_continue_button)
+        else:
+            keyboard = kb.skip_profile_url()
+
     elif step == ProfileStep.REGION:
         await state.set_state(ProfileForm.region)
         current_region = data.get('region') if show_existing_data else None
@@ -244,7 +276,12 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
     if hasattr(callback_or_message, 'message'):
         await safe_edit_message(callback_or_message, text, keyboard)
     else:
-        await callback_or_message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+        await callback_or_message.answer(
+            text,
+            reply_markup=keyboard,
+            parse_mode='HTML',
+            disable_web_page_preview=True
+        )
 
 # ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ ====================
 
@@ -423,6 +460,36 @@ async def process_age(message: Message, state: FSMContext):
 async def wrong_age_format(message: Message):
     await message.answer(f"Отправьте число больше {settings.MIN_AGE}", parse_mode='HTML')
 
+@router.message(ProfileForm.profile_url)
+async def process_profile_url(message: Message, state: FSMContext):
+    """Обработка ссылки профиля"""
+    if not message.text:
+        await message.answer("Отправьте ссылку на профиль или нажмите 'Пропустить'", parse_mode='HTML')
+        return
+
+    data = await state.get_data()
+    game = data.get('game', 'dota')
+    
+    profile_url = message.text.strip()
+    is_valid, error_msg = validate_profile_input('profile_url', profile_url, game)
+
+    if not is_valid:
+        await message.answer(error_msg, parse_mode='HTML')
+        return
+
+    await state.update_data(profile_url=profile_url)
+    
+    # Проверяем есть ли данные на следующем шаге (region)
+    data = await state.get_data()
+    has_next_data = bool(data.get('region'))
+    
+    # Показываем следующий шаг с учетом наличия данных
+    await show_profile_step(message, state, ProfileStep.REGION, show_current=has_next_data)
+
+@router.message(ProfileForm.profile_url, ~F.text)
+async def wrong_profile_url_format(message: Message):
+    await message.answer("Отправьте ссылку на профиль или нажмите 'Пропустить'", parse_mode='HTML')
+
 @router.message(ProfileForm.additional_info)
 async def process_additional_info(message: Message, state: FSMContext):
     """Обработка дополнительной информации"""
@@ -572,11 +639,11 @@ async def rating_done(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Выберите рейтинг", show_alert=True)
         return
     
-    # Проверяем есть ли данные на следующем шаге (region)
-    has_next_data = bool(data.get('region'))
+    # Проверяем есть ли данные на следующем шаге (profile_url)
+    has_next_data = data.get('profile_url') is not None
     
     # Показываем следующий шаг с учетом наличия данных
-    await show_profile_step(callback, state, ProfileStep.REGION, show_current=has_next_data)
+    await show_profile_step(callback, state, ProfileStep.PROFILE_URL, show_current=has_next_data)
     await callback.answer()
 
 @router.callback_query(F.data == "rating_need", ProfileForm.rating)
@@ -900,6 +967,19 @@ async def goals_done(callback: CallbackQuery, state: FSMContext):
 async def goals_need(callback: CallbackQuery):
     await callback.answer("Выберите хотя бы одну цель", show_alert=True)
 
+@router.callback_query(F.data == "skip_profile_url", ProfileForm.profile_url)
+async def skip_profile_url(callback: CallbackQuery, state: FSMContext):
+    """Пропуск ссылки профиля"""
+    await state.update_data(profile_url="")
+    
+    # Проверяем есть ли данные на следующем шаге (region)
+    data = await state.get_data()
+    has_next_data = bool(data.get('region'))
+    
+    # Показываем следующий шаг с учетом наличия данных
+    await show_profile_step(callback, state, ProfileStep.REGION, show_current=has_next_data)
+    await callback.answer()
+
 @router.callback_query(F.data == "skip_info", ProfileForm.additional_info)
 async def skip_info(callback: CallbackQuery, state: FSMContext):
     """Пропуск дополнительной информации"""
@@ -961,14 +1041,15 @@ async def cancel_profile_confirmed(callback: CallbackQuery, state: FSMContext, d
                         photo=profile['photo_id'],
                         caption=text,
                         reply_markup=keyboard,
-                        parse_mode='HTML'
+                        parse_mode='HTML',
+                        disable_web_page_preview=True
                     )
                 else:
-                    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
+                    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
             except Exception as e:
                 logger.error(f"Ошибка отображения профиля при отмене пересоздания: {e}")
                 await callback.message.delete()
-                await callback.message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+                await callback.message.answer(text, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
             
             await callback.answer("Возвращение к анкете")
         else:
@@ -1067,13 +1148,13 @@ async def save_profile_flow(message: Message, state: FSMContext, photo_id: str |
             text = f"Анкета для {game_name} создана!\n\n" + texts.format_profile(profile, show_contact=True)
 
         if profile.get('photo_id'):
-            await message.answer_photo(photo=profile['photo_id'], caption=text, reply_markup=kb.back(), parse_mode='HTML')
+            await message.answer_photo(photo=profile['photo_id'], caption=text, reply_markup=kb.back(), parse_mode='HTML', disable_web_page_preview=True)
         else:
-            await message.answer(text, reply_markup=kb.back(), parse_mode='HTML')
+            await message.answer(text, reply_markup=kb.back(), parse_mode='HTML', disable_web_page_preview=True)
     else:
         action = "пересоздана" if is_recreating else "создана"
         text = f"Анкета для {game_name} {action}!"
-        await message.answer(text, reply_markup=kb.back(), parse_mode='HTML')
+        await message.answer(text, reply_markup=kb.back(), parse_mode='HTML', disable_web_page_preview=True)
 
 async def save_profile_flow_callback(callback: CallbackQuery, state: FSMContext, photo_id: str, db):
     """Сохранение профиля через callback"""
