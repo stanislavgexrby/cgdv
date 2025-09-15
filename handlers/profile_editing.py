@@ -124,7 +124,7 @@ async def recreate_profile(callback: CallbackQuery, state: FSMContext, db):
         user_id=user_id,
         game=game,
         positions_selected=[],
-        recreating=True  # Флаг что мы пересоздаем анкету
+        recreating=True
     )
 
     from handlers.profile import ProfileForm
@@ -217,7 +217,7 @@ async def edit_profile_url(callback: CallbackQuery, state: FSMContext, db):
     
     keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
         [kb.InlineKeyboardButton(text="Удалить ссылку", callback_data="delete_profile_url")],
-        [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")]
+        [kb.InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")]
     ])
     
     await safe_edit_message(callback, text, keyboard)
@@ -265,14 +265,12 @@ async def edit_remove_any_position(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     game = data['game']
     
-    # Убираем "any"
     selected = data.get('positions_selected', [])
     if "any" in selected:
         selected.remove("any")
     
     await state.update_data(positions_selected=selected)
-    
-    # Обновляем клавиатуру
+
     keyboard = kb.positions(game, selected, for_profile=True, editing=True)
     await callback.message.edit_reply_markup(reply_markup=keyboard)
     await callback.answer()

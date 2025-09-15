@@ -54,7 +54,7 @@ def _format_user_info(user_id: int, username: str = None) -> str:
 @admin_only
 async def admin_main_menu(callback: CallbackQuery):
     """Главное меню админ панели"""
-    await safe_edit_message(callback, "👑 Админ панель", kb.admin_main_menu())
+    await safe_edit_message(callback, "Админ панель", kb.admin_main_menu())
     await callback.answer()
 
 # ==================== СТАТИСТИКА ====================
@@ -63,17 +63,17 @@ async def admin_main_menu(callback: CallbackQuery):
 @admin_only
 async def show_admin_stats(callback: CallbackQuery, db):
     """Показ статистики бота"""
-    lines = ["📊 Статистика бота", "", "🗄 База данных: PostgreSQL"]
+    lines = ["Статистика бота", "", "База данных: PostgreSQL"]
 
     # Redis статус
     try:
         if hasattr(db, '_redis'):
             pong = await db._redis.ping()
-            lines.append(f"⚡ Redis: {'✅ OK' if pong else '❌ Недоступен'}")
+            lines.append(f"Redis: {'✅ OK' if pong else '❌ Недоступен'}")
         else:
-            lines.append("⚡ Redis: ❌ Не подключен")
+            lines.append("Redis: ❌ Не подключен")
     except Exception:
-        lines.append("⚡ Redis: ❌ Ошибка")
+        lines.append("Redis: ❌ Ошибка")
 
     # Проверка подключения к PostgreSQL
     if not hasattr(db, '_pg_pool') or db._pg_pool is None:
@@ -242,7 +242,6 @@ async def _delete_profile_action(callback: CallbackQuery, report_id: int, user_i
     success_report = await db.update_report_status(report_id, status="resolved", admin_id=callback.from_user.id)
     
     if success_delete:
-        # Отправляем уведомление пользователю
         await notify_profile_deleted(callback.bot, user_id, game)
         logger.info(f"Админ удалил профиль {user_id} по жалобе {report_id}")
     

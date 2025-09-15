@@ -73,7 +73,7 @@ def subscribe_channel_keyboard(game: str, from_switch: bool = False) -> InlineKe
 def notification_ok() -> InlineKeyboardMarkup:
     """Кнопка OK для уведомлений"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="✅ Понятно", callback_data="dismiss_notification")]
+        [InlineKeyboardButton(text="Понятно", callback_data="dismiss_notification")]
     ])
 
 # ==================== СОЗДАНИЕ И РЕДАКТИРОВАНИЕ ПРОФИЛЕЙ ====================
@@ -85,23 +85,23 @@ def profile_creation_navigation(step: str, has_prev_data: bool = False) -> Inlin
     if step == "name":
         if has_prev_data:
             buttons.extend([
-                [InlineKeyboardButton(text="✅ Продолжить", callback_data="profile_continue")],
-                [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")]
+                [InlineKeyboardButton(text="Продолжить", callback_data="profile_continue")],
+                [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
             ])
         else:
-            buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
+            buttons.append([InlineKeyboardButton(text="Отмена", callback_data="cancel")])
     elif has_prev_data:
         buttons.extend([
-            [InlineKeyboardButton(text="✅ Продолжить", callback_data="profile_continue")],
+            [InlineKeyboardButton(text="Продолжить", callback_data="profile_continue")],
             [
-                InlineKeyboardButton(text="◀️ Назад", callback_data="profile_back"),
-                InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")
+                InlineKeyboardButton(text="Назад", callback_data="profile_back"),
+                InlineKeyboardButton(text="Отмена", callback_data="cancel")
             ]
         ])
     else:
         buttons.append([
-            InlineKeyboardButton(text="◀️ Назад", callback_data="profile_back"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")
+            InlineKeyboardButton(text="Назад", callback_data="profile_back"),
+            InlineKeyboardButton(text="Отмена", callback_data="cancel")
         ])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -129,19 +129,19 @@ def ratings(game: str, selected_rating: str = None, with_navigation: bool = Fals
 
     if with_navigation:
         if selected_rating:
-            buttons.append([InlineKeyboardButton(text="✅ Готово", callback_data="rating_done")])
+            buttons.append([InlineKeyboardButton(text="Готово", callback_data="rating_done")])
         else:
             buttons.append([InlineKeyboardButton(text="Выберите рейтинг", callback_data="rating_need")])
 
     if with_navigation:
         nav_buttons = [
-            InlineKeyboardButton(text="◀️ Назад", callback_data="profile_back"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")
+            InlineKeyboardButton(text="Назад", callback_data="profile_back"),
+            InlineKeyboardButton(text="Отмена", callback_data="cancel")
         ]
         buttons.append(nav_buttons)
     elif with_cancel:
         cancel_callback = "cancel_edit" if not for_profile else "cancel"
-        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=cancel_callback)])
+        buttons.append([InlineKeyboardButton(text="Отмена", callback_data=cancel_callback)])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -168,19 +168,19 @@ def regions(selected_region: str = None, with_navigation: bool = False,
 
     if with_navigation:
         if selected_region:
-            buttons.append([InlineKeyboardButton(text="✅ Готово", callback_data="region_done")])
+            buttons.append([InlineKeyboardButton(text="Готово", callback_data="region_done")])
         else:
             buttons.append([InlineKeyboardButton(text="Выберите регион", callback_data="region_need")])
 
     if with_navigation:
         nav_buttons = [
-            InlineKeyboardButton(text="◀️ Назад", callback_data="profile_back"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")
+            InlineKeyboardButton(text="Назад", callback_data="profile_back"),
+            InlineKeyboardButton(text="Отмена", callback_data="cancel")
         ]
         buttons.append(nav_buttons)
     elif with_cancel:
         cancel_callback = "cancel_edit" if not for_profile else "cancel"
-        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=cancel_callback)])
+        buttons.append([InlineKeyboardButton(text="Отмена", callback_data=cancel_callback)])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -213,27 +213,27 @@ def positions(game: str, selected: List[str] = None, with_navigation: bool = Fal
     if with_navigation:
         # Для создания профиля
         if selected:
-            buttons.append([InlineKeyboardButton(text="✅ Готово", callback_data="pos_done")])
+            buttons.append([InlineKeyboardButton(text="Готово", callback_data="pos_done")])
         else:
             buttons.append([InlineKeyboardButton(text="Выберите позицию", callback_data="pos_need")])
     elif editing:
         # Для редактирования профиля
         if selected:
-            buttons.append([InlineKeyboardButton(text="✅ Сохранить", callback_data="pos_save_edit")])
+            buttons.append([InlineKeyboardButton(text="Сохранить", callback_data="pos_save_edit")])
         else:
             buttons.append([InlineKeyboardButton(text="Выберите позицию", callback_data="pos_need")])
 
     # Навигационные кнопки
     if with_navigation:
         nav_buttons = [
-            InlineKeyboardButton(text="◀️ Назад", callback_data="profile_back"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")
+            InlineKeyboardButton(text="Назад", callback_data="profile_back"),
+            InlineKeyboardButton(text="Отмена", callback_data="cancel")
         ]
         buttons.append(nav_buttons)
     elif editing:
-        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")])
+        buttons.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")])
     elif not with_navigation and for_profile:
-        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
+        buttons.append([InlineKeyboardButton(text="Отмена", callback_data="cancel")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -265,26 +265,26 @@ def goals(selected: List[str] = None, with_navigation: bool = False,
     # Кнопка готово
     if with_navigation:
         if selected:
-            buttons.append([InlineKeyboardButton(text="✅ Готово", callback_data="goals_done")])
+            buttons.append([InlineKeyboardButton(text="Готово", callback_data="goals_done")])
         else:
             buttons.append([InlineKeyboardButton(text="Выберите цель", callback_data="goals_need")])
     elif editing:
         if selected:
-            buttons.append([InlineKeyboardButton(text="✅ Сохранить", callback_data="goals_save_edit")])
+            buttons.append([InlineKeyboardButton(text="Сохранить", callback_data="goals_save_edit")])
         else:
             buttons.append([InlineKeyboardButton(text="Выберите цель", callback_data="goals_need")])
 
     # Навигационные кнопки
     if with_navigation:
         nav_buttons = [
-            InlineKeyboardButton(text="◀️ Назад", callback_data="profile_back"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")
+            InlineKeyboardButton(text="Назад", callback_data="profile_back"),
+            InlineKeyboardButton(text="Отмена", callback_data="cancel")
         ]
         buttons.append(nav_buttons)
     elif editing:
-        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")])
+        buttons.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")])
     elif not with_navigation and for_profile:
-        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
+        buttons.append([InlineKeyboardButton(text="Отмена", callback_data="cancel")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -305,30 +305,30 @@ def goals_filter() -> InlineKeyboardMarkup:
 def skip_profile_url() -> InlineKeyboardMarkup:
     """Пропуск ссылки профиля с навигацией"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="skip_profile_url")],
+        [InlineKeyboardButton(text="Пропустить", callback_data="skip_profile_url")],
         [
-            InlineKeyboardButton(text="◀️ Назад", callback_data="profile_back"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")
+            InlineKeyboardButton(text="Назад", callback_data="profile_back"),
+            InlineKeyboardButton(text="Отмена", callback_data="cancel")
         ]
     ])
 
 def skip_photo() -> InlineKeyboardMarkup:
     """Пропуск загрузки фото с навигацией"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="skip_photo")],
+        [InlineKeyboardButton(text="Пропустить", callback_data="skip_photo")],
         [
-            InlineKeyboardButton(text="◀️ Назад", callback_data="profile_back"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")
+            InlineKeyboardButton(text="Назад", callback_data="profile_back"),
+            InlineKeyboardButton(text="Отмена", callback_data="cancel")
         ]
     ])
 
 def skip_info() -> InlineKeyboardMarkup:
     """Пропуск дополнительной информации с навигацией"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⏭️ Пропустить", callback_data="skip_info")],
+        [InlineKeyboardButton(text="Пропустить", callback_data="skip_info")],
         [
-            InlineKeyboardButton(text="◀️ Назад", callback_data="profile_back"),
-            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")
+            InlineKeyboardButton(text="Назад", callback_data="profile_back"),
+            InlineKeyboardButton(text="Отмена", callback_data="cancel")
         ]
     ])
 
@@ -336,8 +336,8 @@ def confirm_cancel_profile() -> InlineKeyboardMarkup:
     """Подтверждение отмены создания профиля"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Да, отменить", callback_data="confirm_cancel"),
-            InlineKeyboardButton(text="❌ Нет, продолжить", callback_data="continue_profile")
+            InlineKeyboardButton(text="Да, отменить", callback_data="confirm_cancel"),
+            InlineKeyboardButton(text="Нет, продолжить", callback_data="continue_profile")
         ]
     ])
 

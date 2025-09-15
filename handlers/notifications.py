@@ -229,9 +229,6 @@ async def notify_about_like(bot: Bot, user_id: int, game: str, db=None) -> bool:
 
 # ==================== УВЕДОМЛЕНИЯ МОДЕРАЦИИ ====================
 
-# Обновляем notify_profile_deleted, notify_user_banned, notify_user_unbanned
-# Заменяем их на использование smart_notification:
-
 async def notify_profile_deleted(bot: Bot, user_id: int, game: str) -> bool:
     """Уведомление об удалении профиля модератором (умное)"""
     async def _notify():
@@ -262,7 +259,6 @@ async def notify_user_banned(bot: Bot, user_id: int, expires_at: datetime) -> bo
             text = (f"Вы заблокированы до {formatted_date} за нарушение правил сообщества.\n\n"
                     f"Во время блокировки вы не можете использовать бота.")
             
-            # Для банов не даем быстрых действий
             return await smart_notification(bot, user_id, text, None, None, None)
 
         except Exception as e:

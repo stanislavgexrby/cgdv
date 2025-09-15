@@ -377,9 +377,9 @@ class Database:
         """Создание или обновление пользователя"""
         async with self._pg_pool.acquire() as conn:
             await conn.execute(
-                """INSERT INTO users (telegram_id, username, current_game) 
-                   VALUES ($1, $2, $3) 
-                   ON CONFLICT (telegram_id) 
+                """INSERT INTO users (telegram_id, username, current_game)
+                   VALUES ($1, $2, $3)
+                   ON CONFLICT (telegram_id)
                    DO UPDATE SET username = $2, current_game = $3""",
                 telegram_id, username, game
             )
@@ -390,14 +390,13 @@ class Database:
         """Переключение текущей игры"""
         async with self._pg_pool.acquire() as conn:
             await conn.execute(
-                "UPDATE users SET current_game = $1 WHERE telegram_id = $2", 
+                "UPDATE users SET current_game = $1 WHERE telegram_id = $2",
                 game, telegram_id
             )
             await self._clear_user_cache(telegram_id)
             return True
 
     # === ПРОФИЛИ ===
-# === ПРОФИЛИ ===
 
     async def get_user_profile(self, telegram_id: int, game: str) -> Optional[Dict]:
         """Получение профиля пользователя с кэшированием"""
@@ -420,7 +419,7 @@ class Database:
             profile = self._format_profile(row)
             await self._set_cache(cache_key, profile, self._cache_ttl['profile'])
             return profile
-    
+
     async def has_profile(self, telegram_id: int, game: str) -> bool:
         """Проверка наличия профиля с кэшированием"""
         profile = await self.get_user_profile(telegram_id, game)
@@ -480,7 +479,6 @@ class Database:
                 return True
 
     # === ОПТИМИЗИРОВАННЫЙ ПОИСК ===
-        # === ОПТИМИЗИРОВАННЫЙ ПОИСК ===
 
     async def get_potential_matches(self, user_id: int, game: str,
                             rating_filter: str = None,
@@ -499,21 +497,21 @@ class Database:
         query = '''
             WITH excluded_users AS (
                 -- Исключаем уже лайкнутых
-                SELECT DISTINCT to_user as user_id FROM likes 
+                SELECT DISTINCT to_user as user_id FROM likes
                 WHERE from_user = $1 AND game = $2
                 UNION
                 -- Исключаем тех, на кого жаловались (НОВОЕ)
-                SELECT DISTINCT reported_user_id as user_id FROM reports 
+                SELECT DISTINCT reported_user_id as user_id FROM reports
                 WHERE reporter_id = $1 AND game = $2
                 UNION
                 -- Исключаем заблокированных
-                SELECT DISTINCT user_id FROM bans 
+                SELECT DISTINCT user_id FROM bans
                 WHERE expires_at > CURRENT_TIMESTAMP
             )
             SELECT p.*, u.username
             FROM profiles p
             JOIN users u ON p.telegram_id = u.telegram_id
-            WHERE p.telegram_id != $1 
+            WHERE p.telegram_id != $1
                 AND p.game = $2
                 AND p.telegram_id NOT IN (SELECT user_id FROM excluded_users WHERE user_id IS NOT NULL)
         '''
@@ -682,7 +680,6 @@ class Database:
                 from_user, to_user, game
             )
 
-            # Очищаем кэш
             await self._clear_pattern_cache(f"likes:{to_user}:*")
             await self._clear_pattern_cache(f"matches:{from_user}:*")
             await self._clear_pattern_cache(f"matches:{to_user}:*")

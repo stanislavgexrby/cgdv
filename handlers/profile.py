@@ -449,11 +449,9 @@ async def process_age(message: Message, state: FSMContext):
     age = int(message.text.strip())
     await state.update_data(age=age)
     
-    # Проверяем есть ли данные на следующем шаге (rating)
     data = await state.get_data()
     has_next_data = bool(data.get('rating'))
     
-    # Показываем следующий шаг с учетом наличия данных
     await show_profile_step(message, state, ProfileStep.RATING, show_current=has_next_data)
 
 @router.message(ProfileForm.age, ~F.text)
@@ -479,11 +477,9 @@ async def process_profile_url(message: Message, state: FSMContext):
 
     await state.update_data(profile_url=profile_url)
     
-    # Проверяем есть ли данные на следующем шаге (region)
     data = await state.get_data()
     has_next_data = bool(data.get('region'))
     
-    # Показываем следующий шаг с учетом наличия данных
     await show_profile_step(message, state, ProfileStep.REGION, show_current=has_next_data)
 
 @router.message(ProfileForm.profile_url, ~F.text)
@@ -506,11 +502,9 @@ async def process_additional_info(message: Message, state: FSMContext):
 
     await state.update_data(additional_info=info)
     
-    # Проверяем есть ли данные на следующем шаге (photo)
     data = await state.get_data()
     has_next_data = bool(data.get('photo_id'))
     
-    # Показываем следующий шаг с учетом наличия данных
     await show_profile_step(message, state, ProfileStep.PHOTO, show_current=has_next_data)
 
 @router.message(ProfileForm.additional_info, ~F.text)
@@ -522,7 +516,6 @@ async def process_photo(message: Message, state: FSMContext, db):
     photo_id = message.photo[-1].file_id
     await state.update_data(photo_id=photo_id)
     
-    # Фото - последний шаг, сохраняем профиль
     await save_profile_flow(message, state, photo_id, db)
 
 @router.message(ProfileForm.photo)
@@ -538,14 +531,12 @@ async def select_any_rating(callback: CallbackQuery, state: FSMContext):
     game = data['game']
     current_rating = data.get('rating')
     
-    # Если уже выбран "any" - ничего не делаем
     if current_rating == "any":
         await callback.answer("Уже выбрано 'Любой рейтинг'")
         return
     
     await state.update_data(rating="any")
     
-    # Обновляем клавиатуру
     keyboard = kb.ratings(game, selected_rating="any", with_navigation=True)
     try:
         await callback.message.edit_reply_markup(reply_markup=keyboard)
