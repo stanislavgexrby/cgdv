@@ -717,24 +717,35 @@ class Database:
                 return False
 
     async def get_pending_reports(self) -> List[Dict]:
-        """Получение ожидающих жалоб"""
+        """Получение ожидающих жалоб с username"""
         async with self._pg_pool.acquire() as conn:
-            rows = await conn.fetch(
-                "SELECT * FROM reports WHERE status = 'pending' ORDER BY created_at ASC LIMIT 100"
-            )
+            rows = await conn.fetch("""
+                SELECT r.*, 
+                       u1.username as reporter_username,
+                       u2.username as reported_username
+                FROM reports r
+                LEFT JOIN users u1 ON r.reporter_id = u1.telegram_id
+                LEFT JOIN users u2 ON r.reported_user_id = u2.telegram_id
+                WHERE r.status = 'pending' 
+                ORDER BY r.created_at ASC 
+                LIMIT 100
+            """)
             return [dict(r) for r in rows]
 
     async def get_report_info(self, report_id: int) -> Optional[Dict]:
-        """Получение информации о жалобе"""
+        """Получение информации о жалобе с username"""
         async with self._pg_pool.acquire() as conn:
-            row = await conn.fetchrow(
-                '''SELECT r.*, p.name, p.nickname, u.username
-                   FROM reports r
-                   LEFT JOIN profiles p ON r.reported_user_id = p.telegram_id AND r.game = p.game
-                   LEFT JOIN users u ON p.telegram_id = u.telegram_id
-                   WHERE r.id = $1''',
-                report_id
-            )
+            row = await conn.fetchrow("""
+                SELECT r.*, 
+                       p.name, p.nickname, 
+                       u1.username as reporter_username,
+                       u2.username as reported_username
+                FROM reports r
+                LEFT JOIN profiles p ON r.reported_user_id = p.telegram_id AND r.game = p.game
+                LEFT JOIN users u1 ON r.reporter_id = u1.telegram_id
+                LEFT JOIN users u2 ON r.reported_user_id = u2.telegram_id
+                WHERE r.id = $1
+            """, report_id)
             return dict(row) if row else None
 
     async def update_report_status(self, report_id: int, status: str, admin_id: int) -> bool:

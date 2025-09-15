@@ -41,6 +41,13 @@ def _truncate_text(text: str, limit: int = 1024) -> str:
         return text or ""
     return text[:limit-1] + "…"
 
+def _format_user_info(user_id: int, username: str = None) -> str:
+    """Форматирование информации о пользователе"""
+    if username:
+        return f"@{username} (ID: {user_id})"
+    else:
+        return f"ID: {user_id} (нет @username)"
+
 # ==================== ГЛАВНОЕ МЕНЮ АДМИНКИ ====================
 
 @router.callback_query(F.data == "admin_back")
@@ -140,35 +147,35 @@ async def _show_report(callback: CallbackQuery, report: dict, current_index: int
     """Показ отдельной жалобы с индексом"""
     report_id = report['id']
     reported_user_id = report['reported_user_id']
+    reporter_id = report['reporter_id']
     game = report.get('game', 'dota')
     
-    # Получаем профиль нарушителя
     profile = await db.get_user_profile(reported_user_id, game)
     game_name = settings.GAMES.get(game, game)
     
-    # Формируем текст
+    reporter_info = _format_user_info(reporter_id, report.get('reporter_username'))
+    reported_info = _format_user_info(reported_user_id, report.get('reported_username'))
+    
     header = (
         f"🚩 Жалоба #{report_id} ({current_index + 1}/{total_reports}) | {game_name}\n"
         f"📅 Дата: {_format_datetime(report.get('created_at'))}\n"
-        f"👤 Жалоба от: {report['reporter_id']}\n"
-        f"🎯 На пользователя: {reported_user_id}\n"
+        f"👤 Жалоба от: {reporter_info}\n"
+        f"🎯 На пользователя: {reported_info}\n"
         f"📋 Причина: {report.get('report_reason', 'inappropriate_content')}\n"
     )
     
     if profile:
         body = "\n👤 Анкета нарушителя:\n\n" + texts.format_profile(profile, show_contact=True)
     else:
-        body = f"\n❌ Анкета пользователя {reported_user_id} не найдена"
+        body = f"\n❌ Анкета пользователя не найдена"
     
     text = _truncate_text(header + body)
     keyboard = kb.admin_report_actions(reported_user_id, report_id, current_index, total_reports)
     
-    # Если есть фото - отправляем с фото, иначе используем safe_edit_message
     photo_id = profile.get('photo_id') if profile else None
     
     try:
         if photo_id:
-            # Удаляем старое сообщение и отправляем новое с фото
             await callback.message.delete()
             await callback.message.answer_photo(
                 photo=photo_id,
@@ -177,11 +184,9 @@ async def _show_report(callback: CallbackQuery, report: dict, current_index: int
                 parse_mode='HTML'
             )
         else:
-            # Используем safe_edit_message для текстовых сообщений
             await safe_edit_message(callback, text, keyboard)
     except Exception as e:
         logger.error(f"Ошибка показа жалобы: {e}")
-        # Fallback: всегда пытаемся отправить как текст
         await safe_edit_message(callback, text, keyboard)
     
     await callback.answer()
