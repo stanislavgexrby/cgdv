@@ -40,6 +40,19 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
                     positions_text.append(pos)
             text += f"<b>Позиция:</b> {', '.join(positions_text)}\n"
 
+    # Цели
+    if user.get('goals'):
+        if 'any' in user['goals']:
+            text += f"<b>Цель:</b> Любая\n"
+        else:
+            goals_text = []
+            for goal in user['goals']:
+                if goal in settings.GOALS:
+                    goals_text.append(settings.GOALS[goal])
+                else:
+                    goals_text.append(goal)
+            text += f"<b>Цель:</b> {', '.join(goals_text)}\n"
+
     # Регион
     region = user.get('region', '')
     if region == 'any':

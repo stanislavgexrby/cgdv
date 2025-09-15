@@ -22,6 +22,7 @@ class EditProfileForm(StatesGroup):
     edit_rating = State()
     edit_region = State()
     edit_positions = State()
+    edit_goals = State()
     edit_info = State()
     edit_photo = State()
 
@@ -50,6 +51,7 @@ async def update_profile_field(user_id: int, field: str, value, db) -> bool:
         rating=profile['rating'] if field != 'rating' else value,
         region=profile.get('region', 'eeu') if field != 'region' else value,
         positions=profile['positions'] if field != 'positions' else value,
+        goals=profile.get('goals', ['any']) if field != 'goals' else value,
         additional_info=profile['additional_info'] if field != 'additional_info' else value,
         photo_id=profile.get('photo_id') if field != 'photo_id' else value
     )
@@ -270,6 +272,29 @@ async def edit_positions(callback: CallbackQuery, state: FSMContext, db):
         callback,
         "Выберите новые позиции (можно несколько):",
         kb.positions(user['current_game'], current_positions, for_profile=True, editing=True)
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "edit_goals")
+@check_ban_and_profile()
+async def edit_goals(callback: CallbackQuery, state: FSMContext, db):
+    user_id = callback.from_user.id
+    user = await db.get_user(user_id)
+    profile = await db.get_user_profile(user_id, user['current_game'])
+    current_goals = profile.get('goals', ['any']) if profile else ['any']
+
+    await state.update_data(
+        user_id=user_id,
+        game=user['current_game'],
+        goals_selected=current_goals.copy(),
+        original_goals=current_goals.copy()
+    )
+    await state.set_state(EditProfileForm.edit_goals)
+
+    await safe_edit_message(
+        callback,
+        "Выберите новые цели (можно несколько):",
+        kb.goals(current_goals, for_profile=True, editing=True)
     )
     await callback.answer()
 
@@ -555,6 +580,131 @@ async def edit_positions_done(callback: CallbackQuery, state: FSMContext, db):
 @router.callback_query(F.data == "pos_need", EditProfileForm.edit_positions)
 async def edit_positions_need(callback: CallbackQuery):
     await callback.answer("Выберите хотя бы одну позицию", show_alert=True)
+
+@router.callback_query(F.data == "goals_add_any", EditProfileForm.edit_goals)
+async def edit_add_any_goal(callback: CallbackQuery, state: FSMContext):
+    """Добавление 'любой цели' при редактировании"""
+    # Устанавливаем только "any"
+    await state.update_data(goals_selected=["any"])
+    
+    # Обновляем клавиатуру
+    keyboard = kb.goals(["any"], for_profile=True, editing=True)
+    await callback.message.edit_reply_markup(reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data == "goals_remove_any", EditProfileForm.edit_goals)
+async def edit_remove_any_goal(callback: CallbackQuery, state: FSMContext):
+    """Удаление 'любой цели' при редактировании"""
+    data = await state.get_data()
+    selected = data.get('goals_selected', [])
+    
+    # Убираем "any"
+    if "any" in selected:
+        selected.remove("any")
+    
+    await state.update_data(goals_selected=selected)
+    
+    # Обновляем клавиатуру
+    keyboard = kb.goals(selected, for_profile=True, editing=True)
+    await callback.message.edit_reply_markup(reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("goals_add_"), EditProfileForm.edit_goals)
+async def edit_add_goal(callback: CallbackQuery, state: FSMContext):
+    """Добавление цели при редактировании"""
+    goal = callback.data.split("_")[2]
+    data = await state.get_data()
+    selected = data.get('goals_selected', [])
+
+    if goal not in selected:
+        if goal == "any":
+            selected = ["any"]
+        else:
+            if "any" in selected:
+                selected.remove("any")
+            selected.append(goal)
+
+        await state.update_data(goals_selected=selected)
+
+    await callback.message.edit_reply_markup(reply_markup=kb.goals(selected, for_profile=False, editing=True))
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("goals_remove_"), EditProfileForm.edit_goals)
+async def edit_remove_goal(callback: CallbackQuery, state: FSMContext):
+    """Удаление цели при редактировании"""
+    goal = callback.data.split("_")[2]
+    data = await state.get_data()
+    selected = data.get('goals_selected', [])
+
+    if goal in selected:
+        selected.remove(goal)
+        await state.update_data(goals_selected=selected)
+
+    await callback.message.edit_reply_markup(reply_markup=kb.goals(selected, for_profile=False, editing=True))
+    await callback.answer()
+
+@router.callback_query(F.data == "goals_save_edit", EditProfileForm.edit_goals)
+async def save_edit_goals(callback: CallbackQuery, state: FSMContext, db):
+    """Сохранение изменений целей при редактировании"""
+    data = await state.get_data()
+    selected = data.get('goals_selected', [])
+    original = data.get('original_goals', [])
+
+    if not selected:
+        await callback.answer("Выберите хотя бы одну цель", show_alert=True)
+        return
+
+    if set(selected) == set(original):
+        await callback.answer("Цели не изменились")
+        await state.clear()
+        await safe_edit_message(callback, "Цели остались прежними", kb.back_to_editing())
+        return
+
+    success = await update_profile_field(callback.from_user.id, 'goals', selected, db)
+    await state.clear()
+
+    await update_user_activity(callback.from_user.id, 'available', db)
+
+    if success:
+        await safe_edit_message(callback, "Цели обновлены!", kb.back_to_editing())
+    else:
+        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
+
+    await callback.answer()
+
+@router.callback_query(F.data == "goals_done", EditProfileForm.edit_goals)
+async def edit_goals_done(callback: CallbackQuery, state: FSMContext, db):
+    """Завершение редактирования целей (альтернативный обработчик)"""
+    data = await state.get_data()
+    selected = data.get('goals_selected', [])
+    original = data.get('original_goals', [])
+
+    if not selected:
+        await callback.answer("Выберите хотя бы одну цель", show_alert=True)
+        return
+
+    if set(selected) == set(original):
+        await callback.answer("Цели не изменились")
+        await state.clear()
+        await safe_edit_message(callback, "Цели остались прежними", kb.back_to_editing())
+        return
+
+    success = await update_profile_field(callback.from_user.id, 'goals', selected, db)
+    await state.clear()
+
+    await update_user_activity(callback.from_user.id, 'available', db)
+
+    if success:
+        await safe_edit_message(callback, "Цели обновлены!", kb.back_to_editing())
+    else:
+        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
+
+    await callback.answer()
+
+@router.callback_query(F.data == "goals_need", EditProfileForm.edit_goals)
+async def edit_goals_need(callback: CallbackQuery):
+    """Напоминание о необходимости выбора цели при редактировании"""
+    await callback.answer("Выберите хотя бы одну цель", show_alert=True)
 
 @router.callback_query(F.data == "delete_info", EditProfileForm.edit_info)
 async def delete_info(callback: CallbackQuery, state: FSMContext, db):

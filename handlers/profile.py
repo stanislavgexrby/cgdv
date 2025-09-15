@@ -25,6 +25,7 @@ class ProfileForm(StatesGroup):
     rating = State()
     region = State()
     positions = State()
+    goals = State()
     additional_info = State()
     photo = State()
 
@@ -35,10 +36,10 @@ class ProfileStep(Enum):
     RATING = "rating"
     REGION = "region"
     POSITIONS = "positions"
+    GOALS = "goals"
     INFO = "additional_info"
     PHOTO = "photo"
 
-# Порядок шагов
 PROFILE_STEPS_ORDER = [
     ProfileStep.NAME,
     ProfileStep.NICKNAME,
@@ -46,6 +47,7 @@ PROFILE_STEPS_ORDER = [
     ProfileStep.RATING,
     ProfileStep.REGION,
     ProfileStep.POSITIONS,
+    ProfileStep.GOALS,
     ProfileStep.INFO,
     ProfileStep.PHOTO
 ]
@@ -71,6 +73,7 @@ async def save_profile_universal(user_id: int, data: dict, photo_id: str = None,
         rating=data['rating'],
         region=data.get('region', 'eeu'),
         positions=data['positions'],
+        goals=data.get('goals', ['any']),
         additional_info=data['additional_info'],
         photo_id=photo_id
     )
@@ -114,6 +117,16 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
                     position_names = [settings.POSITIONS[game].get(pos, pos) for pos in current]
                     pos_text = ", ".join(position_names)
                 return f"Текущие позиции: <b>{pos_text}</b>\n\nИзмените выбор или продолжите с текущими:"
+        elif step == ProfileStep.GOALS:
+            current = data.get('goals_selected', []) if show_current else []
+            if current and show_current:
+                if "any" in current:
+                    goals_text = "Любая цель"
+                else:
+                    goals_names = [settings.GOALS.get(goal, goal) for goal in current]
+                    goals_text = ", ".join(goals_names)
+                return f"Текущие цели: <b>{goals_text}</b>\n\nИзмените выбор или продолжите с текущими:"
+            return "Выберите ваши цели (можно несколько):"
         elif step == ProfileStep.INFO:
             current = data.get('additional_info', '')
             if current:
@@ -143,7 +156,8 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
         return "Выберите регион:"
     elif step == ProfileStep.POSITIONS:
         return "Выберите позиции (можно несколько):"
-    
+    elif step == ProfileStep.GOALS:
+        return "Выберите ваши цели (можно несколько):"
     return "Вопрос"
 
 async def show_profile_step(callback_or_message, state: FSMContext, step: ProfileStep, show_current: bool = False):
@@ -163,6 +177,8 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
     elif step == ProfileStep.REGION and data.get('region'):
         has_data = True
     elif step == ProfileStep.POSITIONS and data.get('positions_selected'):
+        has_data = True
+    elif step == ProfileStep.GOALS and data.get('goals_selected'):
         has_data = True
     elif step == ProfileStep.INFO and 'additional_info' in data:
         has_data = True
@@ -206,6 +222,11 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
         selected = data.get('positions_selected', []) if show_existing_data else []
         keyboard = kb.positions(game, selected=selected, with_navigation=True)
 
+    elif step == ProfileStep.GOALS:
+        await state.set_state(ProfileForm.goals)
+        selected = data.get('goals_selected', []) if show_existing_data else []
+        keyboard = kb.goals(selected=selected, with_navigation=True)
+
     elif step == ProfileStep.INFO:
         await state.set_state(ProfileForm.additional_info)
         if show_continue_button:
@@ -246,6 +267,7 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext, db):
         user_id=user_id,
         game=game,
         positions_selected=[],
+        goals_selected=[],
         current_step=ProfileStep.NAME.value
     )
     
@@ -778,16 +800,105 @@ async def positions_done(callback: CallbackQuery, state: FSMContext):
 
     await state.update_data(positions=selected)
     
-    # Проверяем есть ли данные на следующем шаге (info)
-    has_next_data = 'additional_info' in data
+    has_next_data = bool(data.get('goals_selected'))
     
-    # Показываем следующий шаг с учетом наличия данных
-    await show_profile_step(callback, state, ProfileStep.INFO, show_current=has_next_data)
+    await show_profile_step(callback, state, ProfileStep.GOALS, show_current=has_next_data)
     await callback.answer()
 
 @router.callback_query(F.data == "pos_need", ProfileForm.positions)
 async def positions_need(callback: CallbackQuery):
     await callback.answer("Выберите хотя бы одну позицию", show_alert=True)
+
+@router.callback_query(F.data == "goals_add_any", ProfileForm.goals)
+async def add_any_goal(callback: CallbackQuery, state: FSMContext):
+    """Добавление 'любой цели'"""
+    # Устанавливаем только "any"
+    await state.update_data(goals_selected=["any"])
+    
+    # Обновляем клавиатуру
+    keyboard = kb.goals(["any"], with_navigation=True)
+    await callback.message.edit_reply_markup(reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data == "goals_remove_any", ProfileForm.goals)
+async def remove_any_goal(callback: CallbackQuery, state: FSMContext):
+    """Удаление 'любой цели'"""
+    data = await state.get_data()
+    selected = data.get('goals_selected', [])
+    if "any" in selected:
+        selected.remove("any")
+    
+    await state.update_data(goals_selected=selected)
+    
+    # Обновляем клавиатуру
+    keyboard = kb.goals(selected, with_navigation=True)
+    await callback.message.edit_reply_markup(reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("goals_add_"), ProfileForm.goals)
+async def add_goal(callback: CallbackQuery, state: FSMContext):
+    """Добавление цели"""
+    goal = callback.data.split("_", 2)[2]
+    data = await state.get_data()
+    selected = data.get('goals_selected', [])
+    
+    if goal in selected:
+        await callback.answer("Эта цель уже выбрана")
+        return
+
+    if goal == "any":
+        selected = ["any"]
+    else:
+        if "any" in selected:
+            selected.remove("any")
+        selected.append(goal)
+    
+    await state.update_data(goals_selected=selected)
+
+    keyboard = kb.goals(selected, with_navigation=True)
+    await callback.message.edit_reply_markup(reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("goals_remove_"), ProfileForm.goals)
+async def remove_goal(callback: CallbackQuery, state: FSMContext):
+    """Удаление цели"""
+    goal = callback.data.split("_", 2)[2]
+    data = await state.get_data()
+    selected = data.get('goals_selected', [])
+
+    if goal not in selected:
+        await callback.answer("Эта цель не выбрана")
+        return
+
+    selected.remove(goal)
+    await state.update_data(goals_selected=selected)
+
+    keyboard = kb.goals(selected, with_navigation=True)
+    await callback.message.edit_reply_markup(reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data == "goals_done", ProfileForm.goals)
+async def goals_done(callback: CallbackQuery, state: FSMContext):
+    """Завершение выбора целей"""
+    data = await state.get_data()
+    selected = data.get('goals_selected', [])
+
+    if not selected:
+        await callback.answer("Выберите хотя бы одну цель", show_alert=True)
+        return
+
+    await state.update_data(goals=selected)
+    
+    # Проверяем есть ли данные на следующем шаге (info)
+    has_next_data = 'additional_info' in data
+    
+    # Показываем следующий шаг
+    await show_profile_step(callback, state, ProfileStep.INFO, show_current=has_next_data)
+    await callback.answer()
+
+@router.callback_query(F.data == "goals_need", ProfileForm.goals)
+async def goals_need(callback: CallbackQuery):
+    await callback.answer("Выберите хотя бы одну цель", show_alert=True)
 
 @router.callback_query(F.data == "skip_info", ProfileForm.additional_info)
 async def skip_info(callback: CallbackQuery, state: FSMContext):
@@ -921,9 +1032,13 @@ async def save_profile_flow(message: Message, state: FSMContext, photo_id: str |
         'rating': data.get('rating'),
         'region': data.get('region', 'eeu'),
         'positions': data.get('positions', []) or data.get('positions_selected', []),
+        'goals': data.get('goals', []) or data.get('goals_selected', []),  # новое поле
         'additional_info': data.get('additional_info', '').strip(),
         'recreating': is_recreating
     }
+
+    if not payload['goals']:
+        payload['goals'] = ['any']
 
     if not payload['positions']:
         payload['positions'] = ['any']

@@ -240,6 +240,71 @@ def positions(game: str, selected: List[str] = None, with_navigation: bool = Fal
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def goals(selected: List[str] = None, with_navigation: bool = False, 
+         for_profile: bool = True, editing: bool = False) -> InlineKeyboardMarkup:
+    """Интерактивный выбор целей"""
+    if selected is None:
+        selected = []
+
+    buttons = []
+
+    for key, name in settings.GOALS.items():
+        if key in selected:
+            text = f"✅ {name}"
+            callback = f"goals_remove_{key}"
+        else:
+            text = name
+            callback = f"goals_add_{key}"
+
+        buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
+
+    # Кнопка "Любая цель"
+    if for_profile or editing:
+        if "any" in selected:
+            buttons.append([InlineKeyboardButton(text="✅ Любая цель", callback_data="goals_remove_any")])
+        else:
+            buttons.append([InlineKeyboardButton(text="Любая цель", callback_data="goals_add_any")])
+
+    # Кнопка готово
+    if with_navigation:
+        if selected:
+            buttons.append([InlineKeyboardButton(text="✅ Готово", callback_data="goals_done")])
+        else:
+            buttons.append([InlineKeyboardButton(text="Выберите цель", callback_data="goals_need")])
+    elif editing:
+        if selected:
+            buttons.append([InlineKeyboardButton(text="✅ Сохранить", callback_data="goals_save_edit")])
+        else:
+            buttons.append([InlineKeyboardButton(text="Выберите цель", callback_data="goals_need")])
+
+    # Навигационные кнопки
+    if with_navigation:
+        nav_buttons = [
+            InlineKeyboardButton(text="◀️ Назад", callback_data="profile_back"),
+            InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")
+        ]
+        buttons.append(nav_buttons)
+    elif editing:
+        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_edit")])
+    elif not with_navigation and for_profile:
+        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="cancel")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def goals_filter() -> InlineKeyboardMarkup:
+    """Фильтр по цели"""
+    buttons = []
+
+    for key, name in settings.GOALS.items():
+        buttons.append([InlineKeyboardButton(text=name, callback_data=f"goals_filter_{key}")])
+
+    buttons.extend([
+        [InlineKeyboardButton(text="Сбросить фильтр", callback_data="goals_reset")],
+        [InlineKeyboardButton(text="Отмена", callback_data="cancel_filter")]
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 def skip_photo() -> InlineKeyboardMarkup:
     """Пропуск загрузки фото с навигацией"""
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -280,6 +345,7 @@ def edit_profile_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Изменить рейтинг", callback_data="edit_rating")],
         [InlineKeyboardButton(text="Изменить регион", callback_data="edit_region")],
         [InlineKeyboardButton(text="Изменить позиции", callback_data="edit_positions")],
+        [InlineKeyboardButton(text="Изменить цели", callback_data="edit_goals")],
         [InlineKeyboardButton(text="Изменить описание", callback_data="edit_info")],
         [InlineKeyboardButton(text="Изменить фото", callback_data="edit_photo")],
         [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
@@ -329,6 +395,7 @@ def search_filters() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Рейтинг", callback_data="filter_rating")],
         [InlineKeyboardButton(text="Позиция", callback_data="filter_position")],
         [InlineKeyboardButton(text="Регион", callback_data="filter_region")],
+        [InlineKeyboardButton(text="Цель", callback_data="filter_goals")],
         [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
     ])
 

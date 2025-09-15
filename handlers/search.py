@@ -45,6 +45,12 @@ async def update_filter_display(callback: CallbackQuery, state: FSMContext, mess
     else:
         filters_text.append("<b>Регион:</b> любой")
 
+    goals_filter = data.get('goals_filter')
+    if goals_filter:
+        goals_name = settings.GOALS.get(goals_filter, goals_filter)
+        filters_text.append(f"<b>Цель:</b> {goals_name}")
+    else:
+        filters_text.append("<b>Цель:</b> любая")
     text = f"Поиск в {game_name}\n\nФильтры:\n\n"
     text += "\n".join(filters_text)
     text += "\n\nНастройте фильтры или начните поиск:"
@@ -183,6 +189,7 @@ async def start_search(callback: CallbackQuery, state: FSMContext, db):
         rating_filter=None,
         position_filter=None,
         region_filter=None,
+        goals_filter=None,
         profiles=[],
         current_index=0
     )
@@ -213,6 +220,12 @@ async def set_position_filter(callback: CallbackQuery, state: FSMContext):
 async def set_region_filter(callback: CallbackQuery, state: FSMContext):
     """Показать меню выбора региона"""
     await safe_edit_message(callback, "Выберите регион:", kb.regions_filter())
+    await callback.answer()
+
+@router.callback_query(F.data == "filter_goals", SearchForm.filters)
+async def set_goals_filter(callback: CallbackQuery, state: FSMContext):
+    """Показать меню выбора цели"""
+    await safe_edit_message(callback, "Выберите цель:", kb.goals_filter())
     await callback.answer()
 
 # ==================== ОБРАБОТЧИКИ УСТАНОВКИ ФИЛЬТРОВ ====================
@@ -286,6 +299,28 @@ async def save_region_filter(callback: CallbackQuery, state: FSMContext):
     region_name = settings.REGIONS.get(region, region)
     await update_filter_display(callback, state, f"Фильтр по региону: {region_name}")
 
+@router.callback_query(F.data.startswith("goals_filter_"), SearchForm.filters)
+async def save_goals_filter(callback: CallbackQuery, state: FSMContext):
+    """Сохранение выбранной цели"""
+    parts = callback.data.split("_")
+    if len(parts) < 3:
+        return
+
+    goal = parts[2]
+
+    if goal not in settings.GOALS:
+        return
+
+    data = await state.get_data()
+    current_goal = data.get('goals_filter')
+    if current_goal == goal:
+        await callback.answer("Эта цель уже выбрана")
+        return
+
+    await state.update_data(goals_filter=goal)
+    goals_name = settings.GOALS.get(goal, goal)
+    await update_filter_display(callback, state, f"Фильтр по цели: {goals_name}")
+
 # ==================== ОБРАБОТЧИКИ СБРОСА ФИЛЬТРОВ ====================
 
 @router.callback_query(F.data == "rating_reset", SearchForm.filters)
@@ -302,6 +337,11 @@ async def reset_position_filter(callback: CallbackQuery, state: FSMContext):
 async def reset_region_filter(callback: CallbackQuery, state: FSMContext):
     await state.update_data(region_filter=None)
     await update_filter_display(callback, state, "Фильтр по региону сброшен")
+
+@router.callback_query(F.data == "goals_reset", SearchForm.filters)
+async def reset_goals_filter(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(goals_filter=None)
+    await update_filter_display(callback, state, "Фильтр по цели сброшен")
 
 @router.callback_query(F.data == "cancel_filter", SearchForm.filters)
 async def cancel_filter(callback: CallbackQuery, state: FSMContext):
@@ -322,6 +362,7 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
         rating_filter=data.get('rating_filter'),
         position_filter=data.get('position_filter'),
         region_filter=data.get('region_filter'),
+        goals_filter=data.get('goals_filter'),
         limit=20
     )
 

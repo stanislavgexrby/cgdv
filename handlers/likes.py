@@ -20,8 +20,9 @@ async def show_profile_with_photo(callback: CallbackQuery, profile: dict, text: 
         if profile.get('photo_id'):
             try:
                 await callback.message.delete()
-            except:
-                pass
+            except Exception as e:
+                logger.warning(f"Не удалось удалить сообщение: {e}")
+
             await callback.message.answer_photo(
                 photo=profile['photo_id'],
                 caption=text,
@@ -32,8 +33,13 @@ async def show_profile_with_photo(callback: CallbackQuery, profile: dict, text: 
             await safe_edit_message(callback, text, keyboard)
         await callback.answer()
     except Exception as e:
-        logger.error(f"Ошибка показа профиля: {e}")
-        await callback.answer("Ошибка загрузки")
+        logger.error(f"Ошибка показа профиля с фото: {e}")
+        try:
+            await safe_edit_message(callback, text, keyboard)
+            await callback.answer()
+        except Exception as e2:
+            logger.error(f"Критическая ошибка показа профиля: {e2}")
+            await callback.answer("Ошибка загрузки")
 
 async def show_empty_state(callback: CallbackQuery, message: str):
     """Показ пустого состояния (нет лайков/матчей)"""
@@ -67,29 +73,18 @@ async def handle_match_created(callback: CallbackQuery, target_user_id: int, gam
 
     target_profile = await db.get_user_profile(target_user_id, game)
 
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+        [kb.InlineKeyboardButton(text="Другие лайки", callback_data="my_likes")],
+        [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+    ])
+
     if target_profile:
         match_text = texts.format_profile(target_profile, show_contact=True)
         text = f"{texts.MATCH_CREATED}\n\n{match_text}"
 
-        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
-            [kb.InlineKeyboardButton(text="Другие лайки", callback_data="my_likes")],
-            [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
-        ])
-
         await show_profile_with_photo(callback, target_profile, text, keyboard)
-
     else:
-        text = texts.MATCH_CREATED
-        if target_profile and target_profile.get('username'):
-            text += f"\n\n@{target_profile['username']}"
-        else:
-            text += "\n\n(У пользователя нет @username)"
-
-        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
-            [kb.InlineKeyboardButton(text="Другие лайки", callback_data="my_likes")],
-            [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
-        ])
-
+        text = f"{texts.MATCH_CREATED}\n\nПользователь не найден"
         await safe_edit_message(callback, text, keyboard)
         await callback.answer()
 

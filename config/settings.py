@@ -101,3 +101,10 @@ REGIONS = {
     "weu": "Западная Европа (WEU)",
     "asia": "Азия (Asia)"
 }
+
+GOALS = {
+    "tournaments": "Турниры",
+    "casual": "Игра не на рейтинг", 
+    "ranked": "Игра на рейтинг",
+    "communication": "Общение"
+}

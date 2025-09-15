@@ -189,6 +189,26 @@ class Database:
                 )
             ''')
 
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS profiles (
+                    id SERIAL PRIMARY KEY,
+                    telegram_id BIGINT,
+                    game TEXT,
+                    name TEXT,
+                    nickname TEXT,
+                    age INTEGER,
+                    rating TEXT,
+                    region TEXT DEFAULT 'eeu',
+                    positions JSONB DEFAULT '[]'::jsonb,
+                    goals JSONB DEFAULT '["any"]'::jsonb,  -- новое поле
+                    additional_info TEXT,
+                    photo_id TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(telegram_id, game)
+                )
+            ''')
+
             optimized_indexes = [
                 # === ОСНОВНЫЕ ИНДЕКСЫ ===
                 "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_game ON profiles(game)",
@@ -212,6 +232,7 @@ class Database:
                 "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_game_rating ON profiles(game, rating)",
                 "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_game_region ON profiles(game, region)",
                 "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_game_active ON profiles(game, telegram_id) WHERE telegram_id IS NOT NULL",
+                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_goals_gin ON profiles USING gin (goals)",
 
                 # === GIN ИНДЕКС ДЛЯ ПОЗИЦИЙ ===
                 "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_positions_gin ON profiles USING gin (positions)",
@@ -236,6 +257,12 @@ class Database:
                 "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_active_with_photo ON profiles(game, telegram_id) WHERE photo_id IS NOT NULL",
             ]
 
+            try:
+                await conn.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS goals JSONB DEFAULT '[\"any\"]'::jsonb")
+                await conn.execute("UPDATE profiles SET goals = '[\"any\"]'::jsonb WHERE goals IS NULL")
+            except Exception as e:
+                logger.warning(f"Миграция поля goals: {e}")
+
             for index_sql in optimized_indexes:
                 try:
                     await conn.execute(index_sql)
@@ -249,6 +276,8 @@ class Database:
             return None
 
         profile = dict(row)
+
+        # Обработка позиций
         positions = profile.get('positions', [])
         if isinstance(positions, str):
             try:
@@ -256,12 +285,22 @@ class Database:
             except:
                 positions = []
         profile['positions'] = positions
+
+        # Обработка целей
+        goals = profile.get('goals', ['any'])
+        if isinstance(goals, str):
+            try:
+                goals = json.loads(goals)
+            except:
+                goals = ['any']
+        profile['goals'] = goals
+
         profile['current_game'] = profile.get('game')
         return profile
 
-    def _generate_filters_hash(self, rating_filter, position_filter, region_filter) -> str:
+    def _generate_filters_hash(self, rating_filter, position_filter, region_filter, goals_filter) -> str:
         """Генерация хэша для фильтров поиска"""
-        filters_str = f"{rating_filter or 'any'}_{position_filter or 'any'}_{region_filter or 'any'}"
+        filters_str = f"{rating_filter or 'any'}_{position_filter or 'any'}_{region_filter or 'any'}_{goals_filter or 'any'}"
         return hashlib.md5(filters_str.encode()).hexdigest()[:8]
 
     # === ОПТИМИЗИРОВАННОЕ КЭШИРОВАНИЕ ===
@@ -384,18 +423,18 @@ class Database:
 
     async def update_user_profile(self, telegram_id: int, game: str, name: str, nickname: str,
                         age: int, rating: str, region: str, positions: List[str],
-                        additional_info: str, photo_id: str = None) -> bool:
+                        goals: List[str], additional_info: str, photo_id: str = None) -> bool:
         """Создание/обновление профиля пользователя"""
         async with self._pg_pool.acquire() as conn:
             await conn.execute(
-                '''INSERT INTO profiles (telegram_id, game, name, nickname, age, rating, region, positions, additional_info, photo_id)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                '''INSERT INTO profiles (telegram_id, game, name, nickname, age, rating, region, positions, goals, additional_info, photo_id)
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                 ON CONFLICT (telegram_id, game)
                 DO UPDATE SET
                     name = $3, nickname = $4, age = $5, rating = $6,
-                    region = $7, positions = $8, additional_info = $9, photo_id = $10''',
+                    region = $7, positions = $8, goals = $9, additional_info = $10, photo_id = $11''',
                 telegram_id, game, name, nickname, age, rating, region,
-                json.dumps(positions), additional_info, photo_id
+                json.dumps(positions), json.dumps(goals), additional_info, photo_id
             )
             await self._clear_user_cache(telegram_id)
             await self._clear_pattern_cache(f"search:*:{game}:*")
@@ -441,10 +480,11 @@ class Database:
                             rating_filter: str = None,
                             position_filter: str = None,
                             region_filter: str = None,
+                            goals_filter: str = None,
                             limit: int = 10) -> List[Dict]:
         """Оптимизированный поиск потенциальных матчей"""
 
-        filters_hash = self._generate_filters_hash(rating_filter, position_filter, region_filter)
+        filters_hash = self._generate_filters_hash(rating_filter, position_filter, region_filter, goals_filter)
         cache_key = f"search:{user_id}:{game}:{filters_hash}"
         cached = await self._get_cache(cache_key)
         if cached:
@@ -489,6 +529,11 @@ class Database:
             param_count += 1
             query += f" AND (p.region = ${param_count} OR p.region = 'any')"
             params.append(region_filter)
+
+        if goals_filter and goals_filter != 'any':
+            param_count += 1
+            query += f" AND p.goals ? ${param_count}"
+            params.append(goals_filter)
 
         param_count += 1
         query += f" ORDER BY p.created_at DESC, p.id LIMIT ${param_count}"
