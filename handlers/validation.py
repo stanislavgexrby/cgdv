@@ -1,6 +1,19 @@
 from config import settings
 import re
 
+def is_valid_profile_url(game: str, url: str) -> bool:
+    """Проверка, соответствует ли ссылка нужному сервису"""
+
+    if game == 'dota':
+        pattern = r'^(https?://)?(www\.)?dotabuff\.com/players/\d+(/.*)?$'
+        return bool(re.match(pattern, url))
+
+    elif game == 'cs':
+        pattern = r'^(https?://)?(www\.)?faceit\.com/.+/players/[^/]+(/.*)?$'
+        return bool(re.match(pattern, url))
+
+    return False
+
 def validate_profile_input(field: str, value, game: str = None) -> tuple[bool, str]:
     """Валидация ввода при создании профиля"""
     if field == 'name':
@@ -31,15 +44,8 @@ def validate_profile_input(field: str, value, game: str = None) -> tuple[bool, s
 
         url = value.strip()
 
-        if game == 'dota':
-            dotabuff_pattern = r'^https?://(www\.)?dotabuff\.com/players/\d+(/.*)?$'
-            if not re.match(dotabuff_pattern, url):
-                return False, "Введите корректную ссылку на Dotabuff профиль\nПример: https://www.dotabuff.com/players/123456789"
-
-        elif game == 'cs':
-            faceit_pattern = r'^https?://(www\.)?faceit\.com/.+/players/[^/]+(/.*)?$'
-            if not re.match(faceit_pattern, url):
-                return False, "Введите корректную ссылку на FACEIT профиль\nПример: https://www.faceit.com/en/players/nickname"
+        if not is_valid_profile_url(game, url):
+            return False, "Некорректная ссылка"
 
         if len(url) > 200:
             return False, "Ссылка слишком длинная (максимум 200 символов)"

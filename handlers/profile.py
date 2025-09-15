@@ -164,7 +164,7 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
     elif step == ProfileStep.AGE:
         return texts.QUESTIONS['age']
     elif step == ProfileStep.INFO:
-        return "Введите описание или нажмите 'Пропустить':"
+        return texts.QUESTIONS['info']
     elif step == ProfileStep.PHOTO:
         return texts.QUESTIONS['photo']
     elif step == ProfileStep.RATING:
