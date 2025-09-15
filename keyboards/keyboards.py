@@ -330,20 +330,31 @@ def admin_main_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
     ])
 
-def admin_report_actions(reported_user_id: int, report_id: int) -> InlineKeyboardMarkup:
+def admin_report_actions(reported_user_id: int, report_id: int, current_index: int = 0, total_count: int = 1) -> InlineKeyboardMarkup:
     """Действия с жалобой"""
-    return InlineKeyboardMarkup(inline_keyboard=[
+    buttons = [
         [
-            InlineKeyboardButton(text="Удалить профиль", callback_data=f"rep:del:{report_id}:{reported_user_id}"),
-            InlineKeyboardButton(text="Бан 7д", callback_data=f"rep:ban:{report_id}:{reported_user_id}:7")
+            InlineKeyboardButton(text="🗑️ Удалить профиль", callback_data=f"rep:del:{report_id}:{reported_user_id}"),
+            InlineKeyboardButton(text="🚫 Бан 7д", callback_data=f"rep:ban:{report_id}:{reported_user_id}:7")
         ],
         [
-            InlineKeyboardButton(text="Бан 30д", callback_data=f"rep:ban:{report_id}:{reported_user_id}:30")
+            InlineKeyboardButton(text="🚫 Бан 30д", callback_data=f"rep:ban:{report_id}:{reported_user_id}:30")
         ],
-        [InlineKeyboardButton(text="Отклонить", callback_data=f"rep:ignore:{report_id}")],
-        [InlineKeyboardButton(text="Следующая", callback_data=f"rep:next")],
-        [InlineKeyboardButton(text="Админ меню", callback_data="admin_back")]
-    ])
+        [InlineKeyboardButton(text="❌ Отклонить", callback_data=f"rep:ignore:{report_id}")],
+    ]
+    
+    if total_count > 1:
+        nav_buttons = []
+        if current_index > 0:
+            nav_buttons.append(InlineKeyboardButton(text="◀️ Пред.", callback_data=f"rep:nav:prev:{current_index}"))
+        if current_index < total_count - 1:
+            nav_buttons.append(InlineKeyboardButton(text= "След. ▶️", callback_data=f"rep:nav:next:{current_index}"))
+        if nav_buttons:
+            buttons.append(nav_buttons)
+    
+    buttons.append([InlineKeyboardButton(text="🏠 Админ меню", callback_data="admin_back")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def admin_back_menu() -> InlineKeyboardMarkup:
     """Возврат в админ меню"""

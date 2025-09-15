@@ -6,7 +6,7 @@ def validate_profile_input(field: str, value, game: str = None) -> tuple[bool, s
     if field == 'name':
         if len(value) < 2 or len(value) > settings.MAX_NAME_LENGTH:
             return False, f"Имя должно быть от 2 до {settings.MAX_NAME_LENGTH} символов"
-        if len(value.split()) < 2:
+        if len(value.split()) != 2:
             return False, "Введите имя и фамилию"
 
     elif field == 'nickname':

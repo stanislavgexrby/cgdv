@@ -105,6 +105,8 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
         success = await db.add_report(user_id, target_user_id, game)
 
         if success:
+            await db._clear_pattern_cache(f"search:{user_id}:{game}:*")
+
             text = "Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время."
             keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
                 [kb.InlineKeyboardButton(text="Продолжить поиск", callback_data="continue_search")],

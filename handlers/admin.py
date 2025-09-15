@@ -134,10 +134,10 @@ async def show_admin_reports(callback: CallbackQuery, db):
         await callback.answer()
         return
 
-    await _show_report(callback, reports[0], db)
+    await _show_report(callback, reports[0], 0, len(reports), db)
 
-async def _show_report(callback: CallbackQuery, report: dict, db):
-    """Показ отдельной жалобы"""
+async def _show_report(callback: CallbackQuery, report: dict, current_index: int, total_reports: int, db):
+    """Показ отдельной жалобы с индексом"""
     report_id = report['id']
     reported_user_id = report['reported_user_id']
     game = report.get('game', 'dota')
@@ -148,9 +148,9 @@ async def _show_report(callback: CallbackQuery, report: dict, db):
     
     # Формируем текст
     header = (
-        f"🚩 Жалоба #{report_id} | {game_name}\n"
+        f"🚩 Жалоба #{report_id} ({current_index + 1}/{total_reports}) | {game_name}\n"
         f"📅 Дата: {_format_datetime(report.get('created_at'))}\n"
-        f"👤 Жалобщик: {report['reporter_id']}\n"
+        f"👤 Жалоба от: {report['reporter_id']}\n"
         f"🎯 На пользователя: {reported_user_id}\n"
         f"📋 Причина: {report.get('report_reason', 'inappropriate_content')}\n"
     )
@@ -161,30 +161,51 @@ async def _show_report(callback: CallbackQuery, report: dict, db):
         body = f"\n❌ Анкета пользователя {reported_user_id} не найдена"
     
     text = _truncate_text(header + body)
-    keyboard = kb.admin_report_actions(reported_user_id, report_id)
+    keyboard = kb.admin_report_actions(reported_user_id, report_id, current_index, total_reports)
     
-    # Отправляем с фото если есть
+    # Если есть фото - отправляем с фото, иначе используем safe_edit_message
     photo_id = profile.get('photo_id') if profile else None
     
     try:
         if photo_id:
-            media = InputMediaPhoto(media=photo_id, caption=text)
-            await callback.message.edit_media(media=media, reply_markup=keyboard)
+            # Удаляем старое сообщение и отправляем новое с фото
+            await callback.message.delete()
+            await callback.message.answer_photo(
+                photo=photo_id,
+                caption=text,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
         else:
+            # Используем safe_edit_message для текстовых сообщений
             await safe_edit_message(callback, text, keyboard)
-    except Exception:
-        # Fallback для случаев несовместимости типов сообщений
-        try:
-            if photo_id:
-                await callback.message.delete()
-                await callback.message.answer_photo(photo_id, caption=text, reply_markup=keyboard)
-            else:
-                await safe_edit_message(callback, text, keyboard)
-        except Exception as e:
-            logger.error(f"Ошибка показа жалобы: {e}")
-            await safe_edit_message(callback, text, keyboard)
+    except Exception as e:
+        logger.error(f"Ошибка показа жалобы: {e}")
+        # Fallback: всегда пытаемся отправить как текст
+        await safe_edit_message(callback, text, keyboard)
     
     await callback.answer()
+
+@router.callback_query(F.data.startswith("rep:nav:"))
+@admin_only
+async def navigate_reports(callback: CallbackQuery, db):
+    """Навигация по жалобам"""
+    parts = callback.data.split(":")
+    if len(parts) < 3:
+        return
+        
+    direction = parts[2]  # prev или next
+    current_index = int(parts[3]) if len(parts) > 3 else 0
+    
+    reports = await db.get_pending_reports()
+    
+    if direction == "next" and current_index + 1 < len(reports):
+        await _show_report(callback, reports[current_index + 1], current_index + 1, len(reports), db)
+    elif direction == "prev" and current_index > 0:
+        await _show_report(callback, reports[current_index - 1], current_index - 1, len(reports), db)
+    else:
+        message = "Это последняя жалоба" if direction == "next" else "Это первая жалоба"
+        await callback.answer(message, show_alert=True)
 
 @router.callback_query(F.data.startswith("rep:"))
 @admin_only
@@ -288,7 +309,7 @@ async def _show_next_report(callback: CallbackQuery, db):
         await safe_edit_message(callback, text, kb.admin_back_menu())
         return
     
-    await _show_report(callback, reports[0], db)
+    await _show_report(callback, reports[0], 0, len(reports), db)
 
 # ==================== БАНЫ ====================
 

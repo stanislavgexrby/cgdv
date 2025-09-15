@@ -119,11 +119,11 @@ async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
 
     keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
         [
-            kb.InlineKeyboardButton(text="❤️ Лайк в ответ", callback_data=f"loves_back_{profile['telegram_id']}_{index}"),
-            kb.InlineKeyboardButton(text="👎 Пропустить", callback_data=f"loves_skip_{profile['telegram_id']}_{index}")
+            kb.InlineKeyboardButton(text="Лайк в ответ", callback_data=f"loves_back_{profile['telegram_id']}_{index}"),
+            kb.InlineKeyboardButton(text="Пропустить", callback_data=f"loves_skip_{profile['telegram_id']}_{index}")
         ],
-        [kb.InlineKeyboardButton(text="🚩 Пожаловаться", callback_data=f"loves_report_{profile['telegram_id']}_{index}")],
-        [kb.InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        [kb.InlineKeyboardButton(text="Пожаловаться", callback_data=f"loves_report_{profile['telegram_id']}_{index}")],
+        [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
     ])
 
     await show_profile_with_photo(callback, profile, text, keyboard)
