@@ -162,7 +162,7 @@ def _format_expire_date(expires_at: str | datetime) -> str:
 def get_main_menu_text(game: str, has_profile: bool) -> str:
     """Генерация текста главного меню"""
     game_name = settings.GAMES.get(game, game)
-    text = f"Главное меню\n\nИгра: {game_name}"
+    text = f"<b>Главное меню</b>\n\nИгра: {game_name}"
 
     if has_profile:
         text += "\n\nВыберите действие:"
