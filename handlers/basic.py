@@ -172,7 +172,6 @@ async def cmd_start(message: Message, db):
     user_id = message.from_user.id
     logger.info(f"Пользователь {user_id} запустил бота")
 
-    # Проверяем бан в самом начале
     if await db.is_user_banned(user_id):
         ban_info = await db.get_user_ban(user_id)
         if ban_info:
@@ -188,16 +187,7 @@ async def cmd_start(message: Message, db):
         await message.answer(text, parse_mode='HTML')
         return
 
-    user = await db.get_user(user_id)
-
-    if user and user.get('current_game'):
-        game = user['current_game']
-        profile = await db.get_user_profile(user_id, game)
-        has_profile = profile is not None
-        text = get_main_menu_text(game, has_profile)
-        await message.answer(text, reply_markup=kb.main_menu(has_profile, game), parse_mode='HTML')
-    else:
-        await message.answer(texts.WELCOME, reply_markup=kb.game_selection(), parse_mode='HTML')
+    await message.answer(texts.WELCOME, reply_markup=kb.game_selection(), parse_mode='HTML')
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):

@@ -7,8 +7,8 @@ import config.settings as settings
 def game_selection() -> InlineKeyboardMarkup:
     """Выбор игры при старте"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎮 Dota 2", callback_data="game_dota")],
-        [InlineKeyboardButton(text="🔫 CS2", callback_data="game_cs")]
+        [InlineKeyboardButton(text="Dota 2", callback_data="game_dota")],
+        [InlineKeyboardButton(text="CS2", callback_data="game_cs")]
     ])
 
 def main_menu(has_profile: bool = False, current_game: str = None) -> InlineKeyboardMarkup:
@@ -20,15 +20,12 @@ def main_menu(has_profile: bool = False, current_game: str = None) -> InlineKeyb
             [InlineKeyboardButton(text="Поиск", callback_data="search")],
             [InlineKeyboardButton(text="Моя анкета", callback_data="view_profile")],
             [InlineKeyboardButton(text="Лайки", callback_data="my_likes")],
-            [InlineKeyboardButton(text="Мэтчи", callback_data="my_matches")]
+            [InlineKeyboardButton(text="Матчи", callback_data="my_matches")]
         ])
     else:
         buttons.append([InlineKeyboardButton(text="Создать анкету", callback_data="create_profile")])
 
-    if current_game:
-        other_game = "cs" if current_game == "dota" else "dota"
-        other_name = settings.GAMES[other_game]
-        buttons.append([InlineKeyboardButton(text=f"Переключить на {other_name}", callback_data=f"switch_{other_game}")])
+    buttons.append([InlineKeyboardButton(text="Сменить игру", callback_data="back_to_games")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
