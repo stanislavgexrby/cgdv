@@ -20,7 +20,7 @@ logger = logging.getLogger(__name__)
 async def on_startup(bot: Bot):
     await bot.delete_webhook(drop_pending_updates=True)
     try:
-        await bot.send_message(ADMIN_ID, "🚀 Бот запущен и готов к работе")
+        await bot.send_message(ADMIN_ID, "Бот запущен и готов к работе")
         logger.info("Отправлено сообщение админу о старте")
     except Exception as e:
         logger.warning(
@@ -37,7 +37,7 @@ async def main():
     bot = Bot(token=token)
     dp = Dispatcher(storage=MemoryStorage())
 
-    logger.info("🔄 Инициализация базы данных PostgreSQL + Redis...")
+    logger.info("Инициализация базы данных PostgreSQL + Redis...")
     db = Database()
     await db.init()
     logger.info("✅ База данных инициализирована")
@@ -52,12 +52,12 @@ async def main():
     try:
         await dp.start_polling(bot)
     except (asyncio.CancelledError, KeyboardInterrupt):
-        logger.info("🛑 Остановка поллинга по запросу пользователя/ОС")
+        logger.info("Остановка поллинга по запросу пользователя/ОС")
     finally:
         await wait_all_notifications()
         await db.close()
         await bot.session.close()
-        logger.info("👋 CGDV остановлен")
+        logger.info("CG TeamUp остановлен")
 
 if __name__ == "__main__":
     try:
