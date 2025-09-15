@@ -1,2 +1,4 @@
 # cgdv
-Use ```python install.py``` and follow the instructions
+Use ```pip install -r requirements.txt``` and then ```docker-compose up -d```.\n
+
+To run the project use ```python main.py```
