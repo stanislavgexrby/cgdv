@@ -179,6 +179,18 @@ async def edit_age(callback: CallbackQuery, state: FSMContext, db):
     await safe_edit_message(callback, "Введите новый возраст:", kb.cancel_edit())
     await callback.answer()
 
+@router.callback_query(F.data == "rating_any", EditProfileForm.edit_rating)
+async def edit_rating_any(callback: CallbackQuery, state: FSMContext, db):
+    success = await update_profile_field(callback.from_user.id, 'rating', 'any', db)
+    await state.clear()
+    await update_user_activity(callback.from_user.id, 'available', db)
+    
+    if success:
+        await safe_edit_message(callback, "Рейтинг обновлён на 'Любой'!", kb.back_to_editing())
+    else:
+        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
+    await callback.answer()
+
 @router.callback_query(F.data == "edit_rating")
 @check_ban_and_profile()
 async def edit_rating(callback: CallbackQuery, state: FSMContext, db):
@@ -186,7 +198,19 @@ async def edit_rating(callback: CallbackQuery, state: FSMContext, db):
     user = await db.get_user(user_id)
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_rating)
-    await safe_edit_message(callback, "Выберите новый рейтинг:", kb.ratings(user['current_game'], for_profile=False, with_cancel=True))
+    await safe_edit_message(callback, "Выберите новый рейтинг:", kb.ratings(user['current_game'], for_profile=True, with_cancel=True))
+    await callback.answer()
+
+@router.callback_query(F.data == "region_any", EditProfileForm.edit_region)
+async def edit_region_any(callback: CallbackQuery, state: FSMContext, db):
+    success = await update_profile_field(callback.from_user.id, 'region', 'any', db)
+    await state.clear()
+    await update_user_activity(callback.from_user.id, 'available', db)
+    
+    if success:
+        await safe_edit_message(callback, "Регион обновлён на 'Любой'!", kb.back_to_editing())
+    else:
+        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
     await callback.answer()
 
 @router.callback_query(F.data == "edit_region")
@@ -196,7 +220,39 @@ async def edit_region(callback: CallbackQuery, state: FSMContext, db):
     user = await db.get_user(user_id)
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_region)
-    await safe_edit_message(callback, "Выберите новый регион:", kb.regions(for_profile=False, with_cancel=True))
+    await safe_edit_message(callback, "Выберите новый регион:", kb.regions(for_profile=True, with_cancel=True))
+    await callback.answer()
+
+@router.callback_query(F.data == "pos_add_any", EditProfileForm.edit_positions)
+async def edit_add_any_position(callback: CallbackQuery, state: FSMContext):
+    """Добавление 'любой позиции' при редактировании"""
+    data = await state.get_data()
+    game = data['game']
+    
+    # Устанавливаем только "any"
+    await state.update_data(positions_selected=["any"])
+    
+    # Обновляем клавиатуру
+    keyboard = kb.positions(game, ["any"], for_profile=True, editing=True)
+    await callback.message.edit_reply_markup(reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data == "pos_remove_any", EditProfileForm.edit_positions)
+async def edit_remove_any_position(callback: CallbackQuery, state: FSMContext):
+    """Удаление 'любой позиции' при редактировании"""
+    data = await state.get_data()
+    game = data['game']
+    
+    # Убираем "any"
+    selected = data.get('positions_selected', [])
+    if "any" in selected:
+        selected.remove("any")
+    
+    await state.update_data(positions_selected=selected)
+    
+    # Обновляем клавиатуру
+    keyboard = kb.positions(game, selected, for_profile=True, editing=True)
+    await callback.message.edit_reply_markup(reply_markup=keyboard)
     await callback.answer()
 
 @router.callback_query(F.data == "edit_positions")
@@ -218,7 +274,7 @@ async def edit_positions(callback: CallbackQuery, state: FSMContext, db):
     await safe_edit_message(
         callback,
         "Выберите новые позиции (можно несколько):",
-        kb.positions(user['current_game'], current_positions, for_profile=False, editing=True)
+        kb.positions(user['current_game'], current_positions, for_profile=True, editing=True)
     )
     await callback.answer()
 
@@ -442,6 +498,35 @@ async def edit_remove_position(callback: CallbackQuery, state: FSMContext):
         await state.update_data(positions_selected=selected)
 
     await callback.message.edit_reply_markup(reply_markup=kb.positions(game, selected, for_profile=False, editing=True))
+    await callback.answer()
+
+@router.callback_query(F.data == "pos_save_edit", EditProfileForm.edit_positions)
+async def save_edit_positions(callback: CallbackQuery, state: FSMContext, db):
+    """Сохранение изменений позиций при редактировании"""
+    data = await state.get_data()
+    selected = data.get('positions_selected', [])
+    original = data.get('original_positions', [])
+
+    if not selected:
+        await callback.answer("Выберите хотя бы одну позицию", show_alert=True)
+        return
+
+    if set(selected) == set(original):
+        await callback.answer("Позиции не изменились")
+        await state.clear()
+        await safe_edit_message(callback, "Позиции остались прежними", kb.back_to_editing())
+        return
+
+    success = await update_profile_field(callback.from_user.id, 'positions', selected, db)
+    await state.clear()
+
+    await update_user_activity(callback.from_user.id, 'available', db)
+
+    if success:
+        await safe_edit_message(callback, "Позиции обновлены!", kb.back_to_editing())
+    else:
+        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
+
     await callback.answer()
 
 @router.callback_query(F.data == "pos_done", EditProfileForm.edit_positions)
