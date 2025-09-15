@@ -257,8 +257,9 @@ async def notify_user_banned(bot: Bot, user_id: int, expires_at: datetime) -> bo
         try:
             formatted_date = expires_at.strftime("%d.%m.%Y %H:%M (UTC)")
             text = (f"Вы заблокированы до {formatted_date} за нарушение правил сообщества.\n\n"
-                    f"Во время блокировки вы не можете использовать бота.")
-            
+                    f"Во время блокировки вы не можете использовать бота.\n\n"
+                    f"Если Вы не согласны с решением, обратитесь в поддержку.")
+
             return await smart_notification(bot, user_id, text, None, None, None)
 
         except Exception as e:
