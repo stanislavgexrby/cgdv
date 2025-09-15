@@ -260,10 +260,13 @@ def skip_info() -> InlineKeyboardMarkup:
         ]
     ])
 
-def cancel_profile_creation() -> InlineKeyboardMarkup:
-    """Отмена создания профиля"""
+def confirm_cancel_profile() -> InlineKeyboardMarkup:
+    """Подтверждение отмены создания профиля"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
+        [
+            InlineKeyboardButton(text="✅ Да, отменить", callback_data="confirm_cancel"),
+            InlineKeyboardButton(text="❌ Нет, продолжить", callback_data="continue_profile")
+        ]
     ])
 
 # ==================== РЕДАКТИРОВАНИЕ ПРОФИЛЕЙ ====================

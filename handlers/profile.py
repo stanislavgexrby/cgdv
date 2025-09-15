@@ -72,8 +72,6 @@ async def save_profile_universal(user_id: int, data: dict, photo_id: str = None,
 
     return success
 
-# Добавить в handlers/profile.py в функцию get_step_question_text
-
 async def get_step_question_text(step: ProfileStep, data: dict = None, show_current: bool = False) -> str:
     """Получить текст вопроса для шага"""
     if show_current and data:
@@ -92,13 +90,11 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
                 game = data.get('game', 'dota')
                 rating_name = settings.RATINGS[game].get(current, current)
                 return f"Текущий рейтинг: <b>{rating_name}</b>\n\nВыберите новый рейтинг или продолжите с текущим:"
-            return "Выберите рейтинг:"
         elif step == ProfileStep.REGION:
             current = data.get('region', '')
             if current:
                 region_name = settings.REGIONS.get(current, current)
                 return f"Текущий регион: <b>{region_name}</b>\n\nВыберите новый регион или продолжите с текущим:"
-            return "Выберите регион:"
         elif step == ProfileStep.POSITIONS:
             current = data.get('positions_selected', [])
             if current:
@@ -109,7 +105,6 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
                     position_names = [settings.POSITIONS[game].get(pos, pos) for pos in current]
                     pos_text = ", ".join(position_names)
                 return f"Текущие позиции: <b>{pos_text}</b>\n\nИзмените выбор или продолжите с текущими:"
-            return "Выберите позиции (можно несколько):"
         elif step == ProfileStep.INFO:
             current = data.get('additional_info', '')
             if current:
@@ -123,7 +118,6 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
             else:
                 return "Фото не загружено.\n\nОтправьте фото или нажмите 'Продолжить':"
     
-    # Обычные вопросы
     if step == ProfileStep.NAME:
         return texts.QUESTIONS['name']
     elif step == ProfileStep.NICKNAME:
@@ -131,14 +125,7 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
     elif step == ProfileStep.AGE:
         return texts.QUESTIONS['age']
     elif step == ProfileStep.INFO:
-        if 'additional_info' in data:
-            current = data.get('additional_info', '')
-            if current:
-                return f"Текущее описание: <b>{current}</b>\n\nВведите новое описание или нажмите 'Продолжить':"
-            else:
-                return "Описание было пропущено.\n\nВведите описание или нажмите 'Продолжить':"
-        else:
-            return "Введите описание или нажмите 'Пропустить':"
+        return "Введите описание или нажмите 'Пропустить':"
     elif step == ProfileStep.PHOTO:
         return texts.QUESTIONS['photo']
     elif step == ProfileStep.RATING:
@@ -175,12 +162,13 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
     
     await state.update_data(current_step=step.value)
     
-    question_text = await get_step_question_text(step, data, show_current and has_data)
+    show_existing_data = has_data and show_current
+    question_text = await get_step_question_text(step, data, show_existing_data)
     
     game_name = settings.GAMES.get(game, game)
     text = f"Создание анкеты для {game_name}\n\n{question_text}"
     
-    show_continue_button = has_data and (show_current or not show_current)  # Всегда показываем если есть данные
+    show_continue_button = show_existing_data
     
     if step == ProfileStep.NAME:
         await state.set_state(ProfileForm.name)
@@ -196,23 +184,23 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
         
     elif step == ProfileStep.RATING:
         await state.set_state(ProfileForm.rating)
-        current_rating = data.get('rating') if has_data else None
+        current_rating = data.get('rating') if show_existing_data else None
         keyboard = kb.ratings(game, selected_rating=current_rating, with_navigation=True)
         
     elif step == ProfileStep.REGION:
         await state.set_state(ProfileForm.region)
-        current_region = data.get('region') if has_data else None
+        current_region = data.get('region') if show_existing_data else None
         keyboard = kb.regions(selected_region=current_region, with_navigation=True)
         
     elif step == ProfileStep.POSITIONS:
         await state.set_state(ProfileForm.positions)
-        selected = data.get('positions_selected', []) if has_data else []
+        selected = data.get('positions_selected', []) if show_existing_data else []
         keyboard = kb.positions(game, selected=selected, with_navigation=True)
 
     elif step == ProfileStep.INFO:
         await state.set_state(ProfileForm.additional_info)
-        if has_data:
-            keyboard = kb.profile_creation_navigation(step.value, has_data)
+        if show_continue_button:
+            keyboard = kb.profile_creation_navigation(step.value, show_continue_button)
         else:
             keyboard = kb.skip_info()
 
@@ -810,10 +798,21 @@ async def skip_photo(callback: CallbackQuery, state: FSMContext, db):
     await save_profile_flow_callback(callback, state, None, db)
 
 @router.callback_query(F.data == "cancel")
-async def cancel_profile(callback: CallbackQuery, state: FSMContext, db):
-    """Отмена создания профиля"""
+async def confirm_cancel_profile(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение отмены создания профиля"""
     data = await state.get_data()
+    game_name = settings.GAMES.get(data.get('game', 'dota'), 'игры')
     
+    text = (f"Отменить создание анкеты?\n\n"
+            f"Вся введенная информация для {game_name} будет потеряна.\n\n"
+            f"Вы уверены?")
+    
+    await safe_edit_message(callback, text, kb.confirm_cancel_profile())
+    await callback.answer()
+
+@router.callback_query(F.data == "confirm_cancel")
+async def cancel_profile_confirmed(callback: CallbackQuery, state: FSMContext, db):
+    """Подтвержденная отмена создания профиля"""
     await state.clear()
     
     user_id = callback.from_user.id
@@ -832,6 +831,42 @@ async def cancel_profile(callback: CallbackQuery, state: FSMContext, db):
         await safe_edit_message(callback, "Создание анкеты отменено", kb.back())
     
     await callback.answer("Создание анкеты отменено")
+
+@router.callback_query(F.data == "continue_profile")
+async def continue_profile_creation(callback: CallbackQuery, state: FSMContext):
+    """Продолжить создание профиля"""
+    data = await state.get_data()
+    current_step = data.get('current_step', ProfileStep.NAME.value)
+    
+    try:
+        current_step_enum = ProfileStep(current_step)
+        
+        # Проверяем есть ли данные для ТЕКУЩЕГО шага
+        has_current_data = False
+        if current_step_enum == ProfileStep.NAME and data.get('name'):
+            has_current_data = True
+        elif current_step_enum == ProfileStep.NICKNAME and data.get('nickname'):
+            has_current_data = True
+        elif current_step_enum == ProfileStep.AGE and data.get('age'):
+            has_current_data = True
+        elif current_step_enum == ProfileStep.RATING and data.get('rating'):
+            has_current_data = True
+        elif current_step_enum == ProfileStep.REGION and data.get('region'):
+            has_current_data = True
+        elif current_step_enum == ProfileStep.POSITIONS and data.get('positions_selected'):
+            has_current_data = True
+        elif current_step_enum == ProfileStep.INFO and 'additional_info' in data:
+            has_current_data = True
+        elif current_step_enum == ProfileStep.PHOTO and data.get('photo_id'):
+            has_current_data = True
+        
+        await show_profile_step(callback, state, current_step_enum, show_current=has_current_data)
+        
+    except Exception as e:
+        logger.error(f"Ошибка возврата к созданию профиля: {e}")
+        await show_profile_step(callback, state, ProfileStep.NAME)
+    
+    await callback.answer("Продолжаем создание анкеты")
 
 # ==================== СОХРАНЕНИЕ ПРОФИЛЯ ====================
 
