@@ -1,0 +1,27 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: teammates_postgres
+    environment:
+      POSTGRES_DB: teammates
+      POSTGRES_USER: teammates_user
+      POSTGRES_PASSWORD: your_secure_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: teammates_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:

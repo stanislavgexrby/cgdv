@@ -11,13 +11,14 @@ def register_handlers(dp: Dispatcher):
         return
 
     try:
-        from . import basic, profile, search, likes, profile_editing
+        from . import basic, profile, search, likes, profile_editing, admin
 
         dp.include_router(basic.router)
         dp.include_router(profile.router)
         dp.include_router(profile_editing.router)
         dp.include_router(search.router)
         dp.include_router(likes.router)
+        dp.include_router(admin.router)
 
         register_handlers._registered = True
         logger.info("✅ Все handlers зарегистрированы")
