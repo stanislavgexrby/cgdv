@@ -6,7 +6,6 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
 
     game = user.get('current_game') or user.get('game', 'dota')
 
-    # Разбиваем имя на части для правильного форматирования
     name_parts = user['name'].split()
     if len(name_parts) >= 2:
         first_name = name_parts[0]
@@ -17,13 +16,12 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
         else:
             text = f"{first_name} <b>{user['nickname']}</b> {last_name}, {user['age']} лет\n\n"
     else:
-        # Если только одно имя
         text = f"<b>{user['name']}</b> <b>{user['nickname']}</b>, {user['age']} лет\n\n"
 
-    # Рейтинг
+# Рейтинг
     rating = user['rating']
     if rating == 'any':
-        rating_text = f"<b>Рейтинг:</b> Любой"
+        rating_text = f"<b>Рейтинг:</b> Не указан"
     elif rating in settings.RATINGS.get(game, {}):
         rating_desc = settings.RATINGS[game][rating]
         rating_text = f"<b>Рейтинг:</b> {rating_desc}"
@@ -35,7 +33,7 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
     # Позиция
     if user['positions']:
         if 'any' in user['positions']:
-            text += f"<b>Позиция:</b> Любая\n"
+            text += f"<b>Позиция:</b> Не указана\n"
         else:
             positions_text = []
             for pos in user['positions']:
@@ -48,7 +46,7 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
     # Цели
     if user.get('goals'):
         if 'any' in user['goals']:
-            text += f"<b>Цель:</b> Любая\n"
+            text += f"<b>Цель:</b> Не указана\n"
         else:
             goals_text = []
             for goal in user['goals']:
@@ -61,7 +59,7 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
     # Регион
     region = user.get('region', '')
     if region == 'any':
-        text += f"<b>Регион:</b> Любой\n"
+        text += f"<b>Регион:</b> Не указан\n"
     elif region and region in settings.REGIONS:
         text += f"<b>Регион:</b> {settings.REGIONS[region]}\n"
 

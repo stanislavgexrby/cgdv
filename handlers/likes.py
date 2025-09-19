@@ -152,14 +152,14 @@ async def _show_matches_internal(callback: CallbackQuery, user_id: int, game: st
 
     if not matches:
         text = f"У вас пока нет матчей в {game_name}\n\n"
-        text += "Чтобы получить мэтчи:\n"
+        text += "Чтобы получить матчи:\n"
         text += "• Лайкайте анкеты в поиске\n"
         text += "• Отвечайте на лайки других игроков"
 
         await show_empty_state(callback, text)
         return
 
-    text = f"Ваши мэтчи в {game_name} ({len(matches)}):\n\n"
+    text = f"Ваши матчи в {game_name} ({len(matches)}):\n\n"
     for i, match in enumerate(matches, 1):
         name = match['name']
         username = match.get('username', 'нет username')
@@ -397,18 +397,18 @@ async def report_like(callback: CallbackQuery, db):
     report_added = await db.add_report(user_id, target_user_id, game)
 
     if report_added:
-        if settings.ADMIN_ID and settings.ADMIN_ID != 0:
+        await callback.answer("Жалоба отправлена модератору")
+        logger.info(f"Жалоба на лайк: {user_id} пожаловался на {target_user_id}")
+
+        for admin_id in settings.ADMIN_IDS:
             try:
                 await callback.bot.send_message(
-                    settings.ADMIN_ID,
+                    admin_id,
                     f"🚩 Новая жалоба!\n\nПользователь {user_id} пожаловался на лайк от {target_user_id} в игре {settings.GAMES.get(game, game)}",
                     parse_mode='HTML'
                 )
             except Exception as e:
-                logger.error(f"Ошибка отправки уведомления админу: {e}")
-
-        await callback.answer("Жалоба отправлена модератору")
-        logger.info(f"Жалоба на лайк: {user_id} пожаловался на {target_user_id}")
+                logger.error(f"Ошибка отправки уведомления админу {admin_id}: {e}")
     else:
         await callback.answer("Вы уже жаловались на этого пользователя", show_alert=True)
         return

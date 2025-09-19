@@ -287,8 +287,8 @@ async def notify_user_unbanned(bot: Bot, user_id: int) -> bool:
 # ==================== УВЕДОМЛЕНИЯ АДМИНА ====================
 
 async def notify_admin_new_report(bot: Bot, reporter_id: int, reported_user_id: int, game: str) -> bool:
-    """Уведомление админа о новой жалобе"""
-    if not settings.ADMIN_ID or settings.ADMIN_ID == 0:
+    """Уведомление всех админов о новой жалобе"""
+    if not settings.ADMIN_IDS:
         return False
 
     try:
@@ -296,13 +296,21 @@ async def notify_admin_new_report(bot: Bot, reporter_id: int, reported_user_id: 
         text = (f"🚩 Новая жалоба!\n\n"
                 f"Пользователь {reporter_id} пожаловался на анкету {reported_user_id} "
                 f"в игре {game_name}")
-        # Админские уведомления без кнопки OK
-        success = await safe_send_notification(bot, settings.ADMIN_ID, text, add_ok_button=False)
-        if success:
-            logger.info("📨 Уведомление админу о жалобе отправлено")
-        return success
+
+        success_count = 0
+        for admin_id in settings.ADMIN_IDS:
+            success = await safe_send_notification(bot, admin_id, text, add_ok_button=False)
+            if success:
+                success_count += 1
+
+        if success_count > 0:
+            logger.info(f"📨 Уведомление о жалобе отправлено {success_count} админам")
+            return True
+        else:
+            logger.warning("Не удалось отправить уведомление ни одному админу")
+            return False
     except Exception as e:
-        logger.error(f"Ошибка отправки уведомления админу: {e}")
+        logger.error(f"Ошибка отправки уведомления админам: {e}")
         return False
 
 # ==================== СЛУЖЕБНЫЕ ФУНКЦИИ ====================

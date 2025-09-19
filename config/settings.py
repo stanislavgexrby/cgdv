@@ -103,8 +103,7 @@ REGIONS = {
 }
 
 GOALS = {
+    "publics": "Паблики",
     "tournaments": "Турниры",
-    "casual": "Игра не на рейтинг", 
-    "ranked": "Игра на рейтинг",
-    "communication": "Общение"
+    "communication": "Общение",
 }

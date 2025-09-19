@@ -29,28 +29,29 @@ async def update_filter_display(callback: CallbackQuery, state: FSMContext, mess
         rating_name = settings.RATINGS[game].get(rating_filter, rating_filter)
         filters_text.append(f"<b>Рейтинг:</b> {rating_name}")
     else:
-        filters_text.append("<b>Рейтинг:</b> любой")
+        filters_text.append("<b>Рейтинг:</b> не указан")
 
     position_filter = data.get('position_filter')
     if position_filter:
         position_name = settings.POSITIONS[game].get(position_filter, position_filter)
         filters_text.append(f"<b>Позиция:</b> {position_name}")
     else:
-        filters_text.append("<b>Позиция:</b> любая")
+        filters_text.append("<b>Позиция:</b> не указана")
 
     region_filter = data.get('region_filter')
     if region_filter:
         region_name = settings.REGIONS.get(region_filter, region_filter)
         filters_text.append(f"<b>Регион:</b> {region_name}")
     else:
-        filters_text.append("<b>Регион:</b> любой")
+        filters_text.append("<b>Регион:</b> не указан")
 
     goals_filter = data.get('goals_filter')
     if goals_filter:
         goals_name = settings.GOALS.get(goals_filter, goals_filter)
         filters_text.append(f"<b>Цель:</b> {goals_name}")
     else:
-        filters_text.append("<b>Цель:</b> любая")
+        filters_text.append("<b>Цель:</b> не указана")
+
     text = f"Поиск в {game_name}\n\nФильтры:\n\n"
     text += "\n".join(filters_text)
     text += "\n\nНастройте фильтры или начните поиск:"
@@ -108,31 +109,47 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
         await show_next_profile(callback, state)
 
     elif action == "report":
-        success = await db.add_report(user_id, target_user_id, game)
+            success = await db.add_report(user_id, target_user_id, game)
 
-        if success:
-            await db._clear_pattern_cache(f"search:{user_id}:{game}:*")
+            if success:
+                await db._clear_pattern_cache(f"search:{user_id}:{game}:*")
 
-            text = "Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время."
-            keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
-                [kb.InlineKeyboardButton(text="Продолжить поиск", callback_data="continue_search")],
-                [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
-            ])
-            await safe_edit_message(callback, text, keyboard)
-            logger.info(f"Жалоба добавлена: {user_id} пожаловался на {target_user_id}")
-            await callback.answer("Жалоба отправлена")
+                text = "Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время."
+                keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+                    [kb.InlineKeyboardButton(text="Продолжить поиск", callback_data="continue_search")],
+                    [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+                ])
 
-            if settings.ADMIN_ID and settings.ADMIN_ID != 0:
+                try:
+                    await callback.message.delete()
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить сообщение при жалобе: {e}")
+
                 try:
                     await callback.bot.send_message(
-                        settings.ADMIN_ID,
-                        f"Новая жалоба!\n\nПользователь {user_id} пожаловался на анкету {target_user_id} в игре {settings.GAMES.get(game, game)}",
+                        chat_id=callback.message.chat.id,
+                        text=text,
+                        reply_markup=keyboard,
                         parse_mode='HTML'
                     )
                 except Exception as e:
-                    logger.error(f"Ошибка отправки уведомления админу: {e}")
-        else:
-            await callback.answer("Вы уже жаловались на эту анкету", show_alert=True)
+                    logger.error(f"Ошибка отправки сообщения о жалобе: {e}")
+                    await safe_edit_message(callback, text, keyboard)
+
+                logger.info(f"Жалоба добавлена: {user_id} пожаловался на {target_user_id}")
+                await callback.answer("Жалоба отправлена")
+
+                for admin_id in settings.ADMIN_IDS:
+                    try:
+                        await callback.bot.send_message(
+                            admin_id,
+                            f"Новая жалоба!\n\nПользователь {user_id} пожаловался на анкету {target_user_id} в игре {settings.GAMES.get(game, game)}",
+                            parse_mode='HTML'
+                        )
+                    except Exception as e:
+                        logger.error(f"Ошибка отправки уведомления админу {admin_id}: {e}")
+            else:
+                await callback.answer("Вы уже жаловались на эту анкету", show_alert=True)
 
 async def show_current_profile(callback: CallbackQuery, state: FSMContext):
     """Показ текущего профиля в поиске"""

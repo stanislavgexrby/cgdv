@@ -13,6 +13,7 @@ def main():
     load_dotenv()
     
     # Проверяем обязательные переменные
+# Проверяем обязательные переменные
     required_vars = {
         'BOT_TOKEN': 'Токен Telegram бота',
         'DB_HOST': 'Хост PostgreSQL',
@@ -21,7 +22,8 @@ def main():
         'DB_USER': 'Пользователь PostgreSQL',
         'DB_PASSWORD': 'Пароль PostgreSQL',
         'REDIS_HOST': 'Хост Redis',
-        'REDIS_PORT': 'Порт Redis'
+        'REDIS_PORT': 'Порт Redis',
+        'ADMIN_ID': 'ID админов (через запятую)'
     }
     
     print("Проверяем переменные окружения:")
@@ -34,7 +36,12 @@ def main():
             print(f"❌ {var}: НЕ УСТАНОВЛЕНА ({description})")
             all_ok = False
         else:
-            display_value = value
+            # Для ADMIN_ID показываем количество админов
+            if var == 'ADMIN_ID':
+                from config.settings import ADMIN_IDS
+                display_value = f"{len(ADMIN_IDS)} админ(а/ов)"
+            else:
+                display_value = value
             print(f"✅ {var}: {display_value}")
     
     print("-" * 30)

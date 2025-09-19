@@ -74,7 +74,7 @@ def admin_only(func):
     """Декоратор для проверки прав администратора"""
     @wraps(func)
     async def wrapper(callback: CallbackQuery, *args, **kwargs):
-        if callback.from_user.id != settings.ADMIN_ID:
+        if not settings.is_admin(callback.from_user.id):
             await callback.answer("Нет прав", show_alert=True)
             return
         return await func(callback, *args, **kwargs)
@@ -83,7 +83,7 @@ def admin_only(func):
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
 async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Optional[InlineKeyboardMarkup] = None):
-    """Безопасное редактирование сообщения"""
+    """Безопасное редактирование сообщения с обработкой ошибок"""
     try:
         message = callback.message
         has_photo = bool(message.photo)
@@ -97,6 +97,7 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
             return
 
         if has_photo:
+            # Для фото-сообщений всегда удаляем и создаем новое
             await message.delete()
             await callback.bot.send_message(
                 chat_id=message.chat.id,
@@ -106,6 +107,7 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
                 disable_web_page_preview=True
             )
         else:
+            # Для текстовых сообщений пытаемся отредактировать
             await message.edit_text(
                 text=text, 
                 reply_markup=reply_markup, 
@@ -114,11 +116,13 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
             )
 
     except Exception as e:
-        logger.error(f"Ошибка редактирования сообщения: {e}")
+        logger.warning(f"Ошибка редактирования сообщения: {e}")
+        # Универсальный fallback
         try:
             await callback.message.delete()
-        except:
-            pass
+        except Exception:
+            pass  # Сообщение уже удалено или недоступно
+        
         try:
             await callback.bot.send_message(
                 chat_id=callback.message.chat.id,
@@ -128,7 +132,12 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
                 disable_web_page_preview=True
             )
         except Exception as e2:
-            logger.error(f"Ошибка отправки нового сообщения: {e2}")
+            logger.error(f"Критическая ошибка отправки сообщения: {e2}")
+            # Последняя попытка через answer
+            try:
+                await callback.answer(f"Ошибка: {text[:100]}...", show_alert=True)
+            except Exception:
+                pass
 
 async def check_subscription(user_id: int, game: str, bot: Bot) -> bool:
     """Проверка подписки на канал"""
@@ -218,9 +227,12 @@ async def cmd_help(message: Message):
     await message.answer(help_text, parse_mode='HTML')
 
 @router.message(Command("admin"))
-@admin_only
 async def cmd_admin(message: Message):
-    await message.answer("Админ панель", reply_markup=kb.admin_main_menu(), parse_mode='HTML')
+    if not settings.is_admin(message.from_user.id):
+        await message.answer("❌ Нет прав доступа", parse_mode='HTML')
+        return
+
+    await message.answer("🔧 Админ панель", reply_markup=kb.admin_main_menu(), parse_mode='HTML')
 
 # ==================== ВЫБОР И ПЕРЕКЛЮЧЕНИЕ ИГР ====================
 
@@ -430,6 +442,8 @@ async def back_to_search_handler(callback: CallbackQuery, state: FSMContext, db)
         game=game,
         rating_filter=None,
         position_filter=None,
+        region_filter=None,
+        goals_filter=None,
         profiles=[],
         current_index=0,
         message_with_photo=False
@@ -438,8 +452,10 @@ async def back_to_search_handler(callback: CallbackQuery, state: FSMContext, db)
 
     game_name = settings.GAMES.get(game, game)
     text = f"Поиск в {game_name}\n\nФильтры:\n\n"
-    text += "<b>Рейтинг:</b> любой\n"
-    text += "<b>Позиция:</b> любая\n\n"
+    text += "<b>Рейтинг:</b> не указан\n"
+    text += "<b>Позиция:</b> не указана\n"
+    text += "<b>Регион:</b> не указан\n"
+    text += "<b>Цель:</b> не указана\n\n"
     text += "Настройте фильтры или начните поиск:"
 
     await safe_edit_message(callback, text, kb.search_filters())

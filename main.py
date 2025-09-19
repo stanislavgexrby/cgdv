@@ -8,7 +8,7 @@ from dotenv import load_dotenv, find_dotenv
 from handlers import register_handlers
 from handlers.notifications import wait_all_notifications
 from database.database import Database
-from config.settings import ADMIN_ID
+from config.settings import ADMIN_IDS
 from middleware.database import DatabaseMiddleware
 
 logging.basicConfig(
@@ -19,14 +19,23 @@ logger = logging.getLogger(__name__)
 
 async def on_startup(bot: Bot):
     await bot.delete_webhook(drop_pending_updates=True)
-    try:
-        await bot.send_message(ADMIN_ID, "Бот запущен и готов к работе")
-        logger.info("Отправлено сообщение админу о старте")
-    except Exception as e:
-        logger.warning(
-            f"Не удалось отправить сообщение админу: {e} "
-            f"(частая причина — админ не нажал Start у бота)"
-        )
+
+    # Отправляем сообщение всем админам
+    startup_success = []
+    for admin_id in ADMIN_IDS:
+        try:
+            await bot.send_message(admin_id, "🤖 Бот запущен и готов к работе")
+            startup_success.append(admin_id)
+        except Exception as e:
+            logger.warning(
+                f"Не удалось отправить сообщение админу {admin_id}: {e} "
+                f"(частая причина — админ не нажал Start у бота)"
+            )
+
+    if startup_success:
+        logger.info(f"Отправлены сообщения о старте админам: {startup_success}")
+    else:
+        logger.warning("Не удалось отправить сообщения ни одному админу")
 
 async def main():
     load_dotenv(find_dotenv(), override=True)
