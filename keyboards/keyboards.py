@@ -123,9 +123,9 @@ def ratings(game: str, selected_rating: str = None, with_navigation: bool = Fals
 
     if for_profile:
         if selected_rating == "any":
-            buttons.append([InlineKeyboardButton(text="✅ Любой рейтинг", callback_data="rating_remove_any")])
+            buttons.append([InlineKeyboardButton(text="✅ Не указан", callback_data="rating_remove_any")])
         else:
-            buttons.append([InlineKeyboardButton(text="Любой рейтинг", callback_data="rating_select_any")])
+            buttons.append([InlineKeyboardButton(text="Не указан", callback_data="rating_select_any")])
 
     if with_navigation:
         if selected_rating:
@@ -162,9 +162,9 @@ def regions(selected_region: str = None, with_navigation: bool = False,
 
     if for_profile:
         if selected_region == "any":
-            buttons.append([InlineKeyboardButton(text="✅ Любой регион", callback_data="region_remove_any")])
+            buttons.append([InlineKeyboardButton(text="✅ Не указан", callback_data="region_remove_any")])
         else:
-            buttons.append([InlineKeyboardButton(text="Любой регион", callback_data="region_select_any")])
+            buttons.append([InlineKeyboardButton(text="Не указан", callback_data="region_select_any")])
 
     if with_navigation:
         if selected_region:
@@ -205,9 +205,9 @@ def positions(game: str, selected: List[str] = None, with_navigation: bool = Fal
     # Кнопка "Любая позиция" (только для профиля)
     if for_profile or editing:
         if "any" in selected:
-            buttons.append([InlineKeyboardButton(text="✅ Любая позиция", callback_data="pos_remove_any")])
+            buttons.append([InlineKeyboardButton(text="✅ Не указана", callback_data="pos_remove_any")])
         else:
-            buttons.append([InlineKeyboardButton(text="Любая позиция", callback_data="pos_add_any")])
+            buttons.append([InlineKeyboardButton(text="Не указана", callback_data="pos_add_any")])
 
     # Кнопка готово
     if with_navigation:
@@ -258,9 +258,9 @@ def goals(selected: List[str] = None, with_navigation: bool = False,
     # Кнопка "Любая цель"
     if for_profile or editing:
         if "any" in selected:
-            buttons.append([InlineKeyboardButton(text="✅ Любая цель", callback_data="goals_remove_any")])
+            buttons.append([InlineKeyboardButton(text="✅ Не указана", callback_data="goals_remove_any")])
         else:
-            buttons.append([InlineKeyboardButton(text="Любая цель", callback_data="goals_add_any")])
+            buttons.append([InlineKeyboardButton(text="Не указана", callback_data="goals_add_any")])
 
     # Кнопка готово
     if with_navigation:

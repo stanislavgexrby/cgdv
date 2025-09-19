@@ -179,26 +179,17 @@ async def edit_age(callback: CallbackQuery, state: FSMContext, db):
     await safe_edit_message(callback, "Введите новый возраст:", kb.cancel_edit())
     await callback.answer()
 
-@router.callback_query(F.data == "rating_any", EditProfileForm.edit_rating)
-async def edit_rating_any(callback: CallbackQuery, state: FSMContext, db):
-    success = await update_profile_field(callback.from_user.id, 'rating', 'any', db)
-    await state.clear()
-    await update_user_activity(callback.from_user.id, 'available', db)
-    
-    if success:
-        await safe_edit_message(callback, "Рейтинг обновлён на 'Любой'!", kb.back_to_editing())
-    else:
-        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
-    await callback.answer()
-
 @router.callback_query(F.data == "edit_rating")
 @check_ban_and_profile()
 async def edit_rating(callback: CallbackQuery, state: FSMContext, db):
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
+    profile = await db.get_user_profile(user_id, user['current_game'])
+    current_rating = profile['rating'] if profile else None
+    
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_rating)
-    await safe_edit_message(callback, "Выберите новый рейтинг:", kb.ratings(user['current_game'], for_profile=True, with_cancel=True))
+    await safe_edit_message(callback, "Выберите новый рейтинг:", kb.ratings(user['current_game'], selected_rating=current_rating, for_profile=False, with_cancel=True))
     await callback.answer()
 
 @router.callback_query(F.data == "edit_profile_url")
@@ -223,26 +214,17 @@ async def edit_profile_url(callback: CallbackQuery, state: FSMContext, db):
     await safe_edit_message(callback, text, keyboard)
     await callback.answer()
 
-@router.callback_query(F.data == "region_any", EditProfileForm.edit_region)
-async def edit_region_any(callback: CallbackQuery, state: FSMContext, db):
-    success = await update_profile_field(callback.from_user.id, 'region', 'any', db)
-    await state.clear()
-    await update_user_activity(callback.from_user.id, 'available', db)
-    
-    if success:
-        await safe_edit_message(callback, "Регион обновлён на 'Любой'!", kb.back_to_editing())
-    else:
-        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
-    await callback.answer()
-
 @router.callback_query(F.data == "edit_region")
 @check_ban_and_profile()
 async def edit_region(callback: CallbackQuery, state: FSMContext, db):
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
+    profile = await db.get_user_profile(user_id, user['current_game'])
+    current_region = profile.get('region') if profile else None
+    
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_region)
-    await safe_edit_message(callback, "Выберите новый регион:", kb.regions(for_profile=True, with_cancel=True))
+    await safe_edit_message(callback, "Выберите новый регион:", kb.regions(selected_region=current_region, for_profile=False, with_cancel=True))
     await callback.answer()
 
 @router.callback_query(F.data == "pos_add_any", EditProfileForm.edit_positions)
@@ -294,7 +276,7 @@ async def edit_positions(callback: CallbackQuery, state: FSMContext, db):
     await safe_edit_message(
         callback,
         "Выберите новые позиции (можно несколько):",
-        kb.positions(user['current_game'], current_positions, for_profile=True, editing=True)
+        kb.positions(user['current_game'], current_positions, for_profile=False, editing=True)
     )
     await callback.answer()
 
@@ -317,7 +299,7 @@ async def edit_goals(callback: CallbackQuery, state: FSMContext, db):
     await safe_edit_message(
         callback,
         "Выберите новые цели (можно несколько):",
-        kb.goals(current_goals, for_profile=True, editing=True)
+        kb.goals(current_goals, for_profile=False, editing=True)
     )
     await callback.answer()
 
@@ -512,14 +494,32 @@ async def wrong_edit_photo_format(message: Message):
 
 @router.callback_query(F.data.startswith("rating_"), EditProfileForm.edit_rating)
 async def process_edit_rating(callback: CallbackQuery, state: FSMContext, db):
-    rating = callback.data.split("_")[1]
+    parts = callback.data.split("_")
+    
+    if len(parts) >= 3 and parts[1] == "select":
+        # rating_select_herald -> выбираем herald
+        rating = parts[2]
+    elif len(parts) >= 3 and parts[1] == "remove":
+        # rating_remove_herald -> при редактировании игнорируем (не меняем рейтинг)
+        await callback.answer("Этот рейтинг уже выбран")
+        return
+    elif len(parts) >= 2:
+        # rating_herald -> выбираем herald (старый формат, если есть)
+        rating = parts[1]
+    else:
+        await callback.answer("Ошибка данных", show_alert=True)
+        return
+        
     success = await update_profile_field(callback.from_user.id, 'rating', rating, db)
     await state.clear()
 
     await update_user_activity(callback.from_user.id, 'available', db)
 
     if success:
-        await safe_edit_message(callback, "Рейтинг обновлён!", kb.back_to_editing())
+        if rating == 'any':
+            await safe_edit_message(callback, "Рейтинг обновлён на 'Не указан'!", kb.back_to_editing())
+        else:
+            await safe_edit_message(callback, "Рейтинг обновлён!", kb.back_to_editing())
     else:
         await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
 
@@ -527,14 +527,32 @@ async def process_edit_rating(callback: CallbackQuery, state: FSMContext, db):
 
 @router.callback_query(F.data.startswith("region_"), EditProfileForm.edit_region)
 async def process_edit_region(callback: CallbackQuery, state: FSMContext, db):
-    region = callback.data.split("_")[1]
+    parts = callback.data.split("_")
+    
+    if len(parts) >= 3 and parts[1] == "select":
+        # region_select_eeu -> выбираем eeu
+        region = parts[2]
+    elif len(parts) >= 3 and parts[1] == "remove":
+        # region_remove_eeu -> при редактировании игнорируем (не меняем регион)
+        await callback.answer("Этот регион уже выбран")
+        return
+    elif len(parts) >= 2:
+        # region_eeu -> выбираем eeu (старый формат, если есть)
+        region = parts[1]
+    else:
+        await callback.answer("Ошибка данных", show_alert=True)
+        return
+        
     success = await update_profile_field(callback.from_user.id, 'region', region, db)
     await state.clear()
 
     await update_user_activity(callback.from_user.id, 'available', db)
 
     if success:
-        await safe_edit_message(callback, "Регион обновлён!", kb.back_to_editing())
+        if region == 'any':
+            await safe_edit_message(callback, "Регион обновлён на 'Не указан'!", kb.back_to_editing())
+        else:
+            await safe_edit_message(callback, "Регион обновлён!", kb.back_to_editing())
     else:
         await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
 

@@ -1,8 +1,12 @@
 import os
+import json
+import logging
 
 from dotenv import load_dotenv, find_dotenv
 
 load_dotenv(find_dotenv(), override=True)
+
+logger = logging.getLogger(__name__)
 
 def _parse_admin_ids(raw: str) -> set[int]:
     ids = set()
@@ -30,6 +34,45 @@ try:
         ADMIN_ID = 0
 except (ValueError, TypeError):
     ADMIN_ID = 0
+
+ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'assets')
+PHOTO_CACHE_FILE = os.path.join(ASSETS_DIR, 'photo_cache.json')
+
+MENU_PHOTOS = {
+    'default': os.path.join(ASSETS_DIR, 'main_menu.png'),
+    'dota': os.path.join(ASSETS_DIR, 'dota2.png'),
+    'cs': os.path.join(ASSETS_DIR, 'cs2.png')
+}
+
+def load_photo_cache():
+    """Загрузить кеш file_id из файла"""
+    try:
+        if os.path.exists(PHOTO_CACHE_FILE):
+            with open(PHOTO_CACHE_FILE, 'r') as f:
+                return json.load(f)
+    except Exception:
+        pass
+    return {}
+
+def save_photo_cache(cache):
+    """Сохранить кеш file_id в файл"""
+    try:
+        os.makedirs(ASSETS_DIR, exist_ok=True)
+        with open(PHOTO_CACHE_FILE, 'w') as f:
+            json.dump(cache, f)
+    except Exception as e:
+        logger.warning(f"Ошибка сохранения кеша фото: {e}")
+
+_photo_cache = load_photo_cache()
+
+def get_cached_photo_id(photo_key: str) -> str:
+    """Получить кешированный file_id"""
+    return _photo_cache.get(photo_key)
+
+def cache_photo_id(photo_key: str, file_id: str):
+    """Кешировать file_id"""
+    _photo_cache[photo_key] = file_id
+    save_photo_cache(_photo_cache)
 
 DOTA_CHANNEL = os.getenv("DOTA_CHANNEL", "@testbotasdasd")
 CS_CHANNEL = os.getenv("CS_CHANNEL", "@test89898922")
@@ -107,3 +150,16 @@ GOALS = {
     "tournaments": "Турниры",
     "communication": "Общение",
 }
+
+MAIN_MENU_PHOTO_DOTA = ""
+MAIN_MENU_PHOTO_CS = ""
+MAIN_MENU_PHOTO_DEFAULT = ""
+
+def get_main_menu_photo(game: str = None) -> str:
+    """Получить фото для главного меню в зависимости от игры"""
+    if game == "dota":
+        return MAIN_MENU_PHOTO_DOTA
+    elif game == "cs":
+        return MAIN_MENU_PHOTO_CS
+    else:
+        return MAIN_MENU_PHOTO_DEFAULT

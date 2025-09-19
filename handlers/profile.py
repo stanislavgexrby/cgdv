@@ -532,7 +532,7 @@ async def select_any_rating(callback: CallbackQuery, state: FSMContext):
     current_rating = data.get('rating')
     
     if current_rating == "any":
-        await callback.answer("Уже выбрано 'Любой рейтинг'")
+        await callback.answer("Уже выбрано 'Не указан'")
         return
     
     await state.update_data(rating="any")
@@ -554,7 +554,7 @@ async def remove_any_rating(callback: CallbackQuery, state: FSMContext):
     
     # Если "any" не выбран - ничего не делаем
     if current_rating != "any":
-        await callback.answer("'Любой рейтинг' не выбран")
+        await callback.answer("'Не указан' не выбран")
         return
     
     # Убираем рейтинг из state
@@ -574,7 +574,7 @@ async def remove_any_rating(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("rating_select_"), ProfileForm.rating)
 async def select_rating(callback: CallbackQuery, state: FSMContext):
     """Выбор рейтинга"""
-    rating = callback.data.split("_", 2)[2]  # Более безопасный парсинг
+    rating = callback.data.split("_", 2)[2]  # Более безопасный парсинг: rating_select_herald -> herald
     data = await state.get_data()
     game = data['game']
     current_rating = data.get('rating')
@@ -598,7 +598,7 @@ async def select_rating(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("rating_remove_"), ProfileForm.rating)
 async def remove_rating(callback: CallbackQuery, state: FSMContext):
     """Сброс выбора рейтинга"""
-    rating = callback.data.split("_", 2)[2]
+    rating = callback.data.split("_", 2)[2]  # rating_remove_herald -> herald
     data = await state.get_data()
     game = data['game']
     current_rating = data.get('rating')
@@ -650,7 +650,7 @@ async def select_any_region(callback: CallbackQuery, state: FSMContext):
     
     # Если уже выбран "any" - ничего не делаем
     if current_region == "any":
-        await callback.answer("Уже выбрано 'Любой регион'")
+        await callback.answer("Уже выбрано 'Не указан'")
         return
     
     await state.update_data(region="any")
@@ -672,7 +672,7 @@ async def remove_any_region(callback: CallbackQuery, state: FSMContext):
     
     # Если "any" не выбран - ничего не делаем
     if current_region != "any":
-        await callback.answer("'Любой регион' не выбран")
+        await callback.answer("'Не указан' не выбран")
         return
     
     # Убираем регион из state
@@ -692,7 +692,7 @@ async def remove_any_region(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("region_select_"), ProfileForm.region)
 async def select_region(callback: CallbackQuery, state: FSMContext):
     """Выбор региона"""
-    region = callback.data.split("_", 2)[2]
+    region = callback.data.split("_", 2)[2]  # region_select_eeu -> eeu
     data = await state.get_data()
     current_region = data.get('region')
     
@@ -715,7 +715,7 @@ async def select_region(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("region_remove_"), ProfileForm.region)
 async def remove_region(callback: CallbackQuery, state: FSMContext):
     """Сброс выбора региона"""
-    region = callback.data.split("_", 2)[2]
+    region = callback.data.split("_", 2)[2]  # region_remove_eeu -> eeu
     data = await state.get_data()
     current_region = data.get('region')
     

@@ -28,3 +28,4 @@ share/python-wheels/
 *.egg
 MANIFEST
 docker-compose.yml
+assets/photo_cache.json

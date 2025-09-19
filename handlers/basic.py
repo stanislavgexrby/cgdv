@@ -1,3 +1,4 @@
+import os
 from datetime import datetime
 import logging
 import keyboards.keyboards as kb
@@ -10,6 +11,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import FSInputFile
 
 from handlers.notifications import update_user_activity
 
@@ -87,17 +89,8 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
     try:
         message = callback.message
         has_photo = bool(message.photo)
-        current_text = message.caption if has_photo else (message.text or "")
-        current_markup = message.reply_markup
-
-        text_changed = current_text != text
-        markup_changed = str(current_markup) != str(reply_markup)
-
-        if not text_changed and not markup_changed:
-            return
 
         if has_photo:
-            # Для фото-сообщений всегда удаляем и создаем новое
             await message.delete()
             await callback.bot.send_message(
                 chat_id=message.chat.id,
@@ -107,22 +100,27 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
                 disable_web_page_preview=True
             )
         else:
-            # Для текстовых сообщений пытаемся отредактировать
-            await message.edit_text(
-                text=text, 
-                reply_markup=reply_markup, 
-                parse_mode='HTML',
-                disable_web_page_preview=True
-            )
+            current_text = message.text or ""
+            current_markup = message.reply_markup
+
+            text_changed = current_text != text
+            markup_changed = str(current_markup) != str(reply_markup)
+
+            if text_changed or markup_changed:
+                await message.edit_text(
+                    text=text, 
+                    reply_markup=reply_markup, 
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
 
     except Exception as e:
         logger.warning(f"Ошибка редактирования сообщения: {e}")
-        # Универсальный fallback
         try:
             await callback.message.delete()
         except Exception:
-            pass  # Сообщение уже удалено или недоступно
-        
+            pass
+
         try:
             await callback.bot.send_message(
                 chat_id=callback.message.chat.id,
@@ -133,11 +131,73 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
             )
         except Exception as e2:
             logger.error(f"Критическая ошибка отправки сообщения: {e2}")
-            # Последняя попытка через answer
             try:
                 await callback.answer(f"Ошибка: {text[:100]}...", show_alert=True)
             except Exception:
                 pass
+
+async def get_menu_photo(bot, game: str = None):
+    """Получить фото для меню (с кешированием file_id)"""
+    photo_key = game if game in ['dota', 'cs'] else 'default'
+    
+    # Сначала пробуем кешированный file_id
+    cached_id = settings.get_cached_photo_id(photo_key)
+    if cached_id:
+        return cached_id
+    
+    # Если нет кеша - отправляем локальный файл
+    photo_path = settings.MENU_PHOTOS.get(photo_key)
+    if photo_path and os.path.exists(photo_path):
+        return FSInputFile(photo_path)
+    
+    # Fallback - возвращаем None (отправим без фото)
+    return None
+
+async def send_main_menu_with_photo(callback_or_message, text: str, keyboard, game: str = None, db=None):
+    """Отправка главного меню с фото (с кешированием)"""
+    photo = await get_menu_photo(callback_or_message.bot if hasattr(callback_or_message, 'bot') else None, game)
+    
+    if not photo:
+        # Fallback на текстовое сообщение
+        if hasattr(callback_or_message, 'message'):
+            await safe_edit_message(callback_or_message, text, keyboard)
+        else:
+            await callback_or_message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+        return
+    
+    try:
+        if hasattr(callback_or_message, 'message'):
+            # Это callback
+            await callback_or_message.message.delete()
+            sent_message = await callback_or_message.message.answer_photo(
+                photo=photo,
+                caption=text,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+        else:
+            # Это обычное сообщение
+            sent_message = await callback_or_message.answer_photo(
+                photo=photo,
+                caption=text,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+        
+        # Кешируем file_id если отправляли локальный файл
+        if isinstance(photo, FSInputFile) and sent_message.photo:
+            photo_key = game if game in ['dota', 'cs'] else 'default'
+            file_id = sent_message.photo[-1].file_id
+            settings.cache_photo_id(photo_key, file_id)
+            logger.info(f"Кеширован file_id для {photo_key}: {file_id}")
+            
+    except Exception as e:
+        logger.warning(f"Ошибка отправки главного меню с фото для игры {game}: {e}")
+        # Fallback на обычное текстовое сообщение
+        if hasattr(callback_or_message, 'message'):
+            await safe_edit_message(callback_or_message, text, keyboard)
+        else:
+            await callback_or_message.answer(text, reply_markup=keyboard, parse_mode='HTML')
 
 async def check_subscription(user_id: int, game: str, bot: Bot) -> bool:
     """Проверка подписки на канал"""
@@ -202,7 +262,7 @@ async def cmd_start(message: Message, db):
         await message.answer(text, parse_mode='HTML')
         return
 
-    await message.answer(texts.WELCOME, reply_markup=kb.game_selection(), parse_mode='HTML')
+    await send_main_menu_with_photo(message, texts.WELCOME, kb.game_selection(), game=None, db=db)
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
@@ -263,7 +323,7 @@ async def select_game(callback: CallbackQuery, db):
     has_profile = profile is not None
     text = get_main_menu_text(game, has_profile)
 
-    await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
+    await send_main_menu_with_photo(callback, text, kb.main_menu(has_profile, game), game=game, db=db)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("switch_"))
@@ -297,7 +357,7 @@ async def switch_game(callback: CallbackQuery, db):
     has_profile = profile is not None
     text = get_main_menu_text(game, has_profile)
 
-    await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
+    await send_main_menu_with_photo(callback, text, kb.main_menu(has_profile, game), game=game, db=db)
     await callback.answer()
 
 # ==================== НАВИГАЦИЯ ПО МЕНЮ ====================
@@ -311,7 +371,7 @@ async def show_main_menu(callback: CallbackQuery, db):
     user = await db.get_user(user_id)
 
     if not user or not user.get('current_game'):
-        await safe_edit_message(callback, texts.WELCOME, kb.game_selection())
+        await send_main_menu_with_photo(callback, texts.WELCOME, kb.game_selection(), game=None, db=db)
         await callback.answer()
         return
 
@@ -330,12 +390,12 @@ async def show_main_menu(callback: CallbackQuery, db):
             has_profile = True
 
     text = get_main_menu_text(game, has_profile)
-    await safe_edit_message(callback, text, kb.main_menu(has_profile, game))
+    await send_main_menu_with_photo(callback, text, kb.main_menu(has_profile, game), game=game, db=db)
     await callback.answer()
 
 @router.callback_query(F.data == "back_to_games")
 async def back_to_games(callback: CallbackQuery):
-    await safe_edit_message(callback, texts.WELCOME, kb.game_selection())
+    await send_main_menu_with_photo(callback, texts.WELCOME, kb.game_selection(), game=None)
     await callback.answer()
 
 @router.callback_query(F.data == "view_profile")
@@ -354,8 +414,8 @@ async def view_profile(callback: CallbackQuery, db):
     keyboard = kb.view_profile_menu()
 
     try:
+        await callback.message.delete()
         if profile.get('photo_id'):
-            await callback.message.delete()
             await callback.message.answer_photo(
                 photo=profile['photo_id'],
                 caption=text,
@@ -364,14 +424,36 @@ async def view_profile(callback: CallbackQuery, db):
                 disable_web_page_preview=True
             )
         else:
-            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
+            await callback.message.answer(
+                text=text,
+                reply_markup=keyboard,
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
     except Exception as e:
         logger.error(f"Ошибка отображения профиля: {e}")
+        # Fallback - отправляем новое сообщение
         try:
-            await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
-        except:
-            await callback.message.delete()
-            await callback.message.answer(text, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
+            if profile.get('photo_id'):
+                await callback.bot.send_photo(
+                    chat_id=callback.message.chat.id,
+                    photo=profile['photo_id'],
+                    caption=text,
+                    reply_markup=keyboard,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+            else:
+                await callback.bot.send_message(
+                    chat_id=callback.message.chat.id,
+                    text=text,
+                    reply_markup=keyboard,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+        except Exception as e2:
+            logger.error(f"Критическая ошибка отображения профиля: {e2}")
+            await callback.answer("Ошибка загрузки профиля", show_alert=True)
 
     await callback.answer()
 
@@ -408,8 +490,9 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
     keyboard = kb.edit_profile_menu()
 
     try:
+        await callback.message.delete()
+        
         if profile.get('photo_id'):
-            await callback.message.delete()
             await callback.message.answer_photo(
                 photo=profile['photo_id'],
                 caption=current_info,
@@ -418,14 +501,35 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
                 disable_web_page_preview=True
             )
         else:
-            await callback.message.edit_text(current_info, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
+            await callback.message.answer(
+                text=current_info,
+                reply_markup=keyboard,
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
     except Exception as e:
         logger.error(f"Ошибка отображения профиля для редактирования: {e}")
         try:
-            await callback.message.edit_text(current_info, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
-        except:
-            await callback.message.delete()
-            await callback.message.answer(current_info, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
+            if profile.get('photo_id'):
+                await callback.bot.send_photo(
+                    chat_id=callback.message.chat.id,
+                    photo=profile['photo_id'],
+                    caption=current_info,
+                    reply_markup=keyboard,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+            else:
+                await callback.bot.send_message(
+                    chat_id=callback.message.chat.id,
+                    text=current_info,
+                    reply_markup=keyboard,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+        except Exception as e2:
+            logger.error(f"Критическая ошибка отображения меню редактирования: {e2}")
+            await callback.answer("Ошибка загрузки", show_alert=True)
 
     await callback.answer()
 
