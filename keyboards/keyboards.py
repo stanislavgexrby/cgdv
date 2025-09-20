@@ -512,7 +512,7 @@ def admin_main_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="Жалобы", callback_data="admin_reports")],
         [InlineKeyboardButton(text="Баны", callback_data="admin_bans")],
-        [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text="Главное меню", callback_data="back_to_games")]
     ])
 
 def admin_report_actions(reported_user_id: int, report_id: int, current_index: int = 0, total_count: int = 1) -> InlineKeyboardMarkup:
@@ -531,13 +531,13 @@ def admin_report_actions(reported_user_id: int, report_id: int, current_index: i
     if total_count > 1:
         nav_buttons = []
         if current_index > 0:
-            nav_buttons.append(InlineKeyboardButton(text="◀️ Пред.", callback_data=f"rep:nav:prev:{current_index}"))
+            nav_buttons.append(InlineKeyboardButton(text="Пред.", callback_data=f"rep:nav:prev:{current_index}"))
         if current_index < total_count - 1:
-            nav_buttons.append(InlineKeyboardButton(text= "След. ▶️", callback_data=f"rep:nav:next:{current_index}"))
+            nav_buttons.append(InlineKeyboardButton(text= "След.", callback_data=f"rep:nav:next:{current_index}"))
         if nav_buttons:
             buttons.append(nav_buttons)
     
-    buttons.append([InlineKeyboardButton(text="🏠 Админ меню", callback_data="admin_back")])
+    buttons.append([InlineKeyboardButton(text="Админ меню", callback_data="admin_back")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 

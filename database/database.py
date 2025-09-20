@@ -101,25 +101,6 @@ class Database:
             ''')
 
             await conn.execute('''
-                CREATE TABLE IF NOT EXISTS profiles (
-                    id SERIAL PRIMARY KEY,
-                    telegram_id BIGINT,
-                    game TEXT,
-                    name TEXT,
-                    nickname TEXT,
-                    age INTEGER,
-                    rating TEXT,
-                    region TEXT DEFAULT 'eeu',
-                    positions JSONB DEFAULT '[]'::jsonb,
-                    additional_info TEXT,
-                    photo_id TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(telegram_id, game)
-                )
-            ''')
-
-            await conn.execute('''
                 CREATE TABLE IF NOT EXISTS likes (
                     id SERIAL PRIMARY KEY,
                     from_user BIGINT,
@@ -200,7 +181,7 @@ class Database:
                     rating TEXT,
                     region TEXT DEFAULT 'eeu',
                     positions JSONB DEFAULT '[]'::jsonb,
-                    goals JSONB DEFAULT '["any"]'::jsonb,  -- новое поле
+                    goals JSONB DEFAULT '["any"]'::jsonb,
                     additional_info TEXT,
                     photo_id TEXT,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

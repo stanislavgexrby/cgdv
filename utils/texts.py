@@ -1,4 +1,22 @@
 import config.settings as settings
+import html
+import re
+
+def _escape_html(text: str) -> str:
+    """Экранирование HTML символов"""
+    return html.escape(text, quote=False)
+
+def _format_profile_url(url: str, game: str = None) -> str:
+    """Форматирование URL для HTML"""
+    if not url or not url.strip():
+        return None
+    
+    url = url.strip()
+    
+    if not url.startswith(('http://', 'https://')):
+        url = 'https://' + url
+    
+    return url
 
 def format_profile(user: dict, show_contact: bool = False) -> str:
     if not user:
@@ -7,16 +25,20 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
     game = user.get('current_game') or user.get('game', 'dota')
 
     name_parts = user['name'].split()
+    
+    # Создаем переменную для никнейма с ссылкой или без
+    profile_url = user.get('profile_url')
+    if profile_url and profile_url.strip():
+        nickname_with_link = f"<a href='{profile_url}'>{user['nickname']}</a>"
+    else:
+        nickname_with_link = user['nickname']
+
     if len(name_parts) >= 2:
         first_name = name_parts[0]
         last_name = ' '.join(name_parts[1:])
-        profile_url = user.get('profile_url')
-        if profile_url and profile_url.strip():
-            text = f"{first_name} <a href='{profile_url}'><b>{user['nickname']}</b></a> {last_name}, {user['age']} лет\n\n"
-        else:
-            text = f"{first_name} <b>{user['nickname']}</b> {last_name}, {user['age']} лет\n\n"
+        text = f"{first_name} <b>{nickname_with_link}</b> {last_name}, {user['age']} лет\n\n"
     else:
-        text = f"<b>{user['name']}</b> <b>{user['nickname']}</b>, {user['age']} лет\n\n"
+        text = f"<b>{user['name']}</b> <b>{nickname_with_link}</b>, {user['age']} лет\n\n"
 
 # Рейтинг
     rating = user['rating']
