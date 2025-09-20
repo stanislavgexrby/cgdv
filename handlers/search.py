@@ -61,6 +61,47 @@ async def update_filters_display(callback: CallbackQuery, state: FSMContext, mes
     if message:
         await callback.answer(message)
 
+async def get_full_filters_display(data: dict) -> str:
+    """Полное отображение всех фильтров как в меню настройки"""
+    game = data.get('game', 'dota')
+    game_name = settings.GAMES.get(game, game)
+
+    filters_text = []
+
+    rating_filter = data.get('rating_filter')
+    if rating_filter:
+        rating_name = settings.RATINGS[game].get(rating_filter, rating_filter)
+        filters_text.append(f"<b>Рейтинг:</b> {rating_name}")
+    else:
+        filters_text.append("<b>Рейтинг:</b> не указан")
+
+    position_filter = data.get('position_filter')
+    if position_filter:
+        position_name = settings.POSITIONS[game].get(position_filter, position_filter)
+        filters_text.append(f"<b>Позиция:</b> {position_name}")
+    else:
+        filters_text.append("<b>Позиция:</b> не указана")
+
+    region_filter = data.get('region_filter')
+    if region_filter:
+        region_name = settings.REGIONS.get(region_filter, region_filter)
+        filters_text.append(f"<b>Регион:</b> {region_name}")
+    else:
+        filters_text.append("<b>Регион:</b> не указан")
+
+    goals_filter = data.get('goals_filter')
+    if goals_filter:
+        goals_name = settings.GOALS.get(goals_filter, goals_filter)
+        filters_text.append(f"<b>Цель:</b> {goals_name}")
+    else:
+        filters_text.append("<b>Цель:</b> не указана")
+
+    text = f"Поиск в {game_name}\n\n"
+    text += "\n".join(filters_text)
+    text += "\n\nВыберите действие:"
+
+    return text
+
 async def handle_search_action(callback: CallbackQuery, action: str, target_user_id: int, state: FSMContext, db):
     """Универсальная обработка действий в поиске"""
     user_id = callback.from_user.id
@@ -199,22 +240,25 @@ async def start_search_menu(callback: CallbackQuery, state: FSMContext, db):
 
     await update_user_activity(user_id, 'search_setup', db)
 
-    await state.clear()
-    await state.update_data(
-        user_id=user_id,
-        game=game,
-        rating_filter=None,
-        position_filter=None,
-        region_filter=None,
-        goals_filter=None,
-        profiles=[],
-        current_index=0
-    )
+    data = await state.get_data()
+    
+    if not data or data.get('game') != game:
+        await state.clear()
+        await state.update_data(
+            user_id=user_id,
+            game=game,
+            rating_filter=None,
+            position_filter=None,
+            region_filter=None,
+            goals_filter=None,
+            profiles=[],
+            current_index=0
+        )
+        data = await state.get_data()
+    
     await state.set_state(SearchForm.menu)
 
-    game_name = settings.GAMES.get(game, game)
-    text = f"Поиск в {game_name}"
-
+    text = await get_full_filters_display(data)
     await safe_edit_message(callback, text, kb.search_filters())
     await callback.answer()
 
@@ -229,12 +273,9 @@ async def setup_filters_menu(callback: CallbackQuery, state: FSMContext):
 async def back_to_search_menu(callback: CallbackQuery, state: FSMContext):
     """Возврат к главному меню поиска"""
     data = await state.get_data()
-    game = data.get('game', 'dota')
-    game_name = settings.GAMES.get(game, game)
-    
     await state.set_state(SearchForm.menu)
-    
-    text = f"Поиск в {game_name}"
+
+    text = await get_full_filters_display(data)
     await safe_edit_message(callback, text, kb.search_filters())
     await callback.answer()
 
