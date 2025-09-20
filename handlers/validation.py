@@ -41,35 +41,29 @@ def validate_profile_input(field: str, value, game: str = None) -> tuple[bool, s
             return False, f"Слишком длинный текст (максимум {settings.MAX_INFO_LENGTH} символов)"
 
     elif field == 'profile_url':
-        if not value.strip():
-            return True, ""
+            if not value.strip():
+                return True, ""
 
-        url = value.strip()
+            url = value.strip()
 
-    elif field == 'profile_url':
-        if not value.strip():
-            return True, ""
+            if game == 'dota' and 'dotabuff.com/players/' in url:
+                if url.rstrip('/').endswith('/players'):
+                    return False, ("Неполная ссылка на Dotabuff. Добавьте ваш Player ID.\n\n"
+                                "Пример: https://www.dotabuff.com/players/123456789\n\n"
+                                "Найти ID можно в URL вашего профиля на Dotabuff")
 
-        url = value.strip()
+            if not is_valid_profile_url(game, url):
+                if game == 'dota':
+                    return False, ("Некорректная ссылка на Dotabuff.\n\n"
+                                "Правильный формат: https://www.dotabuff.com/players/123456789\n\n"
+                                "Где 123456789 - ваш Player ID")
+                elif game == 'cs':
+                    return False, ("Некорректная ссылка на FACEIT.\n\n"
+                                "Пример: https://www.faceit.com/en/players/nickname")
+                else:
+                    return False, "Некорректная ссылка"
 
-        if game == 'dota' and 'dotabuff.com/players/' in url:
-            if url.rstrip('/').endswith('/players'):
-                return False, ("Неполная ссылка на Dotabuff. Добавьте ваш Player ID.\n\n"
-                             "Пример: https://www.dotabuff.com/players/123456789\n\n"
-                             "Найти ID можно в URL вашего профиля на Dotabuff")
-
-        if not is_valid_profile_url(game, url):
-            if game == 'dota':
-                return False, ("Некорректная ссылка на Dotabuff.\n\n"
-                             "Правильный формат: https://www.dotabuff.com/players/123456789\n\n"
-                             "Где 123456789 - ваш Player ID")
-            elif game == 'cs':
-                return False, ("Некорректная ссылка на FACEIT.\n\n"
-                             "Пример: https://www.faceit.com/en/players/nickname")
-            else:
-                return False, "Некорректная ссылка"
-
-        if len(url) > 200:
-            return False, "Ссылка слишком длинная (максимум 200 символов)"
+            if len(url) > 200:
+                return False, "Ссылка слишком длинная (максимум 200 символов)"
 
     return True, ""

@@ -1104,8 +1104,9 @@ async def save_profile_flow(message: Message, state: FSMContext, photo_id: str |
         'rating': data.get('rating'),
         'region': data.get('region', 'eeu'),
         'positions': data.get('positions', []) or data.get('positions_selected', []),
-        'goals': data.get('goals', []) or data.get('goals_selected', []),  # новое поле
+        'goals': data.get('goals', []) or data.get('goals_selected', []),
         'additional_info': data.get('additional_info', '').strip(),
+        'profile_url': data.get('profile_url', ''),  # ДОБАВЛЯЕМ ЭТУ СТРОКУ
         'recreating': is_recreating
     }
 
@@ -1152,6 +1153,8 @@ async def save_profile_flow_callback(callback: CallbackQuery, state: FSMContext,
     data = await state.get_data()
     user_id = data.get('user_id', callback.from_user.id)
     is_recreating = data.get('recreating', False)
+
+    data['profile_url'] = data.get('profile_url', '')
 
     success = await save_profile_universal(
         user_id=user_id,
