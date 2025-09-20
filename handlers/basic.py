@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 class SearchForm(StatesGroup):
+    menu = State()
     filters = State()
     browsing = State()
 
@@ -531,36 +532,4 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
             logger.error(f"Критическая ошибка отображения меню редактирования: {e2}")
             await callback.answer("Ошибка загрузки", show_alert=True)
 
-    await callback.answer()
-
-@router.callback_query(F.data == "back_to_search")
-@check_ban_and_profile()
-async def back_to_search_handler(callback: CallbackQuery, state: FSMContext, db):
-    user_id = callback.from_user.id
-    user = await db.get_user(user_id)
-    game = user['current_game']
-
-    await state.clear()
-    await state.update_data(
-        user_id=user_id,
-        game=game,
-        rating_filter=None,
-        position_filter=None,
-        region_filter=None,
-        goals_filter=None,
-        profiles=[],
-        current_index=0,
-        message_with_photo=False
-    )
-    await state.set_state(SearchForm.filters)
-
-    game_name = settings.GAMES.get(game, game)
-    text = f"Поиск в {game_name}\n\nФильтры:\n\n"
-    text += "<b>Рейтинг:</b> не указан\n"
-    text += "<b>Позиция:</b> не указана\n"
-    text += "<b>Регион:</b> не указан\n"
-    text += "<b>Цель:</b> не указана\n\n"
-    text += "Настройте фильтры или начните поиск:"
-
-    await safe_edit_message(callback, text, kb.search_filters())
     await callback.answer()

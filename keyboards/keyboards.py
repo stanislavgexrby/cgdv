@@ -397,14 +397,22 @@ def confirm_delete() -> InlineKeyboardMarkup:
 # ==================== ПОИСК ====================
 
 def search_filters() -> InlineKeyboardMarkup:
-    """Меню фильтров поиска"""
+    """Простое меню поиска"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Начать поиск", callback_data="start_search")],
+        [InlineKeyboardButton(text="Поиск", callback_data="start_search")],
+        [InlineKeyboardButton(text="Настроить фильтры", callback_data="setup_filters")],
+        [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+    ])
+
+def filters_setup_menu() -> InlineKeyboardMarkup:
+    """Меню настройки фильтров"""
+    return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Рейтинг", callback_data="filter_rating")],
         [InlineKeyboardButton(text="Позиция", callback_data="filter_position")],
         [InlineKeyboardButton(text="Регион", callback_data="filter_region")],
         [InlineKeyboardButton(text="Цель", callback_data="filter_goals")],
-        [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+        [InlineKeyboardButton(text="Сбросить все", callback_data="reset_all_filters")],
+        [InlineKeyboardButton(text="Назад к поиску", callback_data="back_to_search")]
     ])
 
 def ratings_filter(game: str) -> InlineKeyboardMarkup:
@@ -450,14 +458,16 @@ def position_filter_menu(game: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def profile_actions(user_id: int) -> InlineKeyboardMarkup:
-    """Действия с профилем в поиске"""
+    """Действия с профилем в поиске - новая раскладка"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="Лайк", callback_data=f"like_{user_id}"),
             InlineKeyboardButton(text="Пропустить", callback_data=f"skip_{user_id}")
         ],
-        [InlineKeyboardButton(text="Пожаловаться", callback_data=f"report_{user_id}")],
-        [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+        [
+            InlineKeyboardButton(text="Пожаловаться", callback_data=f"report_{user_id}"),
+            InlineKeyboardButton(text="Главное меню", callback_data="main_menu")
+        ]
     ])
 
 # ==================== ЛАЙКИ И МЭТЧИ ====================

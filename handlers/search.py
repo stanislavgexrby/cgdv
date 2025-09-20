@@ -16,8 +16,8 @@ router = Router()
 
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
-async def update_filter_display(callback: CallbackQuery, state: FSMContext, message: str = None):
-    """Обновление отображения фильтров"""
+async def update_filters_display(callback: CallbackQuery, state: FSMContext, message: str = None):
+    """Отображение текущих фильтров"""
     data = await state.get_data()
     game = data.get('game', 'dota')
     game_name = settings.GAMES.get(game, game)
@@ -52,11 +52,11 @@ async def update_filter_display(callback: CallbackQuery, state: FSMContext, mess
     else:
         filters_text.append("<b>Цель:</b> не указана")
 
-    text = f"Поиск в {game_name}\n\nФильтры:\n\n"
+    text = f"Настройка фильтров для {game_name}\n\n"
     text += "\n".join(filters_text)
-    text += "\n\nНастройте фильтры или начните поиск:"
+    text += "\n\nВыберите что настроить:"
 
-    await safe_edit_message(callback, text, kb.search_filters())
+    await safe_edit_message(callback, text, kb.filters_setup_menu())
 
     if message:
         await callback.answer(message)
@@ -109,47 +109,47 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
         await show_next_profile(callback, state)
 
     elif action == "report":
-            success = await db.add_report(user_id, target_user_id, game)
+        success = await db.add_report(user_id, target_user_id, game)
 
-            if success:
-                await db._clear_pattern_cache(f"search:{user_id}:{game}:*")
+        if success:
+            await db._clear_pattern_cache(f"search:{user_id}:{game}:*")
 
-                text = "Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время."
-                keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
-                    [kb.InlineKeyboardButton(text="Продолжить поиск", callback_data="continue_search")],
-                    [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
-                ])
+            text = "Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время."
+            keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+                [kb.InlineKeyboardButton(text="Продолжить поиск", callback_data="continue_search")],
+                [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+            ])
 
-                try:
-                    await callback.message.delete()
-                except Exception as e:
-                    logger.warning(f"Не удалось удалить сообщение при жалобе: {e}")
+            try:
+                await callback.message.delete()
+            except Exception as e:
+                logger.warning(f"Не удалось удалить сообщение при жалобе: {e}")
 
+            try:
+                await callback.bot.send_message(
+                    chat_id=callback.message.chat.id,
+                    text=text,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.error(f"Ошибка отправки сообщения о жалобе: {e}")
+                await safe_edit_message(callback, text, keyboard)
+
+            logger.info(f"Жалоба добавлена: {user_id} пожаловался на {target_user_id}")
+            await callback.answer("Жалоба отправлена")
+
+            for admin_id in settings.ADMIN_IDS:
                 try:
                     await callback.bot.send_message(
-                        chat_id=callback.message.chat.id,
-                        text=text,
-                        reply_markup=keyboard,
+                        admin_id,
+                        f"Новая жалоба!\n\nПользователь {user_id} пожаловался на анкету {target_user_id} в игре {settings.GAMES.get(game, game)}",
                         parse_mode='HTML'
                     )
                 except Exception as e:
-                    logger.error(f"Ошибка отправки сообщения о жалобе: {e}")
-                    await safe_edit_message(callback, text, keyboard)
-
-                logger.info(f"Жалоба добавлена: {user_id} пожаловался на {target_user_id}")
-                await callback.answer("Жалоба отправлена")
-
-                for admin_id in settings.ADMIN_IDS:
-                    try:
-                        await callback.bot.send_message(
-                            admin_id,
-                            f"Новая жалоба!\n\nПользователь {user_id} пожаловался на анкету {target_user_id} в игре {settings.GAMES.get(game, game)}",
-                            parse_mode='HTML'
-                        )
-                    except Exception as e:
-                        logger.error(f"Ошибка отправки уведомления админу {admin_id}: {e}")
-            else:
-                await callback.answer("Вы уже жаловались на эту анкету", show_alert=True)
+                    logger.error(f"Ошибка отправки уведомления админу {admin_id}: {e}")
+        else:
+            await callback.answer("Вы уже жаловались на эту анкету", show_alert=True)
 
 async def show_current_profile(callback: CallbackQuery, state: FSMContext):
     """Показ текущего профиля в поиске"""
@@ -191,8 +191,8 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "search")
 @check_ban_and_profile()
-async def start_search(callback: CallbackQuery, state: FSMContext, db):
-    """Начало поиска - установка фильтров"""
+async def start_search_menu(callback: CallbackQuery, state: FSMContext, db):
+    """Показ главного меню поиска"""
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
     game = user['current_game']
@@ -210,12 +210,35 @@ async def start_search(callback: CallbackQuery, state: FSMContext, db):
         profiles=[],
         current_index=0
     )
-    await state.set_state(SearchForm.filters)
+    await state.set_state(SearchForm.menu)
 
-    await update_filter_display(callback, state)
+    game_name = settings.GAMES.get(game, game)
+    text = f"Поиск в {game_name}"
+
+    await safe_edit_message(callback, text, kb.search_filters())
     await callback.answer()
 
-# ==================== ОБРАБОТЧИКИ ФИЛЬТРОВ ====================
+@router.callback_query(F.data == "setup_filters", SearchForm.menu)
+async def setup_filters_menu(callback: CallbackQuery, state: FSMContext):
+    """Переход к настройке фильтров"""
+    await state.set_state(SearchForm.filters)
+    await update_filters_display(callback, state)
+    await callback.answer()
+
+@router.callback_query(F.data == "back_to_search")
+async def back_to_search_menu(callback: CallbackQuery, state: FSMContext):
+    """Возврат к главному меню поиска"""
+    data = await state.get_data()
+    game = data.get('game', 'dota')
+    game_name = settings.GAMES.get(game, game)
+    
+    await state.set_state(SearchForm.menu)
+    
+    text = f"Поиск в {game_name}"
+    await safe_edit_message(callback, text, kb.search_filters())
+    await callback.answer()
+
+# ==================== НАСТРОЙКА ФИЛЬТРОВ ====================
 
 @router.callback_query(F.data == "filter_rating", SearchForm.filters)
 async def set_rating_filter(callback: CallbackQuery, state: FSMContext):
@@ -245,14 +268,25 @@ async def set_goals_filter(callback: CallbackQuery, state: FSMContext):
     await safe_edit_message(callback, "Выберите цель:", kb.goals_filter())
     await callback.answer()
 
-# ==================== ОБРАБОТЧИКИ УСТАНОВКИ ФИЛЬТРОВ ====================
+@router.callback_query(F.data == "reset_all_filters", SearchForm.filters)
+async def reset_all_filters(callback: CallbackQuery, state: FSMContext):
+    """Сброс всех фильтров"""
+    await state.update_data(
+        rating_filter=None,
+        position_filter=None,
+        region_filter=None,
+        goals_filter=None
+    )
+    await update_filters_display(callback, state, "Все фильтры сброшены")
+
+# ==================== СОХРАНЕНИЕ ФИЛЬТРОВ ====================
 
 @router.callback_query(F.data.startswith("rating_"), SearchForm.filters)
 async def save_rating_filter(callback: CallbackQuery, state: FSMContext):
     """Сохранение выбранного рейтинга"""
     if callback.data.endswith("_reset"):
         await state.update_data(rating_filter=None)
-        await update_filter_display(callback, state, "Фильтр по рейтингу сброшен")
+        await update_filters_display(callback, state, "Фильтр по рейтингу сброшен")
         return
 
     rating = callback.data.split("_")[1]
@@ -269,7 +303,7 @@ async def save_rating_filter(callback: CallbackQuery, state: FSMContext):
 
     await state.update_data(rating_filter=rating)
     rating_name = settings.RATINGS[game].get(rating, rating)
-    await update_filter_display(callback, state, f"Фильтр по рейтингу: {rating_name}")
+    await update_filters_display(callback, state, f"Фильтр по рейтингу: {rating_name}")
 
 @router.callback_query(F.data.startswith("pos_filter_"), SearchForm.filters)
 async def save_position_filter(callback: CallbackQuery, state: FSMContext):
@@ -292,7 +326,7 @@ async def save_position_filter(callback: CallbackQuery, state: FSMContext):
 
     await state.update_data(position_filter=position)
     position_name = settings.POSITIONS[game].get(position, position)
-    await update_filter_display(callback, state, f"Фильтр по позиции: {position_name}")
+    await update_filters_display(callback, state, f"Фильтр по позиции: {position_name}")
 
 @router.callback_query(F.data.startswith("region_filter_"), SearchForm.filters)
 async def save_region_filter(callback: CallbackQuery, state: FSMContext):
@@ -314,7 +348,7 @@ async def save_region_filter(callback: CallbackQuery, state: FSMContext):
 
     await state.update_data(region_filter=region)
     region_name = settings.REGIONS.get(region, region)
-    await update_filter_display(callback, state, f"Фильтр по региону: {region_name}")
+    await update_filters_display(callback, state, f"Фильтр по региону: {region_name}")
 
 @router.callback_query(F.data.startswith("goals_filter_"), SearchForm.filters)
 async def save_goals_filter(callback: CallbackQuery, state: FSMContext):
@@ -336,40 +370,46 @@ async def save_goals_filter(callback: CallbackQuery, state: FSMContext):
 
     await state.update_data(goals_filter=goal)
     goals_name = settings.GOALS.get(goal, goal)
-    await update_filter_display(callback, state, f"Фильтр по цели: {goals_name}")
+    await update_filters_display(callback, state, f"Фильтр по цели: {goals_name}")
 
-# ==================== ОБРАБОТЧИКИ СБРОСА ФИЛЬТРОВ ====================
+# ==================== СБРОС ФИЛЬТРОВ ====================
 
 @router.callback_query(F.data == "rating_reset", SearchForm.filters)
 async def reset_rating_filter(callback: CallbackQuery, state: FSMContext):
     await state.update_data(rating_filter=None)
-    await update_filter_display(callback, state, "Фильтр по рейтингу сброшен")
+    await update_filters_display(callback, state, "Фильтр по рейтингу сброшен")
 
 @router.callback_query(F.data == "position_reset", SearchForm.filters)
 async def reset_position_filter(callback: CallbackQuery, state: FSMContext):
     await state.update_data(position_filter=None)
-    await update_filter_display(callback, state, "Фильтр по позиции сброшен")
+    await update_filters_display(callback, state, "Фильтр по позиции сброшен")
 
 @router.callback_query(F.data == "region_reset", SearchForm.filters)
 async def reset_region_filter(callback: CallbackQuery, state: FSMContext):
     await state.update_data(region_filter=None)
-    await update_filter_display(callback, state, "Фильтр по региону сброшен")
+    await update_filters_display(callback, state, "Фильтр по региону сброшен")
 
 @router.callback_query(F.data == "goals_reset", SearchForm.filters)
 async def reset_goals_filter(callback: CallbackQuery, state: FSMContext):
     await state.update_data(goals_filter=None)
-    await update_filter_display(callback, state, "Фильтр по цели сброшен")
+    await update_filters_display(callback, state, "Фильтр по цели сброшен")
 
 @router.callback_query(F.data == "cancel_filter", SearchForm.filters)
 async def cancel_filter(callback: CallbackQuery, state: FSMContext):
-    await update_filter_display(callback, state, "Отменено")
+    await update_filters_display(callback, state, "Отменено")
 
 # ==================== НАЧАЛО ПОИСКА ====================
 
-@router.callback_query(F.data == "start_search", SearchForm.filters)
+@router.callback_query(F.data == "start_search")
 async def begin_search(callback: CallbackQuery, state: FSMContext, db):
     """Начать поиск с применением фильтров"""
     data = await state.get_data()
+    current_state = await state.get_state()
+
+    # Если вызывается из меню поиска - переходим в filters состояние
+    if current_state == SearchForm.menu:
+        await state.set_state(SearchForm.filters)
+        data = await state.get_data()
 
     await update_user_activity(data['user_id'], 'search_browsing', db)
 
@@ -435,16 +475,3 @@ async def report_profile(callback: CallbackQuery, state: FSMContext, db):
 async def continue_search(callback: CallbackQuery, state: FSMContext):
     """Продолжить поиск после лайка"""
     await show_next_profile(callback, state)
-
-# ==================== ОБРАБОТЧИК ДЛЯ СОСТОЯНИЙ ВНЕ FSM ====================
-
-@router.callback_query(F.data.in_(["filter_rating", "filter_position", "filter_region", "start_search"]))
-async def handle_search_outside_state(callback: CallbackQuery, state: FSMContext, db):
-    """Обработчик для случаев, когда поиск вызывается вне состояния FSM"""
-    current_state = await state.get_state()
-
-    if current_state is None or current_state != SearchForm.filters:
-        logger.warning(f"Обработчик поиска вызван вне состояния FSM: {callback.data}")
-        await state.clear()
-        await callback.answer("Перезапуск поиска...")
-        await start_search(callback, state, db)
