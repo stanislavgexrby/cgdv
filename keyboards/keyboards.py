@@ -20,7 +20,7 @@ def main_menu(has_profile: bool = False, current_game: str = None) -> InlineKeyb
             [InlineKeyboardButton(text="Поиск", callback_data="search")],
             [InlineKeyboardButton(text="Моя анкета", callback_data="view_profile")],
             [InlineKeyboardButton(text="Лайки", callback_data="my_likes")],
-            [InlineKeyboardButton(text="Матчи", callback_data="my_matches")]
+            [InlineKeyboardButton(text="Мэтчи", callback_data="my_matches")]
         ])
     else:
         buttons.append([InlineKeyboardButton(text="Создать анкету", callback_data="create_profile")])
@@ -460,7 +460,7 @@ def profile_actions(user_id: int) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
     ])
 
-# ==================== ЛАЙКИ И МАТЧИ ====================
+# ==================== ЛАЙКИ И МЭТЧИ ====================
 
 def like_actions(user_id: int) -> InlineKeyboardMarkup:
     """Действия с лайком"""

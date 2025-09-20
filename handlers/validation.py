@@ -31,6 +31,8 @@ def validate_profile_input(field: str, value, game: str = None) -> tuple[bool, s
             age = int(value)
             if age < settings.MIN_AGE:
                 return False, f"Возраст должен быть больше {settings.MIN_AGE}"
+            if age > settings.MAX_AGE:
+                return False, f"Возраст должен быть меньше {settings.MIN_AGE}"
         except ValueError:
             return False, "Введите число"
 
