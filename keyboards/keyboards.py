@@ -544,24 +544,24 @@ def admin_back_menu() -> InlineKeyboardMarkup:
 def admin_ban_actions_with_nav(user_id: int, current_index: int, total_count: int) -> InlineKeyboardMarkup:
     """Действия с баном с навигацией"""
     buttons = [
-        [InlineKeyboardButton(text="Снять бан", callback_data=f"admin_unban_{user_id}")]
+        [InlineKeyboardButton(text="✅ Снять бан", callback_data=f"admin_unban_{user_id}")]
     ]
 
     if total_count > 1:
         nav_buttons = []
         if current_index > 0:
             nav_buttons.append(InlineKeyboardButton(
-                text="Предыдущий", 
+                text="Пред.",
                 callback_data=f"admin_ban_prev_{current_index}"
             ))
         if current_index < total_count - 1:
             nav_buttons.append(InlineKeyboardButton(
-                text="Следующий", 
+                text="След.",
                 callback_data=f"admin_ban_next_{current_index}"
             ))
         if nav_buttons:
             buttons.append(nav_buttons)
 
-    buttons.append([InlineKeyboardButton(text="Админ меню", callback_data="admin_stats")])
+    buttons.append([InlineKeyboardButton(text="Админ меню", callback_data="admin_back")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)

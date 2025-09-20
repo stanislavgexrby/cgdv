@@ -726,6 +726,37 @@ class Database:
             )
             return [dict(row) for row in rows]
 
+    async def get_user_moderation_stats(self, user_id: int) -> Dict:
+        """Получение статистики модерации пользователя"""
+        async with self._pg_pool.acquire() as conn:
+            stats = {}
+
+            reports_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM reports WHERE reported_user_id = $1",
+                user_id
+            )
+            stats['reports_total'] = reports_count or 0
+
+            resolved_reports = await conn.fetchval(
+                "SELECT COUNT(*) FROM reports WHERE reported_user_id = $1 AND status = 'resolved'",
+                user_id
+            )
+            stats['reports_resolved'] = resolved_reports or 0
+
+            bans_count = await conn.fetchval(
+                "SELECT COUNT(*) FROM bans WHERE user_id = $1",
+                user_id
+            )
+            stats['bans_total'] = bans_count or 0
+
+            last_ban = await conn.fetchrow(
+                "SELECT reason, created_at, expires_at FROM bans WHERE user_id = $1 ORDER BY created_at DESC LIMIT 1",
+                user_id
+            )
+            stats['last_ban'] = dict(last_ban) if last_ban else None
+
+            return stats
+
     async def ban_user(self, user_id: int, reason: str, expires_at: datetime = None) -> bool:
         """Бан пользователя"""
         async with self._pg_pool.acquire() as conn:

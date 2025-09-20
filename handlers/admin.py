@@ -144,7 +144,7 @@ async def show_admin_reports(callback: CallbackQuery, db):
     await _show_report(callback, reports[0], 0, len(reports), db)
 
 async def _show_report(callback: CallbackQuery, report: dict, current_index: int, total_reports: int, db):
-    """Показ отдельной жалобы с индексом"""
+    """Показ отдельной жалобы с индексом и статистикой нарушений"""
     report_id = report['id']
     reported_user_id = report['reported_user_id']
     reporter_id = report['reporter_id']
@@ -156,20 +156,35 @@ async def _show_report(callback: CallbackQuery, report: dict, current_index: int
     reporter_info = _format_user_info(reporter_id, report.get('reporter_username'))
     reported_info = _format_user_info(reported_user_id, report.get('reported_username'))
     
+    mod_stats = await db.get_user_moderation_stats(reported_user_id)
+    
     header = (
         f"🚩 Жалоба #{report_id} ({current_index + 1}/{total_reports}) | {game_name}\n"
         f"📅 Дата: {_format_datetime(report.get('created_at'))}\n"
         f"👤 Жалоба от: {reporter_info}\n"
         f"🎯 На пользователя: {reported_info}\n"
-        f"📋 Причина: {report.get('report_reason', 'inappropriate_content')}\n"
+        f"📋 Причина: {report.get('report_reason', 'inappropriate_content')}\n\n"
     )
     
+    stats_text = "📊 <b>История нарушений:</b>\n"
+    stats_text += f"• Жалоб всего: {mod_stats['reports_total']}\n"
+    stats_text += f"• Подтвержденных жалоб: {mod_stats['reports_resolved']}\n"
+    stats_text += f"• Банов всего: {mod_stats['bans_total']}\n"
+    
+    if mod_stats['last_ban']:
+        last_ban = mod_stats['last_ban']
+        ban_date = _format_datetime(last_ban['created_at'])
+        stats_text += f"• Последний бан: {ban_date}\n"
+        stats_text += f"• Причина: {last_ban['reason']}\n"
+    else:
+        stats_text += "• Последний бан: не было\n"
+    
     if profile:
-        body = "\n👤 Анкета нарушителя:\n\n" + texts.format_profile(profile, show_contact=True)
+        body = "\n👤 <b>Анкета нарушителя:</b>\n\n" + texts.format_profile(profile, show_contact=True)
     else:
         body = f"\n❌ Анкета пользователя не найдена"
     
-    text = _truncate_text(header + body)
+    text = _truncate_text(header + stats_text + body)
     keyboard = kb.admin_report_actions(reported_user_id, report_id, current_index, total_reports)
     
     photo_id = profile.get('photo_id') if profile else None
@@ -271,30 +286,6 @@ async def _ban_user_action(callback: CallbackQuery, report_id: int, user_id: int
     
     await _show_next_report(callback, db)
 
-async def unban_user(callback: CallbackQuery, db):
-    """Снятие бана"""
-    try:
-        user_id = int(callback.data.split("_")[2])
-    except (ValueError, IndexError):
-        await callback.answer("❌ Ошибка данных", show_alert=True)
-        return
-    
-    success = await db.unban_user(user_id)
-    
-    if success:
-        notify_user_unbanned(callback.bot, user_id)
-        logger.info(f"Админ снял бан с пользователя {user_id}")
-        await callback.answer("Бан снят")
-        
-        bans = await db.get_all_bans()
-        if not bans:
-            text = "Бан снят!\n\nБольше активных банов нет."
-            await safe_edit_message(callback, text, kb.admin_back_menu())
-        else:
-            await _show_ban(callback, bans[0], 0, len(bans))
-    else:
-        await callback.answer("❌ Ошибка снятия бана", show_alert=True)
-
 async def _dismiss_report_action(callback: CallbackQuery, report_id: int, db):
     """Отклонение жалобы"""
     success = await db.update_report_status(report_id, status="ignored", admin_id=callback.from_user.id)
@@ -330,17 +321,14 @@ async def admin_unban_user(callback: CallbackQuery, db):
     success = await db.unban_user(user_id)
     
     if success:
-        # Отправляем уведомление пользователю
         await notify_user_unbanned(callback.bot, user_id)
         logger.info(f"Админ снял бан с пользователя {user_id}")
         
-        # Проверяем есть ли еще баны для показа
         bans = await db.get_all_bans()
         if not bans:
             text = "✅ Бан снят!\n\nБольше активных банов нет."
             await safe_edit_message(callback, text, kb.admin_back_menu())
         else:
-            # Показываем первый бан из оставшихся
             await _show_ban(callback, bans[0], 0, len(bans))
         
         await callback.answer("✅ Бан снят и пользователь уведомлен")
