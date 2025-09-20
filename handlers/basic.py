@@ -216,6 +216,24 @@ async def check_subscription(user_id: int, game: str, bot: Bot) -> bool:
         logger.error(f"Ошибка проверки подписки для канала {channel}: {e}")
         return False
 
+@router.callback_query(F.data == "rules_understood")
+async def rules_understood(callback: CallbackQuery, db):
+    """Понимание правил и переход в главное меню"""
+    user_id = callback.from_user.id
+    user = await db.get_user(user_id)
+
+    if not user or not user.get('current_game'):
+        await callback.answer("Ошибка", show_alert=True)
+        return
+
+    game = user['current_game']
+    profile = await db.get_user_profile(user_id, game)
+    has_profile = profile is not None
+    text = get_main_menu_text(game, has_profile)
+
+    await send_main_menu_with_photo(callback, text, kb.main_menu(has_profile, game), game=game, db=db)
+    await callback.answer()
+
 def _format_expire_date(expires_at: str | datetime) -> str:
     """Приводим expires_at (str или datetime) к красивому виду"""
     if isinstance(expires_at, str):
@@ -320,11 +338,8 @@ async def select_game(callback: CallbackQuery, db):
     logger.info(f"Пользователь {user_id} выбрал игру: {game}")
 
     await db.create_user(user_id, username, game)
-    profile = await db.get_user_profile(user_id, game)
-    has_profile = profile is not None
-    text = get_main_menu_text(game, has_profile)
 
-    await send_main_menu_with_photo(callback, text, kb.main_menu(has_profile, game), game=game, db=db)
+    await safe_edit_message(callback, texts.COMMUNITY_RULES_SIMPLE, kb.community_rules_simple())
     await callback.answer()
 
 @router.callback_query(F.data.startswith("switch_"))
@@ -354,11 +369,8 @@ async def switch_game(callback: CallbackQuery, db):
     logger.info(f"Переключение на игру: {game}")
 
     await db.switch_game(user_id, game)
-    profile = await db.get_user_profile(user_id, game)
-    has_profile = profile is not None
-    text = get_main_menu_text(game, has_profile)
 
-    await send_main_menu_with_photo(callback, text, kb.main_menu(has_profile, game), game=game, db=db)
+    await safe_edit_message(callback, texts.COMMUNITY_RULES_SIMPLE, kb.community_rules_simple())
     await callback.answer()
 
 # ==================== НАВИГАЦИЯ ПО МЕНЮ ====================

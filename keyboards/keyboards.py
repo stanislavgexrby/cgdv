@@ -4,6 +4,12 @@ import config.settings as settings
 
 # ==================== ОСНОВНЫЕ МЕНЮ ====================
 
+def community_rules_simple() -> InlineKeyboardMarkup:
+    """Простое уведомление о правилах"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Понятно", callback_data="rules_understood")]
+    ])
+
 def game_selection() -> InlineKeyboardMarkup:
     """Выбор игры при старте"""
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -461,8 +467,8 @@ def profile_actions(user_id: int) -> InlineKeyboardMarkup:
     """Действия с профилем в поиске - новая раскладка"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="Лайк", callback_data=f"like_{user_id}"),
-            InlineKeyboardButton(text="Пропустить", callback_data=f"skip_{user_id}")
+            InlineKeyboardButton(text="❤️", callback_data=f"like_{user_id}"),
+            InlineKeyboardButton(text="👎", callback_data=f"skip_{user_id}")
         ],
         [
             InlineKeyboardButton(text="Пожаловаться", callback_data=f"report_{user_id}"),
