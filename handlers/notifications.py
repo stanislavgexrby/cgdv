@@ -18,13 +18,12 @@ class NotificationQueue:
     
     def __init__(self):
         self._active_tasks = set()
-        self._max_concurrent = 10  # Максимум одновременных уведомлений
+        self._max_concurrent = 10
         self._retry_count = 2
         
     async def add_notification(self, coro, description: str = "notification"):
         """Добавить уведомление в очередь для асинхронной обработки"""
         if len(self._active_tasks) >= self._max_concurrent:
-            # Ждем освобождения слота
             if self._active_tasks:
                 done, pending = await asyncio.wait(
                     self._active_tasks, 
@@ -45,9 +44,8 @@ class NotificationQueue:
             except Exception as e:
                 logger.warning(f"Ошибка {description} (попытка {attempt + 1}): {e}")
                 if attempt < self._retry_count:
-                    await asyncio.sleep(0.5 * (attempt + 1))  # Экспоненциальная задержка
+                    await asyncio.sleep(0.5 * (attempt + 1)) 
 
-# Глобальная очередь уведомлений
 _notification_queue = NotificationQueue()
 
 # ==================== БАЗОВЫЕ ФУНКЦИИ ====================
@@ -59,10 +57,10 @@ async def get_user_interaction_state(user_id: int, db) -> str:
         last_state = await db._redis.get(cache_key)
         
         busy_states = [
-            'search_browsing',     # Просматривает анкеты
-            'profile_editing',     # Редактирует профиль
-            'profile_creation',    # Создает профиль
-            'search_setup'         # Настраивает фильтры поиска
+            'search_browsing',
+            'profile_editing',
+            'profile_creation',
+            'search_setup'
         ]
         
         if last_state in busy_states:
@@ -82,14 +80,12 @@ async def smart_notification(bot: Bot, user_id: int, text: str,
         user_state = await get_user_interaction_state(user_id, db) if db else 'available'
         
         if user_state == 'busy':
-            # Простое текстовое уведомление без кнопок действий
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="✅ Понятно", callback_data="dismiss_notification")]
             ])
             notification_text = f"🔔 {text}"
             return await safe_send_notification(bot, user_id, notification_text, None, keyboard)
         else:
-            # Полное уведомление с быстрыми действиями
             if quick_actions:
                 keyboard = kb.create_navigation_keyboard(quick_actions)
             else:
@@ -109,11 +105,9 @@ async def update_user_activity(user_id: int, state: str = None, db=None):
         import time
         current_time = time.time()
         
-        # Обновляем время последней активности
         activity_key = f"last_activity:{user_id}"
         await db._redis.setex(activity_key, 300, str(current_time))  # 5 минут
         
-        # Обновляем состояние если передано
         if state:
             state_key = f"user_state:{user_id}"
             await db._redis.setex(state_key, 300, state)  # 5 минут
@@ -299,7 +293,6 @@ async def notify_admin_new_report(bot: Bot, reporter_id: int, reported_user_id: 
 
         success_count = 0
         for admin_id in settings.ADMIN_IDS:
-            # Изменили add_ok_button=False на True, чтобы добавить кнопку "Понятно"
             success = await safe_send_notification(bot, admin_id, text, add_ok_button=True)
             if success:
                 success_count += 1

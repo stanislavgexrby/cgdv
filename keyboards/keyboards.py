@@ -208,28 +208,23 @@ def positions(game: str, selected: List[str] = None, with_navigation: bool = Fal
 
         buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
 
-    # Кнопка "Любая позиция" (только для профиля)
     if for_profile or editing:
         if "any" in selected:
             buttons.append([InlineKeyboardButton(text="✅ Не указана", callback_data="pos_remove_any")])
         else:
             buttons.append([InlineKeyboardButton(text="Не указана", callback_data="pos_add_any")])
 
-    # Кнопка готово
     if with_navigation:
-        # Для создания профиля
         if selected:
             buttons.append([InlineKeyboardButton(text="Готово", callback_data="pos_done")])
         else:
             buttons.append([InlineKeyboardButton(text="Выберите позицию", callback_data="pos_need")])
     elif editing:
-        # Для редактирования профиля
         if selected:
             buttons.append([InlineKeyboardButton(text="Сохранить", callback_data="pos_save_edit")])
         else:
             buttons.append([InlineKeyboardButton(text="Выберите позицию", callback_data="pos_need")])
 
-    # Навигационные кнопки
     if with_navigation:
         nav_buttons = [
             InlineKeyboardButton(text="Назад", callback_data="profile_back"),
@@ -261,14 +256,12 @@ def goals(selected: List[str] = None, with_navigation: bool = False,
 
         buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
 
-    # Кнопка "Любая цель"
     if for_profile or editing:
         if "any" in selected:
             buttons.append([InlineKeyboardButton(text="✅ Не указана", callback_data="goals_remove_any")])
         else:
             buttons.append([InlineKeyboardButton(text="Не указана", callback_data="goals_add_any")])
 
-    # Кнопка готово
     if with_navigation:
         if selected:
             buttons.append([InlineKeyboardButton(text="Готово", callback_data="goals_done")])
@@ -280,7 +273,6 @@ def goals(selected: List[str] = None, with_navigation: bool = False,
         else:
             buttons.append([InlineKeyboardButton(text="Выберите цель", callback_data="goals_need")])
 
-    # Навигационные кнопки
     if with_navigation:
         nav_buttons = [
             InlineKeyboardButton(text="Назад", callback_data="profile_back"),

@@ -233,10 +233,8 @@ async def edit_add_any_position(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     game = data['game']
     
-    # Устанавливаем только "any"
     await state.update_data(positions_selected=["any"])
     
-    # Обновляем клавиатуру
     keyboard = kb.positions(game, ["any"], for_profile=True, editing=True)
     await callback.message.edit_reply_markup(reply_markup=keyboard)
     await callback.answer()
@@ -670,10 +668,8 @@ async def edit_positions_need(callback: CallbackQuery):
 @router.callback_query(F.data == "goals_add_any", EditProfileForm.edit_goals)
 async def edit_add_any_goal(callback: CallbackQuery, state: FSMContext):
     """Добавление 'любой цели' при редактировании"""
-    # Устанавливаем только "any"
     await state.update_data(goals_selected=["any"])
     
-    # Обновляем клавиатуру
     keyboard = kb.goals(["any"], for_profile=True, editing=True)
     await callback.message.edit_reply_markup(reply_markup=keyboard)
     await callback.answer()
@@ -684,13 +680,11 @@ async def edit_remove_any_goal(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     selected = data.get('goals_selected', [])
     
-    # Убираем "any"
     if "any" in selected:
         selected.remove("any")
     
     await state.update_data(goals_selected=selected)
     
-    # Обновляем клавиатуру
     keyboard = kb.goals(selected, for_profile=True, editing=True)
     await callback.message.edit_reply_markup(reply_markup=keyboard)
     await callback.answer()
@@ -868,8 +862,8 @@ async def delete_profile(callback: CallbackQuery, db):
     if success:
         game_name = settings.GAMES.get(game, game)
         text = f"Анкета в {game_name} успешно удалена!\n\n"
-        text += "Все связанные данные (лайки и мэтчи) также удалены.\n\n"
-        text += "Вы можете создать новую анкету в любое время."
+        text += "Все связанные данные (лайки и мэтчи) также удалены\n\n"
+        text += "Вы можете создать новую анкету в любое время"
 
         buttons = [
             [kb.InlineKeyboardButton(text="Создать новую анкету", callback_data="recreate_profile")],
@@ -880,7 +874,7 @@ async def delete_profile(callback: CallbackQuery, db):
         await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
         logger.info(f"Профиль удален для {user_id} в {game}")
     else:
-        text = "Произошла ошибка при удалении анкеты.\n\nПопробуйте еще раз."
+        text = "Произошла ошибка при удалении анкеты\n\nПопробуйте еще раз"
         await callback.message.edit_text(text, reply_markup=kb.back(), parse_mode='HTML')
 
     await callback.answer()

@@ -7,7 +7,7 @@ import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
 from handlers.basic import check_ban_and_profile, safe_edit_message, _format_expire_date
-from handlers.notifications import notify_about_match
+from handlers.notifications import notify_about_match, notify_admin_new_report
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -98,13 +98,13 @@ async def show_next_like_or_finish(callback: CallbackQuery, user_id: int, game: 
     if likes:
         await show_like_profile(callback, likes, 0)
     else:
-        text = "Все лайки просмотрены!\n\nЗайдите позже, возможно появятся новые."
+        text = "Все лайки просмотрены!\n\nЗайдите позже, возможно появятся новые"
         await safe_edit_message(callback, text, kb.back())
 
 async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
     """Показ профиля в лайках"""
     if index >= len(likes):
-        text = "Все лайки просмотрены!\n\nЗайдите позже, возможно появятся новые."
+        text = "Все лайки просмотрены!\n\nЗайдите позже, возможно появятся новые"
         await safe_edit_message(callback, text, kb.back())
         await callback.answer()
         return
@@ -400,15 +400,7 @@ async def report_like(callback: CallbackQuery, db):
         await callback.answer("Жалоба отправлена модератору")
         logger.info(f"Жалоба на лайк: {user_id} пожаловался на {target_user_id}")
 
-        for admin_id in settings.ADMIN_IDS:
-            try:
-                await callback.bot.send_message(
-                    admin_id,
-                    f"🚩 Новая жалоба!\n\nПользователь {user_id} пожаловался на лайк от {target_user_id} в игре {settings.GAMES.get(game, game)}",
-                    parse_mode='HTML'
-                )
-            except Exception as e:
-                logger.error(f"Ошибка отправки уведомления админу {admin_id}: {e}")
+        await notify_admin_new_report(callback.bot, user_id, target_user_id, game)
     else:
         await callback.answer("Вы уже жаловались на этого пользователя", show_alert=True)
         return
@@ -453,7 +445,7 @@ async def show_contact(callback: CallbackQuery, db):
         return
 
     profile_text = texts.format_profile(target_profile, show_contact=True)
-    text = f"Ваш матч:\n\n{profile_text}"
+    text = f"Ваш мэтч:\n\n{profile_text}"
 
     keyboard = kb.contact(target_profile.get('username'))
 

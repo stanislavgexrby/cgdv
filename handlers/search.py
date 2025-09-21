@@ -4,7 +4,7 @@ from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 from handlers.basic import check_ban_and_profile, safe_edit_message, SearchForm
-from handlers.notifications import notify_about_match, notify_about_like, update_user_activity
+from handlers.notifications import notify_about_match, notify_about_like, update_user_activity, notify_admin_new_report
 from handlers.likes import show_profile_with_photo
 
 import keyboards.keyboards as kb
@@ -155,7 +155,7 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
         if success:
             await db._clear_pattern_cache(f"search:{user_id}:{game}:*")
 
-            text = "Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время."
+            text = "Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время"
             keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
                 [kb.InlineKeyboardButton(text="Продолжить поиск", callback_data="continue_search")],
                 [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
@@ -180,15 +180,7 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
             logger.info(f"Жалоба добавлена: {user_id} пожаловался на {target_user_id}")
             await callback.answer("Жалоба отправлена")
 
-            for admin_id in settings.ADMIN_IDS:
-                try:
-                    await callback.bot.send_message(
-                        admin_id,
-                        f"Новая жалоба!\n\nПользователь {user_id} пожаловался на анкету {target_user_id} в игре {settings.GAMES.get(game, game)}",
-                        parse_mode='HTML'
-                    )
-                except Exception as e:
-                    logger.error(f"Ошибка отправки уведомления админу {admin_id}: {e}")
+            await notify_admin_new_report(callback.bot, user_id, target_user_id, game)
         else:
             await callback.answer("Вы уже жаловались на эту анкету", show_alert=True)
 
@@ -201,7 +193,7 @@ async def show_current_profile(callback: CallbackQuery, state: FSMContext):
     if index >= len(profiles):
         await state.clear()
         game_name = settings.GAMES.get(data.get('game', 'dota'), data.get('game', 'dota'))
-        text = f"Больше анкет в {game_name} не найдено. Попробуйте изменить фильтры или зайти позже."
+        text = f"Больше анкет в {game_name} не найдено! Попробуйте изменить фильтры или зайти позже"
 
         keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
             [kb.InlineKeyboardButton(text="Новый поиск", callback_data="search")],
@@ -467,7 +459,7 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
     if not profiles:
         await state.clear()
         game_name = settings.GAMES.get(data['game'], data['game'])
-        text = f"Анкеты в {game_name} не найдены. Попробуйте изменить фильтры или зайти позже."
+        text = f"Анкеты в {game_name} не найдены! Попробуйте изменить фильтры или зайти позже"
 
         keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
             [kb.InlineKeyboardButton(text="Новый поиск", callback_data="search")],

@@ -1,32 +1,14 @@
 import config.settings as settings
-import html
-import re
-
-def _escape_html(text: str) -> str:
-    """Экранирование HTML символов"""
-    return html.escape(text, quote=False)
-
-def _format_profile_url(url: str, game: str = None) -> str:
-    """Форматирование URL для HTML"""
-    if not url or not url.strip():
-        return None
-    
-    url = url.strip()
-    
-    if not url.startswith(('http://', 'https://')):
-        url = 'https://' + url
-    
-    return url
 
 def format_profile(user: dict, show_contact: bool = False) -> str:
     if not user:
-        return "Профиль не найден."
+        return "Профиль не найден"
 
     game = user.get('current_game') or user.get('game', 'dota')
 
     name_parts = user['name'].split()
-    
-    # Создаем переменную для никнейма с ссылкой или без
+
+    # Создаем переменную для никнейма с ссылкой
     profile_url = user.get('profile_url')
     if profile_url and profile_url.strip():
         nickname_with_link = f"<a href='{profile_url}'>{user['nickname']}</a>"
@@ -40,7 +22,7 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
     else:
         text = f"<b>{user['name']}</b> <b>{nickname_with_link}</b>, {user['age']} лет\n\n"
 
-# Рейтинг
+    # Рейтинг
     rating = user['rating']
     if rating == 'any':
         rating_text = f"<b>Рейтинг:</b> Не указан"
@@ -108,21 +90,21 @@ WELCOME = """<b>ДОБРО ПОЖАЛОВАТЬ В CG TEAMUP</b>
 
 COMMUNITY_RULES_SIMPLE = """<b>Важная информация</b>
 
-Создавая анкету или используя бота, Вы соглашаетесь с <b><a href='https://google.com'>правилами сообщества</a></b>."""
+Создавая анкету или используя бота, Вы соглашаетесь с <b><a href='https://google.com'>правилами сообщества</a></b>"""
 
-PROFILE_CREATED = "Анкета создана. Теперь можете искать сокомандников."
+PROFILE_CREATED = "Анкета создана! Теперь можете искать сокомандников"
 
-PROFILE_UPDATED = "Анкета обновлена."
+PROFILE_UPDATED = "Анкета обновлена"
 
-PROFILE_DELETED = "Анкета удалена."
+PROFILE_DELETED = "Анкета удалена"
 
-LIKE_SENT = "Лайк отправлен. Если игрок лайкнет Вас в ответ, вы увидите его контакты."
+LIKE_SENT = "Лайк отправлен! Если игрок лайкнет Вас в ответ, вы увидите его контакты"
 
-MATCH_CREATED = "Это мэтч.\n\nВы понравились друг другу."
+MATCH_CREATED = "Это мэтч\n\nВы понравились друг другу"
 
-NO_PROFILES = "Анкеты не найдены. Попробуйте изменить фильтры или зайти позже."
+NO_PROFILES = "Анкеты не найдены! Попробуйте изменить фильтры или зайти позже"
 
-NEW_LIKE = "Кто-то лайкнул Вашу анкету. Зайдите в «Лайки» чтобы посмотреть."
+NEW_LIKE = "Кто-то лайкнул Вашу анкету! Зайдите в «Лайки» чтобы посмотреть"
 
 QUESTIONS = {
     "name": "Введите Ваше имя и фамилию:",
@@ -137,10 +119,10 @@ QUESTIONS = {
     "photo": "Отправьте фото или нажмите 'Пропустить':"
 }
 
-PROFILE_RECREATED = "Новая анкета создана! Старая анкета была заменена."
+PROFILE_RECREATED = "Новая анкета создана! Старая анкета была заменена"
 
-PROFILE_DELETED_BY_ADMIN = "Ваша анкета была удалена модератором из-за нарушения правил сообщества.\n\nВы можете создать новую анкету, соблюдая правила."
+PROFILE_DELETED_BY_ADMIN = "Ваша анкета была удалена модератором из-за нарушения правил сообщества\n\nВы можете создать новую анкету, соблюдая правила."
 
-USER_BANNED = "Вы заблокированы до {until_date} за нарушение правил сообщества.\n\nВо время блокировки Вы не можете:\n• Создавать анкеты\n• Искать игроков\n• Ставить лайки\n• Просматривать лайки и мтчи"
+USER_BANNED = "Вы заблокированы до {until_date} за нарушение правил сообщества\n\nВо время блокировки Вы не можете:\n• Создавать анкеты\n• Искать игроков\n• Ставить лайки\n• Просматривать лайки и мэтчи"
 
-USER_UNBANNED = "Блокировка снята. Теперь Вы можете снова пользоваться ботом."
+USER_UNBANNED = "Блокировка снята! Теперь Вы можете снова пользоваться ботом"

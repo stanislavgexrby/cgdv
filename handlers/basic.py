@@ -78,7 +78,7 @@ def admin_only(func):
     @wraps(func)
     async def wrapper(callback: CallbackQuery, *args, **kwargs):
         if not settings.is_admin(callback.from_user.id):
-            await callback.answer("Нет прав", show_alert=True)
+            await callback.answer("У Вас нет прав для использования этой команды", show_alert=True)
             return
         return await func(callback, *args, **kwargs)
     return wrapper
@@ -141,17 +141,14 @@ async def get_menu_photo(bot, game: str = None):
     """Получить фото для меню (с кешированием file_id)"""
     photo_key = game if game in ['dota', 'cs'] else 'default'
     
-    # Сначала пробуем кешированный file_id
     cached_id = settings.get_cached_photo_id(photo_key)
     if cached_id:
         return cached_id
     
-    # Если нет кеша - отправляем локальный файл
     photo_path = settings.MENU_PHOTOS.get(photo_key)
     if photo_path and os.path.exists(photo_path):
         return FSInputFile(photo_path)
     
-    # Fallback - возвращаем None (отправим без фото)
     return None
 
 async def send_main_menu_with_photo(callback_or_message, text: str, keyboard, game: str = None, db=None):
@@ -159,7 +156,6 @@ async def send_main_menu_with_photo(callback_or_message, text: str, keyboard, ga
     photo = await get_menu_photo(callback_or_message.bot if hasattr(callback_or_message, 'bot') else None, game)
     
     if not photo:
-        # Fallback на текстовое сообщение
         if hasattr(callback_or_message, 'message'):
             await safe_edit_message(callback_or_message, text, keyboard)
         else:
@@ -168,7 +164,6 @@ async def send_main_menu_with_photo(callback_or_message, text: str, keyboard, ga
     
     try:
         if hasattr(callback_or_message, 'message'):
-            # Это callback
             await callback_or_message.message.delete()
             sent_message = await callback_or_message.message.answer_photo(
                 photo=photo,
@@ -177,24 +172,21 @@ async def send_main_menu_with_photo(callback_or_message, text: str, keyboard, ga
                 parse_mode='HTML'
             )
         else:
-            # Это обычное сообщение
             sent_message = await callback_or_message.answer_photo(
                 photo=photo,
                 caption=text,
                 reply_markup=keyboard,
                 parse_mode='HTML'
             )
-        
-        # Кешируем file_id если отправляли локальный файл
+
         if isinstance(photo, FSInputFile) and sent_message.photo:
             photo_key = game if game in ['dota', 'cs'] else 'default'
             file_id = sent_message.photo[-1].file_id
             settings.cache_photo_id(photo_key, file_id)
             logger.info(f"Кеширован file_id для {photo_key}: {file_id}")
-            
+
     except Exception as e:
         logger.warning(f"Ошибка отправки главного меню с фото для игры {game}: {e}")
-        # Fallback на обычное текстовое сообщение
         if hasattr(callback_or_message, 'message'):
             await safe_edit_message(callback_or_message, text, keyboard)
         else:
@@ -445,7 +437,6 @@ async def view_profile(callback: CallbackQuery, db):
             )
     except Exception as e:
         logger.error(f"Ошибка отображения профиля: {e}")
-        # Fallback - отправляем новое сообщение
         try:
             if profile.get('photo_id'):
                 await callback.bot.send_photo(

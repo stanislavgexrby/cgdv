@@ -116,9 +116,9 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
                     return f"Текущая ссылка: <b>{current}</b>\n\nВведите новую ссылку на FACEIT или нажмите 'Продолжить':"
             else:
                 if game == 'dota':
-                    return "Ссылка не задана.\n\nВведите ссылку на Dotabuff или нажмите 'Продолжить':"
+                    return "Ссылка не задана\n\nВведите ссылку на Dotabuff или нажмите 'Продолжить':"
                 else:
-                    return "Ссылка не задана.\n\nВведите ссылку на FACEIT или нажмите 'Продолжить':"
+                    return "Ссылка не задана\n\nВведите ссылку на FACEIT или нажмите 'Продолжить':"
         elif step == ProfileStep.REGION:
             current = data.get('region', '')
             if current:
@@ -149,13 +149,13 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
             if current:
                 return f"Текущее описание: <b>{current}</b>\n\nВведите новое описание или нажмите 'Продолжить':"
             else:
-                return "Описание не задано.\n\nВведите описание или нажмите 'Продолжить':"
+                return "Описание не задано\n\nВведите описание или нажмите 'Продолжить':"
         elif step == ProfileStep.PHOTO:
             current = data.get('photo_id', '')
             if current:
-                return "Фото загружено.\n\nОтправьте новое фото или нажмите 'Продолжить':"
+                return "Фото загружено\n\nОтправьте новое фото или нажмите 'Продолжить':"
             else:
-                return "Фото не загружено.\n\nОтправьте фото или нажмите 'Продолжить':"
+                return "Фото не загружено\n\nОтправьте фото или нажмите 'Продолжить':"
     
     if step == ProfileStep.NAME:
         return texts.QUESTIONS['name']
@@ -347,7 +347,6 @@ async def profile_continue(callback: CallbackQuery, state: FSMContext, db):
         if current_index < len(PROFILE_STEPS_ORDER) - 1:
             next_step = PROFILE_STEPS_ORDER[current_index + 1]
             
-            # Проверяем есть ли данные на следующем шаге
             next_has_data = False
             if next_step == ProfileStep.NAME and data.get('name'):
                 next_has_data = True
@@ -366,10 +365,8 @@ async def profile_continue(callback: CallbackQuery, state: FSMContext, db):
             elif next_step == ProfileStep.PHOTO and data.get('photo_id'):
                 next_has_data = True
             
-            # Если на следующем шаге есть данные - показываем их
             await show_profile_step(callback, state, next_step, show_current=next_has_data)
         else:
-            # Последний шаг - сохраняем профиль
             await save_profile_flow_callback(callback, state, None, db)
     except Exception as e:
         logger.error(f"Ошибка продолжения: {e}")
@@ -395,11 +392,9 @@ async def process_name(message: Message, state: FSMContext):
 
     await state.update_data(name=name)
     
-    # Проверяем есть ли данные на следующем шаге (nickname)
     data = await state.get_data()
     has_next_data = bool(data.get('nickname'))
     
-    # Показываем следующий шаг с учетом наличия данных
     await show_profile_step(message, state, ProfileStep.NICKNAME, show_current=has_next_data)
 
 @router.message(ProfileForm.name, ~F.text)
@@ -422,11 +417,9 @@ async def process_nickname(message: Message, state: FSMContext):
 
     await state.update_data(nickname=nickname)
     
-    # Проверяем есть ли данные на следующем шаге (age)
     data = await state.get_data()
     has_next_data = bool(data.get('age'))
     
-    # Показываем следующий шаг с учетом наличия данных
     await show_profile_step(message, state, ProfileStep.AGE, show_current=has_next_data)
 
 @router.message(ProfileForm.nickname, ~F.text)
@@ -552,17 +545,14 @@ async def remove_any_rating(callback: CallbackQuery, state: FSMContext):
     game = data['game']
     current_rating = data.get('rating')
     
-    # Если "any" не выбран - ничего не делаем
     if current_rating != "any":
         await callback.answer("'Не указан' не выбран")
         return
     
-    # Убираем рейтинг из state
     if 'rating' in data:
         del data['rating']
         await state.set_data(data)
     
-    # Обновляем клавиатуру
     keyboard = kb.ratings(game, selected_rating=None, with_navigation=True)
     try:
         await callback.message.edit_reply_markup(reply_markup=keyboard)
@@ -574,19 +564,17 @@ async def remove_any_rating(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("rating_select_"), ProfileForm.rating)
 async def select_rating(callback: CallbackQuery, state: FSMContext):
     """Выбор рейтинга"""
-    rating = callback.data.split("_", 2)[2]  # Более безопасный парсинг: rating_select_herald -> herald
+    rating = callback.data.split("_", 2)[2]
     data = await state.get_data()
     game = data['game']
     current_rating = data.get('rating')
     
-    # Если уже выбран этот же рейтинг - ничего не делаем
     if current_rating == rating:
         await callback.answer("Этот рейтинг уже выбран")
         return
     
     await state.update_data(rating=rating)
     
-    # Обновляем клавиатуру только если что-то изменилось
     keyboard = kb.ratings(game, selected_rating=rating, with_navigation=True)
     try:
         await callback.message.edit_reply_markup(reply_markup=keyboard)
@@ -598,22 +586,19 @@ async def select_rating(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("rating_remove_"), ProfileForm.rating)
 async def remove_rating(callback: CallbackQuery, state: FSMContext):
     """Сброс выбора рейтинга"""
-    rating = callback.data.split("_", 2)[2]  # rating_remove_herald -> herald
+    rating = callback.data.split("_", 2)[2]
     data = await state.get_data()
     game = data['game']
     current_rating = data.get('rating')
     
-    # Если этот рейтинг не выбран - ничего не делаем
     if current_rating != rating:
         await callback.answer("Этот рейтинг не выбран")
         return
     
-    # Убираем рейтинг из state
     if 'rating' in data:
         del data['rating']
         await state.set_data(data)
     
-    # Обновляем клавиатуру
     keyboard = kb.ratings(game, selected_rating=None, with_navigation=True)
     try:
         await callback.message.edit_reply_markup(reply_markup=keyboard)
@@ -630,10 +615,8 @@ async def rating_done(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Выберите рейтинг", show_alert=True)
         return
     
-    # Проверяем есть ли данные на следующем шаге (profile_url)
     has_next_data = data.get('profile_url') is not None
     
-    # Показываем следующий шаг с учетом наличия данных
     await show_profile_step(callback, state, ProfileStep.PROFILE_URL, show_current=has_next_data)
     await callback.answer()
 
@@ -648,14 +631,12 @@ async def select_any_region(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     current_region = data.get('region')
     
-    # Если уже выбран "any" - ничего не делаем
     if current_region == "any":
         await callback.answer("Уже выбрано 'Не указан'")
         return
     
     await state.update_data(region="any")
     
-    # Обновляем клавиатуру
     keyboard = kb.regions(selected_region="any", with_navigation=True)
     try:
         await callback.message.edit_reply_markup(reply_markup=keyboard)
@@ -670,17 +651,14 @@ async def remove_any_region(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     current_region = data.get('region')
     
-    # Если "any" не выбран - ничего не делаем
     if current_region != "any":
         await callback.answer("'Не указан' не выбран")
         return
     
-    # Убираем регион из state
     if 'region' in data:
         del data['region']
         await state.set_data(data)
     
-    # Обновляем клавиатуру
     keyboard = kb.regions(selected_region=None, with_navigation=True)
     try:
         await callback.message.edit_reply_markup(reply_markup=keyboard)
@@ -692,18 +670,16 @@ async def remove_any_region(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("region_select_"), ProfileForm.region)
 async def select_region(callback: CallbackQuery, state: FSMContext):
     """Выбор региона"""
-    region = callback.data.split("_", 2)[2]  # region_select_eeu -> eeu
+    region = callback.data.split("_", 2)[2]
     data = await state.get_data()
     current_region = data.get('region')
     
-    # Если уже выбран этот же регион - ничего не делаем
     if current_region == region:
         await callback.answer("Этот регион уже выбран")
         return
     
     await state.update_data(region=region)
     
-    # Обновляем клавиатуру
     keyboard = kb.regions(selected_region=region, with_navigation=True)
     try:
         await callback.message.edit_reply_markup(reply_markup=keyboard)
@@ -715,21 +691,18 @@ async def select_region(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data.startswith("region_remove_"), ProfileForm.region)
 async def remove_region(callback: CallbackQuery, state: FSMContext):
     """Сброс выбора региона"""
-    region = callback.data.split("_", 2)[2]  # region_remove_eeu -> eeu
+    region = callback.data.split("_", 2)[2]
     data = await state.get_data()
     current_region = data.get('region')
     
-    # Если этот регион не выбран - ничего не делаем
     if current_region != region:
         await callback.answer("Этот регион не выбран")
         return
     
-    # Убираем регион из state
     if 'region' in data:
         del data['region']
         await state.set_data(data)
     
-    # Обновляем клавиатуру
     keyboard = kb.regions(selected_region=None, with_navigation=True)
     try:
         await callback.message.edit_reply_markup(reply_markup=keyboard)
@@ -746,10 +719,8 @@ async def region_done(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Выберите регион", show_alert=True)
         return
     
-    # Проверяем есть ли данные на следующем шаге (positions)
     has_next_data = bool(data.get('positions_selected'))
     
-    # Показываем следующий шаг с учетом наличия данных
     await show_profile_step(callback, state, ProfileStep.POSITIONS, show_current=has_next_data)
     await callback.answer()
 
@@ -764,10 +735,8 @@ async def add_any_position(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     game = data['game']
     
-    # Устанавливаем только "any"
     await state.update_data(positions_selected=["any"])
     
-    # Обновляем клавиатуру
     keyboard = kb.positions(game, ["any"], with_navigation=True)
     await callback.message.edit_reply_markup(reply_markup=keyboard)
     await callback.answer()
@@ -778,14 +747,12 @@ async def remove_any_position(callback: CallbackQuery, state: FSMContext):
     data = await state.get_data()
     game = data['game']
     
-    # Убираем "any"
     selected = data.get('positions_selected', [])
     if "any" in selected:
         selected.remove("any")
     
     await state.update_data(positions_selected=selected)
     
-    # Обновляем клавиатуру
     keyboard = kb.positions(game, selected, with_navigation=True)
     await callback.message.edit_reply_markup(reply_markup=keyboard)
     await callback.answer()
@@ -798,7 +765,6 @@ async def add_position(callback: CallbackQuery, state: FSMContext):
     selected = data.get('positions_selected', [])
     game = data['game']
     
-    # Если позиция уже выбрана - ничего не делаем
     if position in selected:
         await callback.answer("Эта позиция уже выбрана")
         return
@@ -812,7 +778,6 @@ async def add_position(callback: CallbackQuery, state: FSMContext):
     
     await state.update_data(positions_selected=selected)
 
-    # Обновляем клавиатуру
     keyboard = kb.positions(game, selected, with_navigation=True)
     try:
         await callback.message.edit_reply_markup(reply_markup=keyboard)
@@ -829,7 +794,6 @@ async def remove_position(callback: CallbackQuery, state: FSMContext):
     selected = data.get('positions_selected', [])
     game = data['game']
 
-    # Если позиция не выбрана - ничего не делаем
     if position not in selected:
         await callback.answer("Эта позиция не выбрана")
         return
@@ -837,7 +801,6 @@ async def remove_position(callback: CallbackQuery, state: FSMContext):
     selected.remove(position)
     await state.update_data(positions_selected=selected)
 
-    # Обновляем клавиатуру
     keyboard = kb.positions(game, selected, with_navigation=True)
     try:
         await callback.message.edit_reply_markup(reply_markup=keyboard)
@@ -870,10 +833,8 @@ async def positions_need(callback: CallbackQuery):
 @router.callback_query(F.data == "goals_add_any", ProfileForm.goals)
 async def add_any_goal(callback: CallbackQuery, state: FSMContext):
     """Добавление 'любой цели'"""
-    # Устанавливаем только "any"
     await state.update_data(goals_selected=["any"])
     
-    # Обновляем клавиатуру
     keyboard = kb.goals(["any"], with_navigation=True)
     await callback.message.edit_reply_markup(reply_markup=keyboard)
     await callback.answer()
@@ -888,7 +849,6 @@ async def remove_any_goal(callback: CallbackQuery, state: FSMContext):
     
     await state.update_data(goals_selected=selected)
     
-    # Обновляем клавиатуру
     keyboard = kb.goals(selected, with_navigation=True)
     await callback.message.edit_reply_markup(reply_markup=keyboard)
     await callback.answer()
@@ -947,10 +907,8 @@ async def goals_done(callback: CallbackQuery, state: FSMContext):
 
     await state.update_data(goals=selected)
     
-    # Проверяем есть ли данные на следующем шаге (info)
     has_next_data = 'additional_info' in data
     
-    # Показываем следующий шаг
     await show_profile_step(callback, state, ProfileStep.INFO, show_current=has_next_data)
     await callback.answer()
 
@@ -963,11 +921,9 @@ async def skip_profile_url(callback: CallbackQuery, state: FSMContext):
     """Пропуск ссылки профиля"""
     await state.update_data(profile_url="")
     
-    # Проверяем есть ли данные на следующем шаге (region)
     data = await state.get_data()
     has_next_data = bool(data.get('region'))
     
-    # Показываем следующий шаг с учетом наличия данных
     await show_profile_step(callback, state, ProfileStep.REGION, show_current=has_next_data)
     await callback.answer()
 
@@ -976,11 +932,9 @@ async def skip_info(callback: CallbackQuery, state: FSMContext):
     """Пропуск дополнительной информации"""
     await state.update_data(additional_info="")
     
-    # Проверяем есть ли данные на следующем шаге (photo)
     data = await state.get_data()
     has_next_data = bool(data.get('photo_id'))
     
-    # Показываем следующий шаг с учетом наличия данных
     await show_profile_step(callback, state, ProfileStep.PHOTO, show_current=has_next_data)
     await callback.answer()
 
@@ -995,7 +949,7 @@ async def confirm_cancel_profile(callback: CallbackQuery, state: FSMContext):
     game_name = settings.GAMES.get(data.get('game', 'dota'), 'игры')
     
     text = (f"Отменить создание анкеты?\n\n"
-            f"Вся введенная информация для {game_name} будет потеряна.\n\n"
+            f"Вся введенная информация для {game_name} будет потеряна\n\n"
             f"Вы уверены?")
     
     await safe_edit_message(callback, text, kb.confirm_cancel_profile())
@@ -1061,7 +1015,6 @@ async def continue_profile_creation(callback: CallbackQuery, state: FSMContext):
     try:
         current_step_enum = ProfileStep(current_step)
         
-        # Проверяем есть ли данные для ТЕКУЩЕГО шага
         has_current_data = False
         if current_step_enum == ProfileStep.NAME and data.get('name'):
             has_current_data = True
@@ -1106,7 +1059,7 @@ async def save_profile_flow(message: Message, state: FSMContext, photo_id: str |
         'positions': data.get('positions', []) or data.get('positions_selected', []),
         'goals': data.get('goals', []) or data.get('goals_selected', []),
         'additional_info': data.get('additional_info', '').strip(),
-        'profile_url': data.get('profile_url', ''),  # ДОБАВЛЯЕМ ЭТУ СТРОКУ
+        'profile_url': data.get('profile_url', ''),
         'recreating': is_recreating
     }
 
@@ -1124,7 +1077,7 @@ async def save_profile_flow(message: Message, state: FSMContext, photo_id: str |
     )
 
     if not success:
-        await message.answer("Не удалось сохранить анкету. Попробуйте ещё раз.", parse_mode='HTML')
+        await message.answer("Не удалось сохранить анкету! Попробуйте ещё раз", parse_mode='HTML')
         return
 
     await state.clear()
@@ -1135,7 +1088,7 @@ async def save_profile_flow(message: Message, state: FSMContext, photo_id: str |
 
     if profile:
         if is_recreating:
-            text = f"Новая анкета для {game_name} создана! Старая анкета была заменена.\n\n" + texts.format_profile(profile, show_contact=True)
+            text = f"Новая анкета для {game_name} создана! Старая анкета была заменена\n\n" + texts.format_profile(profile, show_contact=True)
         else:
             text = f"Анкета для {game_name} создана!\n\n" + texts.format_profile(profile, show_contact=True)
 
@@ -1167,9 +1120,9 @@ async def save_profile_flow_callback(callback: CallbackQuery, state: FSMContext,
     if success:
         game_name = settings.GAMES.get(data['game'], data['game'])
         if is_recreating:
-            text = f"Новая анкета для {game_name} создана! Старая анкета была заменена."
+            text = f"Новая анкета для {game_name} создана! Старая анкета была заменена"
         else:
-            text = f"Анкета для {game_name} создана! Теперь можете искать сокомандников."
+            text = f"Анкета для {game_name} создана! Теперь можете искать сокомандников"
         await safe_edit_message(callback, text, kb.back())
     else:
         await safe_edit_message(callback, "Ошибка сохранения", kb.back())

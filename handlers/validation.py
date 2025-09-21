@@ -48,13 +48,13 @@ def validate_profile_input(field: str, value, game: str = None) -> tuple[bool, s
 
             if game == 'dota' and 'dotabuff.com/players/' in url:
                 if url.rstrip('/').endswith('/players'):
-                    return False, ("Неполная ссылка на Dotabuff. Добавьте ваш Player ID.\n\n"
+                    return False, ("Неполная ссылка на Dotabuff. Добавьте ваш Player ID\n\n"
                                 "Пример: https://www.dotabuff.com/players/123456789\n\n"
                                 "Найти ID можно в URL вашего профиля на Dotabuff")
 
             if not is_valid_profile_url(game, url):
                 if game == 'dota':
-                    return False, ("Некорректная ссылка на Dotabuff.\n\n"
+                    return False, ("Некорректная ссылка на Dotabuff\n\n"
                                 "Правильный формат: https://www.dotabuff.com/players/123456789\n\n"
                                 "Где 123456789 - ваш Player ID")
                 elif game == 'cs':
