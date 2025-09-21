@@ -166,7 +166,7 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: s
     async def _notify():
         try:
             game_name = settings.GAMES.get(game, game)
-            text = f"У вас новый мэтч в {game_name}! Зайдите в «Мэтчи», чтобы посмотреть контакты."
+            text = f"У вас новый мэтч в {game_name}! Зайдите в «Мэтчи», чтобы посмотреть контакты"
 
             current_user = await db.get_user(user_id)
             quick_actions = []
@@ -202,7 +202,7 @@ async def notify_about_like(bot: Bot, user_id: int, game: str, db=None) -> bool:
                 actual_game = game
 
             game_name = settings.GAMES.get(actual_game, actual_game)
-            text = f"Кто-то лайкнул вашу анкету в {game_name}! Зайдите в «Лайки», чтобы посмотреть."
+            text = f"Кто-то лайкнул вашу анкету в {game_name}! Зайдите в «Лайки», чтобы посмотреть"
 
             current_user = await db.get_user(user_id)
             quick_actions = []
@@ -228,8 +228,8 @@ async def notify_profile_deleted(bot: Bot, user_id: int, game: str) -> bool:
     async def _notify():
         try:
             game_name = settings.GAMES.get(game, game)
-            text = (f"Ваша анкета в {game_name} была удалена модератором за нарушение правил сообщества.\n\n"
-                    f"Вы можете создать новую анкету, соблюдая правила.")
+            text = (f"Ваша анкета в {game_name} была удалена модератором за нарушение правил сообщества\n\n"
+                    f"Вы можете создать новую анкету, соблюдая правила")
 
             quick_actions = [
                 ("Создать новую анкету", "create_profile"),
@@ -250,9 +250,9 @@ async def notify_user_banned(bot: Bot, user_id: int, expires_at: datetime) -> bo
     async def _notify():
         try:
             formatted_date = expires_at.strftime("%d.%m.%Y %H:%M (UTC)")
-            text = (f"Вы заблокированы до {formatted_date} за нарушение правил сообщества.\n\n"
-                    f"Во время блокировки вы не можете использовать бота.\n\n"
-                    f"Если Вы не согласны с решением, обратитесь в поддержку.")
+            text = (f"Вы заблокированы до {formatted_date} за нарушение правил сообщества\n\n"
+                    f"Во время блокировки вы не можете использовать бота\n\n"
+                    f"Если Вы не согласны с решением, обратитесь в поддержку")
 
             return await smart_notification(bot, user_id, text, None, None, None)
 
