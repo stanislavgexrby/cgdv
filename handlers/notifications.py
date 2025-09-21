@@ -299,7 +299,8 @@ async def notify_admin_new_report(bot: Bot, reporter_id: int, reported_user_id: 
 
         success_count = 0
         for admin_id in settings.ADMIN_IDS:
-            success = await safe_send_notification(bot, admin_id, text, add_ok_button=False)
+            # Изменили add_ok_button=False на True, чтобы добавить кнопку "Понятно"
+            success = await safe_send_notification(bot, admin_id, text, add_ok_button=True)
             if success:
                 success_count += 1
 
@@ -312,7 +313,6 @@ async def notify_admin_new_report(bot: Bot, reporter_id: int, reported_user_id: 
     except Exception as e:
         logger.error(f"Ошибка отправки уведомления админам: {e}")
         return False
-
 # ==================== СЛУЖЕБНЫЕ ФУНКЦИИ ====================
 
 async def wait_all_notifications():
