@@ -90,7 +90,7 @@ WELCOME = """<b>ДОБРО ПОЖАЛОВАТЬ В CG TEAMUP</b>
 
 COMMUNITY_RULES_SIMPLE = """<b>Важная информация</b>
 
-Создавая анкету или используя бота, Вы соглашаетесь с <b><a href='https://google.com'>правилами сообщества</a></b>"""
+Создавая анкету или используя бота, Вы соглашаетесь с <b><a href='https://docs.google.com/document/d/1omGgDsIxHStXpY_i21LZwQgN-qtcLAScF7OJpwYGqcA/edit?usp=sharing'>правилами сообщества</a></b>"""
 
 PROFILE_CREATED = "Анкета создана! Теперь можете искать сокомандников"
 
