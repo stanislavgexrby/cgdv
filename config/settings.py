@@ -74,8 +74,8 @@ def cache_photo_id(photo_key: str, file_id: str):
     _photo_cache[photo_key] = file_id
     save_photo_cache(_photo_cache)
 
-DOTA_CHANNEL = os.getenv("DOTA_CHANNEL", "@testbotasdasd")
-CS_CHANNEL = os.getenv("CS_CHANNEL", "@test89898922")
+DOTA_CHANNEL = os.getenv('DOTA_CHANNEL_ID')
+CS_CHANNEL = os.getenv('CS_CHANNEL_ID')
 CHECK_SUBSCRIPTION = os.getenv("CHECK_SUBSCRIPTION", "true").lower() == "true"
 
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/teammates.db")

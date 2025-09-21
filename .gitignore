@@ -29,3 +29,4 @@ share/python-wheels/
 MANIFEST
 docker-compose.yml
 assets/photo_cache.json
+venv/*

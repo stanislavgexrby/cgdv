@@ -9,6 +9,7 @@ from handlers import register_handlers
 from handlers.notifications import wait_all_notifications
 from database.database import Database
 from config.settings import ADMIN_IDS
+import config.settings as settings 
 from middleware.database import DatabaseMiddleware
 
 logging.basicConfig(
@@ -57,7 +58,6 @@ async def main():
 
     await on_startup(bot)
     logger.info("✅ CGDV запущен успешно!")
-
     try:
         await dp.start_polling(bot)
     except (asyncio.CancelledError, KeyboardInterrupt):
