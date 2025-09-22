@@ -133,16 +133,10 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
             await safe_edit_message(callback, text, keyboard)
             logger.info(f"Матч: {user_id} <-> {target_user_id}")
         else:
-            await safe_edit_message(
-                callback, 
-                texts.LIKE_SENT,
-                kb.InlineKeyboardMarkup(inline_keyboard=[
-                    [kb.InlineKeyboardButton(text="Продолжить поиск", callback_data="continue_search")],
-                    [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
-                ])
-            )
+            await callback.answer("Лайк отправлен!")
             await notify_about_like(callback.bot, target_user_id, game, db)
             logger.info(f"Лайк: {user_id} -> {target_user_id}")
+            await show_next_profile(callback, state)
 
     elif action == "skip":
         await db.add_search_skip(user_id, target_user_id, game)
