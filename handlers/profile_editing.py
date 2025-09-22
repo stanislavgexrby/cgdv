@@ -4,6 +4,8 @@ from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
+from handlers.profile import show_profile_step, ProfileStep, PROFILE_STEPS_ORDER, ProfileForm
+from handlers.profile import ProfileStep
 from handlers.notifications import update_user_activity
 from handlers.basic import check_ban_and_profile, safe_edit_message
 from handlers.validation import validate_profile_input
@@ -108,7 +110,6 @@ async def edit_profile(callback: CallbackQuery, db):
 @router.callback_query(F.data == "recreate_profile")
 @check_ban_and_profile(require_profile=False)
 async def recreate_profile(callback: CallbackQuery, state: FSMContext, db):
-    """Создание анкеты заново"""
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
 
@@ -117,28 +118,36 @@ async def recreate_profile(callback: CallbackQuery, state: FSMContext, db):
         return
 
     game = user['current_game']
-    game_name = settings.GAMES.get(game, game)
 
     await state.clear()
     await state.update_data(
         user_id=user_id,
         game=game,
         positions_selected=[],
-        recreating=True
+        recreating=True,
+        current_step=ProfileStep.NAME.value
     )
 
-    from handlers.profile import ProfileForm
-    await state.set_state(ProfileForm.name)
-
+    # Удаляем предыдущее сообщение (меню просмотра профиля)
+    try:
+        await callback.message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить меню профиля: {e}")
+    
+    # Отправляем новое сообщение для создания анкеты
+    game_name = settings.GAMES.get(game, game)
     text = f"Создание новой анкеты для {game_name}\n\n{texts.QUESTIONS['name']}"
-
-    await callback.message.delete()
-    await callback.bot.send_message(
-        chat_id=callback.message.chat.id,
+    keyboard = kb.profile_creation_navigation("name", False)
+    
+    sent_message = await callback.message.answer(
         text=text,
-        reply_markup=kb.profile_creation_navigation("name", False),
-        parse_mode='HTML'
+        reply_markup=keyboard,
+        parse_mode='HTML',
+        disable_web_page_preview=True
     )
+    
+    await state.update_data(last_bot_message_id=sent_message.message_id)
+    await state.set_state(ProfileForm.name)
     await callback.answer()
 
 # ==================== ОБРАБОТЧИКИ РЕДАКТИРОВАНИЯ ПОЛЕЙ ====================

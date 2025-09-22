@@ -57,6 +57,18 @@ PROFILE_STEPS_ORDER = [
 
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
+# В начале файла добавим вспомогательную функцию
+async def clear_message_keyboard(bot, chat_id: int, message_id: int):
+    """Очистка клавиатуры у сообщения"""
+    try:
+        await bot.edit_message_reply_markup(
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=None
+        )
+    except Exception:
+        pass  # Сообщение могло быть удалено или изменено
+
 async def save_profile_universal(user_id: int, data: dict, photo_id: str = None, db = None) -> bool:
     """Универсальная функция сохранения профиля"""
     is_recreating = data.get('recreating', False)
@@ -184,10 +196,11 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
     return "Вопрос"
 
 async def show_profile_step(callback_or_message, state: FSMContext, step: ProfileStep, show_current: bool = False):
-    """Показать шаг создания профиля"""
+    """Показать шаг создания профиля с улучшенной навигацией"""
     data = await state.get_data()
     game = data.get('game', 'dota')
     
+    # Определяем есть ли данные для текущего шага
     has_data = False
     if step == ProfileStep.NAME and data.get('name'):
         has_data = True
@@ -220,6 +233,7 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
     
     show_continue_button = show_existing_data
     
+    # Определяем клавиатуру для текущего шага
     if step == ProfileStep.NAME:
         await state.set_state(ProfileForm.name)
         keyboard = kb.profile_creation_navigation(step.value, show_continue_button)
@@ -273,15 +287,65 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
         else:
             keyboard = kb.skip_photo()
     
+    # Обработка в зависимости от типа события
     if hasattr(callback_or_message, 'message'):
-        await safe_edit_message(callback_or_message, text, keyboard)
+        # Это CallbackQuery - редактируем текущее сообщение
+        try:
+            await callback_or_message.message.edit_text(
+                text=text,
+                reply_markup=keyboard,
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+        except Exception as e:
+            logger.error(f"Ошибка редактирования сообщения в CallbackQuery: {e}")
+        
     else:
-        await callback_or_message.answer(
-            text,
-            reply_markup=keyboard,
-            parse_mode='HTML',
-            disable_web_page_preview=True
-        )
+        # Это Message (текстовое сообщение пользователя)
+        bot = callback_or_message.bot
+        chat_id = callback_or_message.chat.id
+        last_message_id = data.get('last_bot_message_id')
+        
+        # Удаляем пользовательское сообщение
+        try:
+            await callback_or_message.delete()
+        except Exception:
+            pass
+        
+        # Обязательно редактируем последнее сообщение бота
+        if last_message_id:
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=last_message_id,
+                    text=text,
+                    reply_markup=keyboard,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+                logger.info(f"Успешно отредактировано сообщение {last_message_id}")
+            except Exception as e:
+                logger.error(f"Не удалось отредактировать сообщение {last_message_id}: {e}")
+                # Если не удалось отредактировать, создаем новое и обновляем ID
+                sent_message = await bot.send_message(
+                    chat_id=chat_id,
+                    text=text,
+                    reply_markup=keyboard,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+                await state.update_data(last_bot_message_id=sent_message.message_id)
+        else:
+            logger.warning("Нет last_bot_message_id, создаю новое сообщение")
+            # Если нет ID предыдущего сообщения, создаем новое
+            sent_message = await bot.send_message(
+                chat_id=chat_id,
+                text=text,
+                reply_markup=keyboard,
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+            await state.update_data(last_bot_message_id=sent_message.message_id)
 
 # ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ ====================
 
@@ -308,7 +372,37 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext, db):
         current_step=ProfileStep.NAME.value
     )
     
-    await show_profile_step(callback, state, ProfileStep.NAME)
+    # Удаляем главное меню и все предыдущие сообщения создания профиля
+    try:
+        # Удаляем до 5 предыдущих сообщений (на случай если остались дубли)
+        for i in range(5):
+            try:
+                await callback.bot.delete_message(
+                    chat_id=callback.message.chat.id,
+                    message_id=callback.message.message_id - i
+                )
+            except Exception:
+                break
+    except Exception:
+        pass
+    
+    # Отправляем новое сообщение для создания анкеты
+    game_name = settings.GAMES.get(game, game)
+    text = f"Создание анкеты для {game_name}\n\n{texts.QUESTIONS['name']}"
+    keyboard = kb.profile_creation_navigation("name", False)
+    
+    sent_message = await callback.message.answer(
+        text=text,
+        reply_markup=keyboard,
+        parse_mode='HTML',
+        disable_web_page_preview=True
+    )
+    
+    # Обязательно сохраняем ID отправленного сообщения
+    await state.update_data(last_bot_message_id=sent_message.message_id)
+    await state.set_state(ProfileForm.name)
+    
+    logger.info(f"Сохранен last_bot_message_id: {sent_message.message_id}")
     await callback.answer()
 
 @router.callback_query(F.data == "profile_back")
@@ -380,14 +474,14 @@ async def profile_continue(callback: CallbackQuery, state: FSMContext, db):
 async def process_name(message: Message, state: FSMContext):
     """Обработка имени"""
     if not message.text:
-        await message.answer("Отправьте текстовое сообщение с именем и фамилией", parse_mode='HTML')
+        await show_validation_error(message, state, "Отправьте текстовое сообщение с именем и фамилией")
         return
 
     name = message.text.strip()
     is_valid, error_msg = validate_profile_input('name', name)
 
     if not is_valid:
-        await message.answer(error_msg, parse_mode='HTML')
+        await show_validation_error(message, state, error_msg)
         return
 
     await state.update_data(name=name)
@@ -398,21 +492,21 @@ async def process_name(message: Message, state: FSMContext):
     await show_profile_step(message, state, ProfileStep.NICKNAME, show_current=has_next_data)
 
 @router.message(ProfileForm.name, ~F.text)
-async def wrong_name_format(message: Message):
-    await message.answer("Отправьте текстовое сообщение с именем и фамилией", parse_mode='HTML')
+async def wrong_name_format(message: Message, state: FSMContext):
+    await show_validation_error(message, state, "Отправьте текстовое сообщение с именем и фамилией")
 
 @router.message(ProfileForm.nickname)
 async def process_nickname(message: Message, state: FSMContext):
     """Обработка никнейма"""
     if not message.text:
-        await message.answer("Отправьте текстовое сообщение с игровым никнеймом", parse_mode='HTML')
+        await show_validation_error(message, state, "Отправьте текстовое сообщение с игровым никнеймом")
         return
 
     nickname = message.text.strip()
     is_valid, error_msg = validate_profile_input('nickname', nickname)
 
     if not is_valid:
-        await message.answer(error_msg, parse_mode='HTML')
+        await show_validation_error(message, state, error_msg)
         return
 
     await state.update_data(nickname=nickname)
@@ -422,9 +516,30 @@ async def process_nickname(message: Message, state: FSMContext):
     
     await show_profile_step(message, state, ProfileStep.AGE, show_current=has_next_data)
 
+@router.message(ProfileForm.age)
+async def process_age(message: Message, state: FSMContext):
+    """Обработка возраста"""
+    if not message.text:
+        await show_validation_error(message, state, f"Отправьте число больше {settings.MIN_AGE}")
+        return
+
+    is_valid, error_msg = validate_profile_input('age', message.text.strip())
+
+    if not is_valid:
+        await show_validation_error(message, state, error_msg)
+        return
+
+    age = int(message.text.strip())
+    await state.update_data(age=age)
+    
+    data = await state.get_data()
+    has_next_data = bool(data.get('rating'))
+    
+    await show_profile_step(message, state, ProfileStep.RATING, show_current=has_next_data)
+
 @router.message(ProfileForm.nickname, ~F.text)
-async def wrong_nickname_format(message: Message):
-    await message.answer("Отправьте текстовое сообщение с игровым никнеймом", parse_mode='HTML')
+async def wrong_nickname_format(message: Message, state: FSMContext):
+    await show_validation_error(message, state, "Отправьте текстовое сообщение с игровым никнеймом")
 
 @router.message(ProfileForm.age)
 async def process_age(message: Message, state: FSMContext):
@@ -436,7 +551,18 @@ async def process_age(message: Message, state: FSMContext):
     is_valid, error_msg = validate_profile_input('age', message.text.strip())
 
     if not is_valid:
-        await message.answer(error_msg, parse_mode='HTML')
+        # Удаляем пользовательское сообщение
+        try:
+            await message.delete()
+        except Exception:
+            pass
+        
+        # Отправляем ошибку как временное сообщение
+        error_message = await message.answer(error_msg, parse_mode='HTML')
+        
+        # Удаляем сообщение об ошибке через 3 секунды
+        import asyncio
+        asyncio.create_task(delete_message_after_delay(error_message, 3))
         return
 
     age = int(message.text.strip())
@@ -447,15 +573,24 @@ async def process_age(message: Message, state: FSMContext):
     
     await show_profile_step(message, state, ProfileStep.RATING, show_current=has_next_data)
 
+async def delete_message_after_delay(message, delay: int):
+    """Удаление сообщения через задержку"""
+    import asyncio
+    await asyncio.sleep(delay)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
 @router.message(ProfileForm.age, ~F.text)
-async def wrong_age_format(message: Message):
-    await message.answer(f"Отправьте число больше {settings.MIN_AGE}", parse_mode='HTML')
+async def wrong_age_format(message: Message, state: FSMContext):
+    await show_validation_error(message, state, f"Отправьте число больше {settings.MIN_AGE}")
 
 @router.message(ProfileForm.profile_url)
 async def process_profile_url(message: Message, state: FSMContext):
     """Обработка ссылки профиля"""
     if not message.text:
-        await message.answer("Отправьте ссылку на профиль или нажмите 'Пропустить'", parse_mode='HTML')
+        await show_validation_error(message, state, "Отправьте ссылку на профиль или нажмите 'Пропустить'")
         return
 
     data = await state.get_data()
@@ -465,7 +600,7 @@ async def process_profile_url(message: Message, state: FSMContext):
     is_valid, error_msg = validate_profile_input('profile_url', profile_url, game)
 
     if not is_valid:
-        await message.answer(error_msg, parse_mode='HTML')
+        await show_validation_error(message, state, error_msg)
         return
 
     await state.update_data(profile_url=profile_url)
@@ -475,9 +610,88 @@ async def process_profile_url(message: Message, state: FSMContext):
     
     await show_profile_step(message, state, ProfileStep.REGION, show_current=has_next_data)
 
+@router.message(ProfileForm.additional_info)
+async def process_additional_info(message: Message, state: FSMContext):
+    """Обработка дополнительной информации"""
+    if not message.text:
+        await show_validation_error(message, state, "Отправьте текстовое сообщение с описанием или используйте кнопки")
+        return
+
+    info = message.text.strip()
+    is_valid, error_msg = validate_profile_input('info', info)
+
+    if not is_valid:
+        await show_validation_error(message, state, error_msg)
+        return
+
+    await state.update_data(additional_info=info)
+    
+    data = await state.get_data()
+    has_next_data = bool(data.get('photo_id'))
+    
+    await show_profile_step(message, state, ProfileStep.PHOTO, show_current=has_next_data)
+
+async def show_validation_error(message: Message, state: FSMContext, error_text: str):
+    """Показ ошибки валидации в том же сообщении"""
+    data = await state.get_data()
+    game = data.get('game', 'dota')
+    current_step = data.get('current_step', 'name')
+    
+    # Удаляем пользовательское сообщение
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    
+    # Получаем текст текущего вопроса
+    try:
+        current_step_enum = ProfileStep(current_step)
+        question_text = await get_step_question_text(current_step_enum, data, False)
+    except Exception:
+        question_text = "Попробуйте еще раз:"
+    
+    game_name = settings.GAMES.get(game, game)
+    text = f"Создание анкеты для {game_name}\n\n{question_text}\n\n❌ {error_text}"
+    
+    # Определяем клавиатуру для текущего шага
+    if current_step == 'name':
+        keyboard = kb.profile_creation_navigation("name", False)
+    elif current_step == 'nickname':
+        keyboard = kb.profile_creation_navigation("nickname", False)
+    elif current_step == 'age':
+        keyboard = kb.profile_creation_navigation("age", False)
+    elif current_step == 'profile_url':
+        keyboard = kb.skip_profile_url()
+    elif current_step == 'additional_info':
+        keyboard = kb.skip_info()
+    elif current_step == 'photo':  # Добавили обработку для фото
+        keyboard = kb.skip_photo()
+    else:
+        keyboard = kb.profile_creation_navigation(current_step, False)
+    
+    # Редактируем последнее сообщение бота
+    bot = message.bot
+    chat_id = message.chat.id
+    last_message_id = data.get('last_bot_message_id')
+    
+    if last_message_id:
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=last_message_id,
+                text=text,
+                reply_markup=keyboard,
+                parse_mode='HTML',
+                disable_web_page_preview=True
+            )
+        except Exception as e:
+            logger.error(f"Не удалось показать ошибку в сообщении {last_message_id}: {e}")
+    else:
+        logger.error("Нет last_bot_message_id для показа ошибки валидации")
+
 @router.message(ProfileForm.profile_url, ~F.text)
-async def wrong_profile_url_format(message: Message):
-    await message.answer("Отправьте ссылку на профиль или нажмите 'Пропустить'", parse_mode='HTML')
+async def wrong_profile_url_format(message: Message, state: FSMContext):
+    await show_validation_error(message, state, "Отправьте ссылку на профиль или используйте кнопки")
 
 @router.message(ProfileForm.additional_info)
 async def process_additional_info(message: Message, state: FSMContext):
@@ -501,19 +715,24 @@ async def process_additional_info(message: Message, state: FSMContext):
     await show_profile_step(message, state, ProfileStep.PHOTO, show_current=has_next_data)
 
 @router.message(ProfileForm.additional_info, ~F.text)
-async def wrong_info_format(message: Message):
-    await message.answer("Отправьте текстовое сообщение с описанием или нажмите 'Пропустить'", parse_mode='HTML')
+async def wrong_info_format(message: Message, state: FSMContext):
+    await show_validation_error(message, state, "Отправьте текстовое сообщение с описанием или нажмите 'Пропустить'")
 
 @router.message(ProfileForm.photo, F.photo)
 async def process_photo(message: Message, state: FSMContext, db):
     photo_id = message.photo[-1].file_id
     await state.update_data(photo_id=photo_id)
     
-    await save_profile_flow(message, state, photo_id, db)
+    await save_profile_flow_message(message, state, photo_id, db)
 
 @router.message(ProfileForm.photo)
-async def wrong_photo_format(message: Message):
-    await message.answer("Отправьте фотографию или нажмите 'Пропустить'", reply_markup=kb.skip_photo(), parse_mode='HTML')
+async def wrong_photo_format(message: Message, state: FSMContext):
+    """Неправильный формат при загрузке фото"""
+    await show_validation_error(
+        message, 
+        state, 
+        "Отправьте фотографию или нажмите 'Пропустить'"
+    )
 
 # ==================== ОБРАБОТЧИКИ CALLBACK ====================
 
@@ -1043,8 +1262,8 @@ async def continue_profile_creation(callback: CallbackQuery, state: FSMContext):
 
 # ==================== СОХРАНЕНИЕ ПРОФИЛЯ ====================
 
-async def save_profile_flow(message: Message, state: FSMContext, photo_id: str | None, db):
-    """Финал создания анкеты: сохранение и показ результата."""
+async def save_profile_flow_message(message: Message, state: FSMContext, photo_id: str | None, db):
+    """Сохранение профиля с редактированием существующего сообщения"""
     user_id = message.from_user.id
     data = await state.get_data()
     is_recreating = data.get('recreating', False)
@@ -1077,32 +1296,65 @@ async def save_profile_flow(message: Message, state: FSMContext, photo_id: str |
     )
 
     if not success:
-        await message.answer("Не удалось сохранить анкету! Попробуйте ещё раз", parse_mode='HTML')
+        # Показываем ошибку в том же сообщении
+        await show_profile_creation_error(message, state, "Не удалось сохранить анкету! Попробуйте ещё раз")
         return
 
     await state.clear()
     await update_user_activity(user_id, 'available', db)
 
-    profile = await db.get_user_profile(user_id, payload['game'])
     game_name = settings.GAMES.get(payload['game'], payload['game'])
-
-    if profile:
-        if is_recreating:
-            text = f"Новая анкета для {game_name} создана! Старая анкета была заменена\n\n" + texts.format_profile(profile, show_contact=True)
-        else:
-            text = f"Анкета для {game_name} создана!\n\n" + texts.format_profile(profile, show_contact=True)
-
-        if profile.get('photo_id'):
-            await message.answer_photo(photo=profile['photo_id'], caption=text, reply_markup=kb.back(), parse_mode='HTML', disable_web_page_preview=True)
-        else:
-            await message.answer(text, reply_markup=kb.back(), parse_mode='HTML', disable_web_page_preview=True)
+    
+    if is_recreating:
+        text = f"Новая анкета для {game_name} создана! Старая анкета была заменена"
     else:
-        action = "пересоздана" if is_recreating else "создана"
-        text = f"Анкета для {game_name} {action}!"
-        await message.answer(text, reply_markup=kb.back(), parse_mode='HTML', disable_web_page_preview=True)
+        text = f"Анкета для {game_name} создана! Теперь можете искать сокомандников"
+
+    # Редактируем последнее сообщение бота
+    bot = message.bot
+    chat_id = message.chat.id
+    last_message_id = data.get('last_bot_message_id')
+    
+    if last_message_id:
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=last_message_id,
+                text=text,
+                reply_markup=kb.back(),
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Не удалось отредактировать сообщение завершения: {e}")
+
+async def show_profile_creation_error(message: Message, state: FSMContext, error_text: str):
+    """Показ ошибки создания профиля в том же сообщении"""
+    data = await state.get_data()
+    game = data.get('game', 'dota')
+    game_name = settings.GAMES.get(game, game)
+    
+    text = f"Создание анкеты для {game_name}\n\n❌ {error_text}"
+    keyboard = kb.skip_photo()
+    
+    # Редактируем последнее сообщение бота
+    bot = message.bot
+    chat_id = message.chat.id
+    last_message_id = data.get('last_bot_message_id')
+    
+    if last_message_id:
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=last_message_id,
+                text=text,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Не удалось показать ошибку создания профиля: {e}")
 
 async def save_profile_flow_callback(callback: CallbackQuery, state: FSMContext, photo_id: str, db):
-    """Сохранение профиля через callback"""
+    """Сохранение профиля через callback с редактированием"""
     data = await state.get_data()
     user_id = data.get('user_id', callback.from_user.id)
     is_recreating = data.get('recreating', False)
@@ -1123,8 +1375,17 @@ async def save_profile_flow_callback(callback: CallbackQuery, state: FSMContext,
             text = f"Новая анкета для {game_name} создана! Старая анкета была заменена"
         else:
             text = f"Анкета для {game_name} создана! Теперь можете искать сокомандников"
-        await safe_edit_message(callback, text, kb.back())
     else:
-        await safe_edit_message(callback, "Ошибка сохранения", kb.back())
+        text = "Ошибка сохранения"
+
+    # Редактируем существующее сообщение вместо создания нового
+    try:
+        await callback.message.edit_text(
+            text=text,
+            reply_markup=kb.back(),
+            parse_mode='HTML'
+        )
+    except Exception as e:
+        logger.error(f"Ошибка редактирования при сохранении профиля: {e}")
 
     await callback.answer()
