@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
+
 from handlers.basic import check_ban_and_profile, safe_edit_message, _format_expire_date
 from handlers.notifications import notify_about_match, notify_admin_new_report
 
@@ -23,13 +24,25 @@ async def show_profile_with_photo(callback: CallbackQuery, profile: dict, text: 
             except Exception as e:
                 logger.warning(f"Не удалось удалить сообщение: {e}")
 
-            await callback.message.answer_photo(
-                photo=profile['photo_id'],
-                caption=text,
-                reply_markup=keyboard,
-                parse_mode='HTML',
-                disable_web_page_preview=True
-            )
+            try:
+                await callback.message.answer_photo(
+                    photo=profile['photo_id'],
+                    caption=text,
+                    reply_markup=keyboard,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+            except Exception as photo_error:
+                if "wrong file identifier" in str(photo_error) or "file not found" in str(photo_error):
+                    logger.warning(f"Невалидный photo_id для пользователя {profile.get('telegram_id')}: {photo_error}")
+                    await callback.message.answer(
+                        text=text,
+                        reply_markup=keyboard,
+                        parse_mode='HTML',
+                        disable_web_page_preview=True
+                    )
+                else:
+                    raise photo_error
         else:
             await safe_edit_message(callback, text, keyboard)
         await callback.answer()

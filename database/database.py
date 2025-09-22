@@ -459,6 +459,21 @@ class Database:
                 await self._clear_pattern_cache(f"search:*:{game}:*")
                 return True
 
+    async def clear_invalid_photo(self, user_id: int, game: str) -> bool:
+        """Очистка невалидного photo_id у пользователя"""
+        try:
+            async with self._pg_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE profiles SET photo_id = NULL WHERE telegram_id = $1 AND game = $2",
+                    user_id, game
+                )
+                await self._clear_user_cache(user_id)
+                logger.info(f"Очищен невалидный photo_id для пользователя {user_id} в игре {game}")
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка очистки photo_id: {e}")
+            return False
+
     # === ОПТИМИЗИРОВАННЫЙ ПОИСК ===
 
     async def get_potential_matches(self, user_id: int, game: str,

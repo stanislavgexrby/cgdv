@@ -116,7 +116,12 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
                 )
 
     except Exception as e:
-        logger.warning(f"Ошибка редактирования сообщения: {e}")
+        error_str = str(e).lower()
+        if "message to edit not found" in error_str or "message is not modified" in error_str:
+            logger.info(f"Сообщение не найдено для редактирования, создаем новое: {e}")
+        else:
+            logger.warning(f"Ошибка редактирования сообщения: {e}")
+        
         try:
             await callback.message.delete()
         except Exception:
@@ -369,6 +374,7 @@ async def switch_game(callback: CallbackQuery, db):
 
 @router.callback_query(F.data.in_(["main_menu", "back_to_main"]))
 async def show_main_menu(callback: CallbackQuery, db):
+    """Показ главного меню без автоматического переключения игр"""
     user_id = callback.from_user.id
     
     await update_user_activity(user_id, 'available', db)
@@ -383,16 +389,6 @@ async def show_main_menu(callback: CallbackQuery, db):
     game = user['current_game']
     profile = await db.get_user_profile(user_id, game)
     has_profile = profile is not None
-
-    if not has_profile:
-        other_game = "dota" if game == "cs" else "cs"
-        other_profile = await db.get_user_profile(user_id, other_game)
-        has_other_profile = other_profile is not None
-
-        if has_other_profile:
-            await db.switch_game(user_id, other_game)
-            game = other_game
-            has_profile = True
 
     text = get_main_menu_text(game, has_profile)
     await send_main_menu_with_photo(callback, text, kb.main_menu(has_profile, game), game=game, db=db)

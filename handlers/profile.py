@@ -1,7 +1,6 @@
 import logging
 from aiogram.types import Message, CallbackQuery
 from aiogram import Router, F
-from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
 
 from handlers.notifications import update_user_activity
@@ -16,33 +15,114 @@ import config.settings as settings
 logger = logging.getLogger(__name__)
 router = Router()
 
-# ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+async def save_profile_unified(user_id: int, data: dict, photo_id: str = None, 
+                             callback: CallbackQuery = None, message: Message = None, 
+                             state: FSMContext = None, db = None) -> bool:
+    """Единая функция сохранения профиля с универсальным выводом результата"""
+    if not db:
+        logger.error("База данных не передана в save_profile_unified")
+        return False
+    
+    is_recreating = data.get('recreating', False)
+    
+    if is_recreating:
+        old_profile = await db.get_user_profile(user_id, data['game'])
+        if old_profile:
+            await db.delete_profile(user_id, data['game'])
+            logger.info(f"Старая анкета удалена при пересоздании: {user_id} в {data['game']}")
+    
+    profile_url = data.get('profile_url', '')
+    goals = data.get('goals', []) or data.get('goals_selected', [])
+    if not goals:
+        goals = ['any']
+    
+    positions = data.get('positions', []) or data.get('positions_selected', [])
+    if not positions:
+        positions = ['any']
+    
+    success = await db.update_user_profile(
+        telegram_id=user_id,
+        game=data['game'],
+        name=data['name'],
+        nickname=data['nickname'],
+        age=data['age'],
+        rating=data['rating'],
+        region=data.get('region', 'eeu'),
+        positions=positions,
+        goals=goals,
+        additional_info=data.get('additional_info', ''),
+        photo_id=photo_id,
+        profile_url=profile_url
+    )
+    
+    if state:
+        await state.clear()
+    await update_user_activity(user_id, 'available', db)
+    
+    game_name = settings.GAMES.get(data['game'], data['game'])
+    if is_recreating:
+        result_text = f"Новая анкета для {game_name} создана! Старая анкета была заменена"
+    else:
+        result_text = f"Анкета для {game_name} создана! Теперь можете искать сокомандников"
+    
+    if not success:
+        await _show_save_error(callback, message, data)
+        return False
+    else:
+        await _show_save_result(callback, message, data, result_text)
+    
+    action = "пересоздан" if is_recreating else "создан"
+    logger.info(f"Профиль {action} для {user_id} в {data['game']}")
+    return True
 
-async def clear_message_keyboard(bot, chat_id: int, message_id: int):
-    """Очистка клавиатуры у сообщения"""
-    try:
-        await bot.edit_message_reply_markup(
-            chat_id=chat_id,
-            message_id=message_id,
-            reply_markup=None
-        )
-    except Exception:
-        pass
+async def _show_save_error(callback: CallbackQuery, message: Message, data: dict):
+    """Показ ошибки сохранения профиля"""
+    error_text = "❌ Не удалось сохранить анкету! Попробуйте ещё раз"
+    
+    if callback:
+        try:
+            await callback.message.edit_text(text=error_text, reply_markup=kb.back(), parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"Ошибка показа ошибки через callback: {e}")
+    elif message:
+        last_message_id = data.get('last_bot_message_id')
+        if last_message_id:
+            try:
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=last_message_id,
+                    text=error_text,
+                    reply_markup=kb.skip_photo(),
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.error(f"Не удалось показать ошибку в сообщении {last_message_id}: {e}")
 
-async def delete_message_after_delay(message, delay: int):
-    """Удаление сообщения через задержку"""
-    import asyncio
-    await asyncio.sleep(delay)
-    try:
-        await message.delete()
-    except Exception:
-        pass
-
-# ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ ====================
+async def _show_save_result(callback: CallbackQuery, message: Message, data: dict, result_text: str):
+    """Показ результата сохранения профиля"""
+    if callback:
+        try:
+            await callback.message.edit_text(text=result_text, reply_markup=kb.back(), parse_mode='HTML')
+        except Exception as e:
+            logger.error(f"Ошибка показа результата через callback: {e}")
+    elif message:
+        last_message_id = data.get('last_bot_message_id')
+        if last_message_id:
+            try:
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=last_message_id,
+                    text=result_text,
+                    reply_markup=kb.back(),
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.error(f"Не удалось отредактировать сообщение завершения: {e}")
 
 @router.callback_query(F.data == "create_profile")
 @check_ban_and_profile(require_profile=False)
 async def start_create_profile(callback: CallbackQuery, state: FSMContext, db):
+    """Начало создания нового профиля"""
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
 
@@ -64,7 +144,6 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext, db):
     )
     
     try:
-        # Удаляем до 5 предыдущих сообщений (на случай если остались дубли)
         for i in range(10):
             try:
                 await callback.bot.delete_message(
@@ -94,7 +173,7 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext, db):
 
 @router.callback_query(F.data == "profile_back")
 async def profile_go_back(callback: CallbackQuery, state: FSMContext):
-    """Переход к предыдущему шагу"""
+    """Переход к предыдущему шагу создания профиля"""
     data = await state.get_data()
     current_step = data.get('current_step', ProfileStep.NAME.value)
     
@@ -115,7 +194,7 @@ async def profile_go_back(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "profile_continue")
 async def profile_continue(callback: CallbackQuery, state: FSMContext, db):
-    """Продолжить с текущими данными"""
+    """Продолжить создание профиля с текущими данными"""
     data = await state.get_data()
     current_step = data.get('current_step', ProfileStep.NAME.value)
     
@@ -135,9 +214,13 @@ async def profile_continue(callback: CallbackQuery, state: FSMContext, db):
                 next_has_data = True
             elif next_step == ProfileStep.RATING and data.get('rating'):
                 next_has_data = True
+            elif next_step == ProfileStep.PROFILE_URL and data.get('profile_url') is not None:
+                next_has_data = True
             elif next_step == ProfileStep.REGION and data.get('region'):
                 next_has_data = True
             elif next_step == ProfileStep.POSITIONS and data.get('positions_selected'):
+                next_has_data = True
+            elif next_step == ProfileStep.GOALS and data.get('goals_selected'):
                 next_has_data = True
             elif next_step == ProfileStep.INFO and 'additional_info' in data:
                 next_has_data = True
@@ -146,18 +229,25 @@ async def profile_continue(callback: CallbackQuery, state: FSMContext, db):
             
             await show_profile_step(callback, state, next_step, show_current=next_has_data)
         else:
-            await save_profile_flow_callback(callback, state, None, db)
+            user_id = data.get('user_id', callback.from_user.id)
+            await save_profile_unified(
+                user_id=user_id,
+                data=data,
+                photo_id=data.get('photo_id'),
+                callback=callback,
+                state=state,
+                db=db
+            )
     except Exception as e:
         logger.error(f"Ошибка продолжения: {e}")
         await callback.answer("Ошибка", show_alert=True)
+        return
     
     await callback.answer()
 
-# ==================== ОБРАБОТЧИКИ ТЕКСТОВЫХ СООБЩЕНИЙ ====================
-
 @router.message(ProfileForm.name)
 async def process_name(message: Message, state: FSMContext):
-    """Обработка имени"""
+    """Обработка введенного имени и фамилии"""
     if not message.text:
         await show_validation_error(message, state, "Отправьте текстовое сообщение с именем и фамилией")
         return
@@ -178,11 +268,12 @@ async def process_name(message: Message, state: FSMContext):
 
 @router.message(ProfileForm.name, ~F.text)
 async def wrong_name_format(message: Message, state: FSMContext):
+    """Обработка неправильного формата имени"""
     await show_validation_error(message, state, "Отправьте текстовое сообщение с именем и фамилией")
 
 @router.message(ProfileForm.nickname)
 async def process_nickname(message: Message, state: FSMContext):
-    """Обработка никнейма"""
+    """Обработка введенного игрового никнейма"""
     if not message.text:
         await show_validation_error(message, state, "Отправьте текстовое сообщение с игровым никнеймом")
         return
@@ -203,11 +294,12 @@ async def process_nickname(message: Message, state: FSMContext):
 
 @router.message(ProfileForm.nickname, ~F.text)
 async def wrong_nickname_format(message: Message, state: FSMContext):
+    """Обработка неправильного формата никнейма"""
     await show_validation_error(message, state, "Отправьте текстовое сообщение с игровым никнеймом")
 
 @router.message(ProfileForm.age)
 async def process_age(message: Message, state: FSMContext):
-    """Обработка возраста"""
+    """Обработка введенного возраста"""
     if not message.text:
         await show_validation_error(message, state, f"Отправьте число больше {settings.MIN_AGE}")
         return
@@ -226,42 +318,14 @@ async def process_age(message: Message, state: FSMContext):
     
     await show_profile_step(message, state, ProfileStep.RATING, show_current=has_next_data)
 
-# @router.message(ProfileForm.age)
-# async def process_age(message: Message, state: FSMContext):
-#     """Обработка возраста"""
-#     if not message.text:
-#         await message.answer(f"Отправьте число больше {settings.MIN_AGE}", parse_mode='HTML')
-#         return
-
-#     is_valid, error_msg = validate_profile_input('age', message.text.strip())
-
-#     if not is_valid:
-#         try:
-#             await message.delete()
-#         except Exception:
-#             pass
-        
-#         error_message = await message.answer(error_msg, parse_mode='HTML')
-        
-#         import asyncio
-#         asyncio.create_task(delete_message_after_delay(error_message, 3))
-#         return
-
-#     age = int(message.text.strip())
-#     await state.update_data(age=age)
-    
-#     data = await state.get_data()
-#     has_next_data = bool(data.get('rating'))
-    
-#     await show_profile_step(message, state, ProfileStep.RATING, show_current=has_next_data)
-
 @router.message(ProfileForm.age, ~F.text)
 async def wrong_age_format(message: Message, state: FSMContext):
+    """Обработка неправильного формата возраста"""
     await show_validation_error(message, state, f"Отправьте число больше {settings.MIN_AGE}")
 
 @router.message(ProfileForm.profile_url)
 async def process_profile_url(message: Message, state: FSMContext):
-    """Обработка ссылки профиля"""
+    """Обработка введенной ссылки на профиль"""
     if not message.text:
         await show_validation_error(message, state, "Отправьте ссылку на профиль или нажмите 'Пропустить'")
         return
@@ -285,11 +349,12 @@ async def process_profile_url(message: Message, state: FSMContext):
 
 @router.message(ProfileForm.profile_url, ~F.text)
 async def wrong_profile_url_format(message: Message, state: FSMContext):
+    """Обработка неправильного формата ссылки профиля"""
     await show_validation_error(message, state, "Отправьте ссылку на профиль или используйте кнопки")
 
 @router.message(ProfileForm.additional_info)
 async def process_additional_info(message: Message, state: FSMContext):
-    """Обработка дополнительной информации"""
+    """Обработка введенной дополнительной информации"""
     if not message.text:
         await show_validation_error(message, state, "Отправьте текстовое сообщение с описанием или используйте кнопки")
         return
@@ -308,52 +373,42 @@ async def process_additional_info(message: Message, state: FSMContext):
     
     await show_profile_step(message, state, ProfileStep.PHOTO, show_current=has_next_data)
 
-@router.message(ProfileForm.additional_info)
-async def process_additional_info(message: Message, state: FSMContext):
-    """Обработка дополнительной информации"""
-    if not message.text:
-        await message.answer("Отправьте текстовое сообщение с описанием или используйте кнопки", parse_mode='HTML')
-        return
-
-    info = message.text.strip()
-    is_valid, error_msg = validate_profile_input('info', info)
-
-    if not is_valid:
-        await message.answer(error_msg, parse_mode='HTML')
-        return
-
-    await state.update_data(additional_info=info)
-    
-    data = await state.get_data()
-    has_next_data = bool(data.get('photo_id'))
-    
-    await show_profile_step(message, state, ProfileStep.PHOTO, show_current=has_next_data)
-
 @router.message(ProfileForm.additional_info, ~F.text)
 async def wrong_info_format(message: Message, state: FSMContext):
+    """Обработка неправильного формата дополнительной информации"""
     await show_validation_error(message, state, "Отправьте текстовое сообщение с описанием или нажмите 'Пропустить'")
 
 @router.message(ProfileForm.photo, F.photo)
 async def process_photo(message: Message, state: FSMContext, db):
+    """Обработка загруженного фото и сохранение профиля"""
     photo_id = message.photo[-1].file_id
     await state.update_data(photo_id=photo_id)
     
-    await save_profile_flow_message(message, state, photo_id, db)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    
+    data = await state.get_data()
+    user_id = message.from_user.id
+    
+    await save_profile_unified(
+        user_id=user_id,
+        data=data,
+        photo_id=photo_id,
+        message=message,
+        state=state,
+        db=db
+    )
 
 @router.message(ProfileForm.photo)
 async def wrong_photo_format(message: Message, state: FSMContext):
-    """Неправильный формат при загрузке фото"""
-    await show_validation_error(
-        message, 
-        state, 
-        "Отправьте фотографию или нажмите 'Пропустить'"
-    )
-
-# ==================== ОБРАБОТЧИКИ CALLBACK ====================
+    """Обработка неправильного формата при загрузке фото"""
+    await show_validation_error(message, state, "Отправьте фотографию или нажмите 'Пропустить'")
 
 @router.callback_query(F.data == "rating_select_any", ProfileForm.rating)
 async def select_any_rating(callback: CallbackQuery, state: FSMContext):
-    """Выбор любого рейтинга"""
+    """Выбор опции 'Любой рейтинг'"""
     data = await state.get_data()
     game = data['game']
     current_rating = data.get('rating')
@@ -374,7 +429,7 @@ async def select_any_rating(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "rating_remove_any", ProfileForm.rating)
 async def remove_any_rating(callback: CallbackQuery, state: FSMContext):
-    """Сброс выбора любого рейтинга"""
+    """Сброс выбора 'Любой рейтинг'"""
     data = await state.get_data()
     game = data['game']
     current_rating = data.get('rating')
@@ -397,7 +452,7 @@ async def remove_any_rating(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("rating_select_"), ProfileForm.rating)
 async def select_rating(callback: CallbackQuery, state: FSMContext):
-    """Выбор рейтинга"""
+    """Выбор конкретного рейтинга"""
     rating = callback.data.split("_", 2)[2]
     data = await state.get_data()
     game = data['game']
@@ -419,7 +474,7 @@ async def select_rating(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("rating_remove_"), ProfileForm.rating)
 async def remove_rating(callback: CallbackQuery, state: FSMContext):
-    """Сброс выбора рейтинга"""
+    """Сброс выбора конкретного рейтинга"""
     rating = callback.data.split("_", 2)[2]
     data = await state.get_data()
     game = data['game']
@@ -461,7 +516,7 @@ async def rating_need(callback: CallbackQuery):
 
 @router.callback_query(F.data == "region_select_any", ProfileForm.region)
 async def select_any_region(callback: CallbackQuery, state: FSMContext):
-    """Выбор любого региона"""
+    """Выбор опции 'Любой регион'"""
     data = await state.get_data()
     current_region = data.get('region')
     
@@ -481,7 +536,7 @@ async def select_any_region(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "region_remove_any", ProfileForm.region)
 async def remove_any_region(callback: CallbackQuery, state: FSMContext):
-    """Сброс выбора любого региона"""
+    """Сброс выбора 'Любой регион'"""
     data = await state.get_data()
     current_region = data.get('region')
     
@@ -503,7 +558,7 @@ async def remove_any_region(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("region_select_"), ProfileForm.region)
 async def select_region(callback: CallbackQuery, state: FSMContext):
-    """Выбор региона"""
+    """Выбор конкретного региона"""
     region = callback.data.split("_", 2)[2]
     data = await state.get_data()
     current_region = data.get('region')
@@ -524,7 +579,7 @@ async def select_region(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("region_remove_"), ProfileForm.region)
 async def remove_region(callback: CallbackQuery, state: FSMContext):
-    """Сброс выбора региона"""
+    """Сброс выбора конкретного региона"""
     region = callback.data.split("_", 2)[2]
     data = await state.get_data()
     current_region = data.get('region')
@@ -565,7 +620,7 @@ async def region_need(callback: CallbackQuery):
 
 @router.callback_query(F.data == "pos_add_any", ProfileForm.positions)
 async def add_any_position(callback: CallbackQuery, state: FSMContext):
-    """Добавление 'любой позиции'"""
+    """Добавление опции 'Любая позиция'"""
     data = await state.get_data()
     game = data['game']
     
@@ -577,7 +632,7 @@ async def add_any_position(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "pos_remove_any", ProfileForm.positions)
 async def remove_any_position(callback: CallbackQuery, state: FSMContext):
-    """Удаление 'любой позиции'"""
+    """Удаление опции 'Любая позиция'"""
     data = await state.get_data()
     game = data['game']
     
@@ -593,7 +648,7 @@ async def remove_any_position(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("pos_add_"), ProfileForm.positions)
 async def add_position(callback: CallbackQuery, state: FSMContext):
-    """Добавление позиции"""
+    """Добавление конкретной позиции"""
     position = callback.data.split("_", 2)[2]
     data = await state.get_data()
     selected = data.get('positions_selected', [])
@@ -622,7 +677,7 @@ async def add_position(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("pos_remove_"), ProfileForm.positions)
 async def remove_position(callback: CallbackQuery, state: FSMContext):
-    """Удаление позиции"""
+    """Удаление конкретной позиции"""
     position = callback.data.split("_", 2)[2]
     data = await state.get_data()
     selected = data.get('positions_selected', [])
@@ -662,11 +717,12 @@ async def positions_done(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "pos_need", ProfileForm.positions)
 async def positions_need(callback: CallbackQuery):
+    """Напоминание о необходимости выбора позиции"""
     await callback.answer("Выберите хотя бы одну позицию", show_alert=True)
 
 @router.callback_query(F.data == "goals_add_any", ProfileForm.goals)
 async def add_any_goal(callback: CallbackQuery, state: FSMContext):
-    """Добавление 'любой цели'"""
+    """Добавление опции 'Любая цель'"""
     await state.update_data(goals_selected=["any"])
     
     keyboard = kb.goals(["any"], with_navigation=True)
@@ -675,7 +731,7 @@ async def add_any_goal(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "goals_remove_any", ProfileForm.goals)
 async def remove_any_goal(callback: CallbackQuery, state: FSMContext):
-    """Удаление 'любой цели'"""
+    """Удаление опции 'Любая цель'"""
     data = await state.get_data()
     selected = data.get('goals_selected', [])
     if "any" in selected:
@@ -689,7 +745,7 @@ async def remove_any_goal(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("goals_add_"), ProfileForm.goals)
 async def add_goal(callback: CallbackQuery, state: FSMContext):
-    """Добавление цели"""
+    """Добавление конкретной цели"""
     goal = callback.data.split("_", 2)[2]
     data = await state.get_data()
     selected = data.get('goals_selected', [])
@@ -713,7 +769,7 @@ async def add_goal(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data.startswith("goals_remove_"), ProfileForm.goals)
 async def remove_goal(callback: CallbackQuery, state: FSMContext):
-    """Удаление цели"""
+    """Удаление конкретной цели"""
     goal = callback.data.split("_", 2)[2]
     data = await state.get_data()
     selected = data.get('goals_selected', [])
@@ -748,11 +804,12 @@ async def goals_done(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "goals_need", ProfileForm.goals)
 async def goals_need(callback: CallbackQuery):
+    """Напоминание о необходимости выбора цели"""
     await callback.answer("Выберите хотя бы одну цель", show_alert=True)
 
 @router.callback_query(F.data == "skip_profile_url", ProfileForm.profile_url)
 async def skip_profile_url(callback: CallbackQuery, state: FSMContext):
-    """Пропуск ссылки профиля"""
+    """Пропуск ввода ссылки на профиль"""
     await state.update_data(profile_url="")
     
     data = await state.get_data()
@@ -763,7 +820,7 @@ async def skip_profile_url(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "skip_info", ProfileForm.additional_info)
 async def skip_info(callback: CallbackQuery, state: FSMContext):
-    """Пропуск дополнительной информации"""
+    """Пропуск ввода дополнительной информации"""
     await state.update_data(additional_info="")
     
     data = await state.get_data()
@@ -774,7 +831,20 @@ async def skip_info(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "skip_photo", ProfileForm.photo)
 async def skip_photo(callback: CallbackQuery, state: FSMContext, db):
-    await save_profile_flow_callback(callback, state, None, db)
+    """Пропуск загрузки фото и сохранение профиля"""
+    data = await state.get_data()
+    user_id = data.get('user_id', callback.from_user.id)
+    
+    await save_profile_unified(
+        user_id=user_id,
+        data=data,
+        photo_id=None,
+        callback=callback,
+        state=state,
+        db=db
+    )
+    
+    await callback.answer()
 
 @router.callback_query(F.data == "cancel")
 async def confirm_cancel_profile(callback: CallbackQuery, state: FSMContext):
@@ -842,7 +912,7 @@ async def cancel_profile_confirmed(callback: CallbackQuery, state: FSMContext, d
 
 @router.callback_query(F.data == "continue_profile")
 async def continue_profile_creation(callback: CallbackQuery, state: FSMContext):
-    """Продолжить создание профиля"""
+    """Продолжить создание профиля после подтверждения"""
     data = await state.get_data()
     current_step = data.get('current_step', ProfileStep.NAME.value)
     
@@ -874,161 +944,3 @@ async def continue_profile_creation(callback: CallbackQuery, state: FSMContext):
         await show_profile_step(callback, state, ProfileStep.NAME)
     
     await callback.answer("Продолжаем создание анкеты")
-
-# ==================== СОХРАНЕНИЕ ПРОФИЛЯ ====================
-
-async def save_profile_universal(user_id: int, data: dict, photo_id: str = None, db = None) -> bool:
-    """Универсальная функция сохранения профиля"""
-    is_recreating = data.get('recreating', False)
-    
-    if is_recreating:
-        old_profile = await db.get_user_profile(user_id, data['game'])
-        if old_profile:
-            await db.delete_profile(user_id, data['game'])
-            logger.info(f"Старая анкета удалена при пересоздании: {user_id} в {data['game']}")
-    
-    success = await db.update_user_profile(
-        telegram_id=user_id,
-        game=data['game'],
-        name=data['name'],
-        nickname=data['nickname'],
-        age=data['age'],
-        rating=data['rating'],
-        region=data.get('region', 'eeu'),
-        positions=data['positions'],
-        goals=data.get('goals', ['any']),
-        additional_info=data['additional_info'],
-        photo_id=photo_id,
-        profile_url=data.get('profile_url', '')
-    )
-
-    if success:
-        action = "пересоздан" if is_recreating else "создан"
-        logger.info(f"Профиль {action} для {user_id} в {data['game']}")
-
-    return success
-
-async def save_profile_flow_callback(callback: CallbackQuery, state: FSMContext, photo_id: str, db):
-    """Сохранение профиля через callback с редактированием"""
-    data = await state.get_data()
-    user_id = data.get('user_id', callback.from_user.id)
-    is_recreating = data.get('recreating', False)
-
-    data['profile_url'] = data.get('profile_url', '')
-
-    success = await save_profile_universal(
-        user_id=user_id,
-        data=data,
-        photo_id=photo_id,
-        db=db
-    )
-    await state.clear()
-
-    if success:
-        game_name = settings.GAMES.get(data['game'], data['game'])
-        if is_recreating:
-            text = f"Новая анкета для {game_name} создана! Старая анкета была заменена"
-        else:
-            text = f"Анкета для {game_name} создана! Теперь можете искать сокомандников"
-    else:
-        text = "Ошибка сохранения"
-
-    try:
-        await callback.message.edit_text(
-            text=text,
-            reply_markup=kb.back(),
-            parse_mode='HTML'
-        )
-    except Exception as e:
-        logger.error(f"Ошибка редактирования при сохранении профиля: {e}")
-
-    await callback.answer()
-
-async def save_profile_flow_message(message: Message, state: FSMContext, photo_id: str | None, db):
-    """Сохранение профиля с редактированием существующего сообщения"""
-    user_id = message.from_user.id
-    data = await state.get_data()
-    is_recreating = data.get('recreating', False)
-
-    payload = {
-        'game': data.get('game'),
-        'name': data.get('name', '').strip(),
-        'nickname': data.get('nickname', '').strip(),
-        'age': data.get('age'),
-        'rating': data.get('rating'),
-        'region': data.get('region', 'eeu'),
-        'positions': data.get('positions', []) or data.get('positions_selected', []),
-        'goals': data.get('goals', []) or data.get('goals_selected', []),
-        'additional_info': data.get('additional_info', '').strip(),
-        'profile_url': data.get('profile_url', ''),
-        'recreating': is_recreating
-    }
-
-    if not payload['goals']:
-        payload['goals'] = ['any']
-
-    if not payload['positions']:
-        payload['positions'] = ['any']
-
-    success = await save_profile_universal(
-        user_id=user_id,
-        data=payload,
-        photo_id=photo_id,
-        db=db
-    )
-
-    if not success:
-        # Показываем ошибку в том же сообщении
-        await show_profile_creation_error(message, state, "Не удалось сохранить анкету! Попробуйте ещё раз")
-        return
-
-    await state.clear()
-    await update_user_activity(user_id, 'available', db)
-
-    game_name = settings.GAMES.get(payload['game'], payload['game'])
-    
-    if is_recreating:
-        text = f"Новая анкета для {game_name} создана! Старая анкета была заменена"
-    else:
-        text = f"Анкета для {game_name} создана! Теперь можете искать сокомандников"
-
-    # Редактируем последнее сообщение бота
-    bot = message.bot
-    chat_id = message.chat.id
-    last_message_id = data.get('last_bot_message_id')
-    
-    if last_message_id:
-        try:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=last_message_id,
-                text=text,
-                reply_markup=kb.back(),
-                parse_mode='HTML'
-            )
-        except Exception as e:
-            logger.error(f"Не удалось отредактировать сообщение завершения: {e}")
-
-async def show_profile_creation_error(message: Message, state: FSMContext, error_text: str):
-    """Показ ошибки создания профиля в том же сообщении"""
-    data = await state.get_data()
-    
-    text = f"❌ {error_text}"
-    keyboard = kb.skip_photo()
-    
-    # Редактируем последнее сообщение бота
-    bot = message.bot
-    chat_id = message.chat.id
-    last_message_id = data.get('last_bot_message_id')
-    
-    if last_message_id:
-        try:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=last_message_id,
-                text=text,
-                reply_markup=keyboard,
-                parse_mode='HTML'
-            )
-        except Exception as e:
-            logger.error(f"Не удалось показать ошибку создания профиля: {e}")

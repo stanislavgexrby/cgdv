@@ -149,32 +149,10 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
         if success:
             await db._clear_pattern_cache(f"search:{user_id}:{game}:*")
 
-            text = "Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время"
-            keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
-                [kb.InlineKeyboardButton(text="Продолжить поиск", callback_data="continue_search")],
-                [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
-            ])
-
-            try:
-                await callback.message.delete()
-            except Exception as e:
-                logger.warning(f"Не удалось удалить сообщение при жалобе: {e}")
-
-            try:
-                await callback.bot.send_message(
-                    chat_id=callback.message.chat.id,
-                    text=text,
-                    reply_markup=keyboard,
-                    parse_mode='HTML'
-                )
-            except Exception as e:
-                logger.error(f"Ошибка отправки сообщения о жалобе: {e}")
-                await safe_edit_message(callback, text, keyboard)
-
-            logger.info(f"Жалоба добавлена: {user_id} пожаловался на {target_user_id}")
-            await callback.answer("Жалоба отправлена")
-
+            await callback.answer("Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время")
             await notify_admin_new_report(callback.bot, user_id, target_user_id, game)
+            logger.info(f"Жалоба добавлена: {user_id} пожаловался на {target_user_id}")
+            await show_next_profile(callback, state)
         else:
             await callback.answer("Вы уже жаловались на эту анкету", show_alert=True)
 
