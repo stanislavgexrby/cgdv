@@ -2,13 +2,11 @@ import logging
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery
 from aiogram.fsm.context import FSMContext
-from aiogram.fsm.state import State, StatesGroup
 
-from handlers.profile import show_profile_step, ProfileStep, PROFILE_STEPS_ORDER, ProfileForm
-from handlers.profile import ProfileStep
 from handlers.notifications import update_user_activity
 from handlers.basic import check_ban_and_profile, safe_edit_message
 from handlers.validation import validate_profile_input
+from handlers.profile_enum import ProfileForm, ProfileStep, EditProfileForm
 
 import keyboards.keyboards as kb
 import utils.texts as texts
@@ -16,18 +14,6 @@ import config.settings as settings
 
 logger = logging.getLogger(__name__)
 router = Router()
-
-class EditProfileForm(StatesGroup):
-    edit_name = State()
-    edit_nickname = State()
-    edit_age = State()
-    edit_rating = State()
-    edit_profile_url = State()
-    edit_region = State()
-    edit_positions = State()
-    edit_goals = State()
-    edit_info = State()
-    edit_photo = State()
 
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
@@ -128,13 +114,11 @@ async def recreate_profile(callback: CallbackQuery, state: FSMContext, db):
         current_step=ProfileStep.NAME.value
     )
 
-    # Удаляем предыдущее сообщение (меню просмотра профиля)
     try:
         await callback.message.delete()
     except Exception as e:
         logger.warning(f"Не удалось удалить меню профиля: {e}")
     
-    # Отправляем новое сообщение для создания анкеты
     game_name = settings.GAMES.get(game, game)
     text = f"Создание новой анкеты для {game_name}\n\n{texts.QUESTIONS['name']}"
     keyboard = kb.profile_creation_navigation("name", False)

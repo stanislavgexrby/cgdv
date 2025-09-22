@@ -344,9 +344,9 @@ async def skip_like(callback: CallbackQuery, db):
 
         if ban_info:
             ban_end = ban_info['expires_at'][:16]
-            text = f"Вы заблокированы в {game_name} до {ban_end}."
+            text = f"Вы заблокированы в {game_name} до {ban_end}"
         else:
-            text = f"Вы заблокированы в {game_name}."
+            text = f"Вы заблокированы в {game_name}"
 
         await safe_edit_message(callback, text, kb.back())
         await callback.answer()
@@ -376,7 +376,6 @@ async def report_like(callback: CallbackQuery, db):
 
     game = user['current_game']
 
-    # Проверяем бан
     if await db.is_user_banned(user_id):
         game_name = settings.GAMES.get(game, game)
         ban_info = await db.get_user_ban(user_id)
@@ -384,15 +383,18 @@ async def report_like(callback: CallbackQuery, db):
         if ban_info:
             expires_at = ban_info['expires_at']
             ban_end = _format_expire_date(expires_at)
-            text = f"Вы заблокированы в {game_name} до {ban_end}."
+            text = f"Вы заблокированы в {game_name} до {ban_end}"
         else:
-            text = f"Вы заблокированы в {game_name}."
+            text = f"Вы заблокированы в {game_name}"
 
         await safe_edit_message(callback, text, kb.back())
         await callback.answer()
         return
 
     like_removed = await db.remove_like(target_user_id, user_id, game)
+
+    if not like_removed:
+        logger.info(f"Не удалось удалить лайк: {user_id} пожаловался на {target_user_id}")
 
     report_added = await db.add_report(user_id, target_user_id, game)
 

@@ -11,9 +11,10 @@ def register_handlers(dp: Dispatcher):
         return
 
     try:
-        from . import basic, profile, search, likes, profile_editing, admin
+        from . import basic, profile, search, likes, profile_editing, admin, profile_enum
 
         dp.include_router(basic.router)
+        dp.include_router(profile_enum.router)
         dp.include_router(profile.router)
         dp.include_router(profile_editing.router)
         dp.include_router(search.router)
