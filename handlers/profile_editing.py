@@ -37,7 +37,7 @@ async def update_profile_field(user_id: int, field: str, value, db) -> bool:
         nickname=profile['nickname'] if field != 'nickname' else value,
         age=profile['age'] if field != 'age' else value,
         rating=profile['rating'] if field != 'rating' else value,
-        region=profile.get('region', 'russia') if field != 'country' else value,
+        region=profile.get('region', 'russia') if field != 'region' else value,
         positions=profile['positions'] if field != 'positions' else value,
         goals=profile.get('goals', ['any']) if field != 'goals' else value,
         additional_info=profile['additional_info'] if field != 'additional_info' else value,
@@ -536,13 +536,18 @@ async def edit_country(callback: CallbackQuery, state: FSMContext, db):
     user_id = callback.from_user.id
     await update_user_activity(user_id, 'editing_profile', db)
     
-    profile = await db.get_user_profile(user_id, callback.from_user.username)
+    user = await db.get_user(user_id)
+    if not user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+    
+    profile = await db.get_user_profile(user_id, user['current_game'])
     if not profile:
         await callback.answer("Профиль не найден", show_alert=True)
         return
     
-    current_country = profile.get('region')  # В БД пока region, но логически country
-    await state.update_data(user_id=user_id, current_game=profile.get('game'))
+    current_country = profile.get('region')
+    await state.update_data(user_id=user_id, current_game=user['current_game'])
     await state.set_state(EditProfileForm.edit_country)
     
     text = "Выберите новую страну:"
@@ -555,7 +560,7 @@ async def process_edit_country_select(callback: CallbackQuery, state: FSMContext
     """Выбор страны при редактировании"""
     country = callback.data.split("_", 2)[2]
     
-    success = await update_profile_field(callback.from_user.id, 'country', country, db)
+    success = await update_profile_field(callback.from_user.id, 'region', country, db)
     await state.clear()
     await update_user_activity(callback.from_user.id, 'available', db)
 
@@ -585,32 +590,34 @@ async def edit_country_other(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 @router.message(EditProfileForm.edit_country_input)
-async def process_edit_country_input(message: Message, state: FSMContext):
+async def process_edit_country_input(message: Message, state: FSMContext, db):
     """Обработка ввода названия страны при редактировании"""
     search_name = message.text.strip()
-    
     country_key = settings.find_country_by_name(search_name)
     
     if country_key:
-        country_name = settings.COUNTRIES_DICT[country_key]
-        text = f"Найдена страна: {country_name}\n\nВыберите действие:"
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text=f"✅ Выбрать {country_name}", callback_data=f"confirm_edit_country_{country_key}")],
-            [InlineKeyboardButton(text="Попробовать еще раз", callback_data="retry_edit_country_input")],
-            [InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")]
-        ])
-        
-        await message.answer(text, reply_markup=keyboard)
+        try:
+            await message.delete()
+        except:
+            pass
+            
+        success = await update_profile_field(message.from_user.id, 'region', country_key, db)
+        await state.clear()
+        await update_user_activity(message.from_user.id, 'available', db)
+
+        if success:
+            country_name = settings.COUNTRIES_DICT[country_key]
+            await message.answer(f"Страна обновлена на {country_name}!", reply_markup=kb.back_to_editing(), parse_mode='HTML')
+        else:
+            await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML')
+            
     else:
-        text = f"Страна '{search_name}' не найдена в словаре.\n\nПопробуйте ввести другое название."
-        
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Попробовать еще раз", callback_data="retry_edit_country_input")],
-            [InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")]
-        ])
-        
-        await message.answer(text, reply_markup=keyboard)
+        try:
+            await message.delete()
+        except:
+            pass
+            
+        await message.answer(f"Страна '{search_name}' не найдена в словаре.\n\nПопробуйте ввести другое название.", reply_markup=kb.cancel_edit(), parse_mode='HTML')
 
 @router.callback_query(F.data == "retry_edit_country_input", EditProfileForm.edit_country_input)
 async def handle_retry_edit_country_input(callback: CallbackQuery, state: FSMContext):
@@ -641,7 +648,7 @@ async def confirm_edit_country(callback: CallbackQuery, state: FSMContext, db):
     """Подтверждение выбранной страны при редактировании"""
     country_key = callback.data.split("_", 3)[3]
     
-    success = await update_profile_field(callback.from_user.id, 'country', country_key, db)
+    success = await update_profile_field(callback.from_user.id, 'region', country_key, db)
     await state.clear()
     await update_user_activity(callback.from_user.id, 'available', db)
 

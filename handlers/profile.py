@@ -639,25 +639,44 @@ async def back_to_country_selection(callback: CallbackQuery, state: FSMContext):
 async def process_country_input(message: Message, state: FSMContext):
     """Обработка ввода названия страны"""
     search_name = message.text.strip()
-    
     country_key = settings.find_country_by_name(search_name)
     
+    data = await state.get_data()
+    
     if country_key:
-        country_name = settings.COUNTRIES_DICT[country_key]
-        text = f"Найдена страна: {country_name}\n\nВыберите действие:"
+        await state.update_data(region=country_key)
         
-        keyboard = kb.confirm_country(country_key)
+        try:
+            await message.delete()
+        except:
+            pass
         
-        await message.answer(text, reply_markup=keyboard)
+        await show_profile_step(message, state, ProfileStep.REGION, show_current=True)
+        
     else:
-        text = f"Страна '{search_name}' не найдена в словаре.\n\nПопробуйте ввести другое название или вернитесь к выбору из списка."
+        try:
+            await message.delete()
+        except:
+            pass
         
-        keyboard = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Попробовать еще раз", callback_data="retry_country_input")],
-            [InlineKeyboardButton(text="Назад к списку", callback_data="country_back")]
-        ])
-        
-        await message.answer(text, reply_markup=keyboard)
+        last_message_id = data.get('last_bot_message_id')
+        if last_message_id:
+            error_text = f"Страна '{search_name}' не найдена в словаре.\n\nВведите название страны:\n\nНапример: Молдова, Эстония, Литва, Польша, Германия и т.д."
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Назад к списку", callback_data="country_back")]
+            ])
+            
+            try:
+                await message.bot.edit_message_text(
+                    chat_id=message.chat.id,
+                    message_id=last_message_id,
+                    text=error_text,
+                    reply_markup=keyboard,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+            except Exception as e:
+                logger.warning(f"Ошибка редактирования сообщения при ошибке поиска: {e}")
 
 @router.callback_query(F.data == "retry_country_input", ProfileForm.country_input)
 async def handle_retry_country_input(callback: CallbackQuery, state: FSMContext):
@@ -680,23 +699,16 @@ async def confirm_selected_country(callback: CallbackQuery, state: FSMContext):
     """Подтверждение выбранной страны"""
     country_key = callback.data.split("_", 2)[2]
     
-    # Сохраняем выбранную страну
     await state.update_data(region=country_key)
-    await state.set_state(ProfileForm.region)
-    
-    country_name = settings.COUNTRIES_DICT[country_key]
-    text = f"Выбрана страна: {country_name}\n\nВыберите страну:"
-    
-    keyboard = kb.countries(selected_country=country_key, with_navigation=True)
     
     try:
-        await callback.message.edit_text(text, reply_markup=keyboard)
-    except Exception as e:
-        logger.warning(f"Ошибка при подтверждении страны: {e}")
+        await callback.message.delete()
+    except:
+        pass
     
+    await show_profile_step(callback, state, ProfileStep.REGION, show_current=True)
     await callback.answer()
 
-# Переименовать region_done в country_done:
 @router.callback_query(F.data == "country_done", ProfileForm.region)
 async def country_done(callback: CallbackQuery, state: FSMContext):
     """Подтверждение выбора страны"""

@@ -478,14 +478,14 @@ class Database:
     # === ОПТИМИЗИРОВАННЫЙ ПОИСК ===
 
     async def get_potential_matches(self, user_id: int, game: str,
-                            rating_filter: str = None,
-                            position_filter: str = None,
-                            region_filter: str = None,
-                            goals_filter: str = None,
-                            limit: int = 10) -> List[Dict]:
+                        rating_filter: str = None,
+                        position_filter: str = None,
+                        country_filter: str = None,
+                        goals_filter: str = None,
+                        limit: int = 10) -> List[Dict]:
         """Оптимизированный поиск потенциальных матчей"""
 
-        filters_hash = self._generate_filters_hash(rating_filter, position_filter, region_filter, goals_filter)
+        filters_hash = self._generate_filters_hash(rating_filter, position_filter, country_filter, goals_filter)
         cache_key = f"search:{user_id}:{game}:{filters_hash}"
         cached = await self._get_cache(cache_key)
         if cached:
@@ -493,15 +493,12 @@ class Database:
 
         query = '''
             WITH excluded_users AS (
-                -- Исключаем уже лайкнутых
                 SELECT DISTINCT to_user as user_id FROM likes
                 WHERE from_user = $1 AND game = $2
                 UNION
-                -- Исключаем тех, на кого жаловались (НОВОЕ)
                 SELECT DISTINCT reported_user_id as user_id FROM reports
                 WHERE reporter_id = $1 AND game = $2
                 UNION
-                -- Исключаем заблокированных
                 SELECT DISTINCT user_id FROM bans
                 WHERE expires_at > CURRENT_TIMESTAMP
             )
@@ -526,10 +523,10 @@ class Database:
             query += f" AND (p.positions ? ${param_count} OR p.positions ? 'any')"
             params.append(position_filter)
 
-        if region_filter and region_filter != 'any':
+        if country_filter and country_filter != 'any':
             param_count += 1
             query += f" AND (p.region = ${param_count} OR p.region = 'any')"
-            params.append(region_filter)
+            params.append(country_filter)
 
         if goals_filter and goals_filter != 'any':
             param_count += 1

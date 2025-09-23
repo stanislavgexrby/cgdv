@@ -82,12 +82,12 @@ async def get_full_filters_display(data: dict) -> str:
     else:
         filters_text.append("<b>Позиция:</b> не указана")
 
-    region_filter = data.get('region_filter')
-    if region_filter:
-        region_name = settings.REGIONS.get(region_filter, region_filter)
-        filters_text.append(f"<b>Регион:</b> {region_name}")
+    country_filter = data.get('country_filter')
+    if country_filter:
+        country_name = settings.MAIN_COUNTRIES.get(country_filter) or settings.COUNTRIES_DICT.get(country_filter, country_filter)
+        filters_text.append(f"<b>Страна:</b> {country_name}")
     else:
-        filters_text.append("<b>Регион:</b> не указан")
+        filters_text.append("<b>Страна:</b> не указана")
 
     goals_filter = data.get('goals_filter')
     if goals_filter:
@@ -282,7 +282,7 @@ async def reset_all_filters(callback: CallbackQuery, state: FSMContext):
     await state.update_data(
         rating_filter=None,
         position_filter=None,
-        region_filter=None,
+        country_filter=None,
         goals_filter=None
     )
     await update_filters_display(callback, state, "Все фильтры сброшены")
@@ -427,11 +427,17 @@ async def handle_retry_country_filter_input(callback: CallbackQuery, state: FSMC
 async def confirm_country_filter(callback: CallbackQuery, state: FSMContext):
     """Подтверждение выбранной страны для фильтра"""
     country_key = callback.data.split("_", 3)[3]
-    
+
     await state.update_data(country_filter=country_key)
     await state.set_state(SearchForm.filters)
-    
+
     country_name = settings.COUNTRIES_DICT[country_key]
+
+    try:
+        await callback.message.delete()
+    except:
+        pass
+
     await update_filters_display(callback, state, f"Фильтр по стране: {country_name}")
 
 @router.callback_query(F.data.startswith("goals_filter_"), SearchForm.filters)
@@ -490,7 +496,6 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
     data = await state.get_data()
     current_state = await state.get_state()
 
-    # Если вызывается из меню поиска - переходим в filters состояние
     if current_state == SearchForm.menu:
         await state.set_state(SearchForm.filters)
         data = await state.get_data()
@@ -502,7 +507,7 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
         game=data['game'],
         rating_filter=data.get('rating_filter'),
         position_filter=data.get('position_filter'),
-        region_filter=data.get('region_filter'),
+        country_filter=data.get('country_filter'),
         goals_filter=data.get('goals_filter'),
         limit=20
     )
