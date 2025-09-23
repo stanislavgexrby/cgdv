@@ -26,12 +26,12 @@ def is_valid_profile_url(game: str, url: str) -> bool:
     return False
 
 def validate_profile_input(field: str, value, game: str = None) -> tuple[bool, str]:
-    """Валидация ввода при создании профиля"""
     if field == 'name':
         if len(value) < 2 or len(value) > settings.MAX_NAME_LENGTH:
             return False, f"Имя должно быть от 2 до {settings.MAX_NAME_LENGTH} символов"
-        if len(value.split()) != 2:
-            return False, "Введите имя и фамилию"
+
+        if len(value.split()) != 1:
+            return False, "Имя должно быть одним словом (без пробелов)"
 
     elif field == 'nickname':
         if len(value) < 2 or len(value) > settings.MAX_NICKNAME_LENGTH:

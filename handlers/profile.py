@@ -247,9 +247,9 @@ async def profile_continue(callback: CallbackQuery, state: FSMContext, db):
 
 @router.message(ProfileForm.name)
 async def process_name(message: Message, state: FSMContext):
-    """Обработка введенного имени и фамилии"""
+    """Обработка введенного имени"""
     if not message.text:
-        await show_validation_error(message, state, "Отправьте текстовое сообщение с именем и фамилией")
+        await show_validation_error(message, state, "Отправьте текстовое сообщение с Вашим именем")
         return
 
     name = message.text.strip()
@@ -269,7 +269,7 @@ async def process_name(message: Message, state: FSMContext):
 @router.message(ProfileForm.name, ~F.text)
 async def wrong_name_format(message: Message, state: FSMContext):
     """Обработка неправильного формата имени"""
-    await show_validation_error(message, state, "Отправьте текстовое сообщение с именем и фамилией")
+    await show_validation_error(message, state, "Отправьте текстовое сообщение с именем")
 
 @router.message(ProfileForm.nickname)
 async def process_nickname(message: Message, state: FSMContext):

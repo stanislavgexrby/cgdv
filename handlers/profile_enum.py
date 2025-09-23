@@ -61,11 +61,10 @@ class EditProfileForm(StatesGroup):
     edit_photo = State()
 
 async def get_step_question_text(step: ProfileStep, data: dict = None, show_current: bool = False) -> str:
-    """Получить текст вопроса для шага"""
     if show_current and data:
         if step == ProfileStep.NAME:
             current = data.get('name', '')
-            return f"Текущее имя и фамилия: <b>{current}</b>\n\nВведите новое имя и фамилию или нажмите 'Продолжить':"
+            return f"Текущее имя: <b>{current}</b>\n\nВведите новое имя или нажмите 'Продолжить':"
         elif step == ProfileStep.NICKNAME:
             current = data.get('nickname', '')
             return f"Текущий игровой никнейм: <b>{current}</b>\n\nВведите новый никнейм или нажмите 'Продолжить':"

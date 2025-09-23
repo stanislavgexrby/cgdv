@@ -6,21 +6,13 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
 
     game = user.get('current_game') or user.get('game', 'dota')
 
-    name_parts = user['name'].split()
-
-    # Создаем переменную для никнейма с ссылкой
     profile_url = user.get('profile_url')
     if profile_url and profile_url.strip():
         nickname_with_link = f"<a href='{profile_url}'>{user['nickname']}</a>"
     else:
         nickname_with_link = user['nickname']
-
-    if len(name_parts) >= 2:
-        first_name = name_parts[0]
-        last_name = ' '.join(name_parts[1:])
-        text = f"{first_name} <b>{nickname_with_link}</b> {last_name}, {user['age']} лет\n\n"
-    else:
-        text = f"<b>{user['name']}</b> <b>{nickname_with_link}</b>, {user['age']} лет\n\n"
+    # Имя с ссылкой на профиль в игре
+    text = f"{user['name']} <b>{nickname_with_link}</b>, {user['age']} лет\n\n"
 
     # Рейтинг
     rating = user['rating']
@@ -107,7 +99,7 @@ NO_PROFILES = "Анкеты не найдены! Попробуйте измен
 NEW_LIKE = "Кто-то лайкнул Вашу анкету! Зайдите в «Лайки» чтобы посмотреть"
 
 QUESTIONS = {
-    "name": "Введите Ваше имя и фамилию:",
+    "name": "Введите Ваше имя:",
     "nickname": "Введите игровой никнейм:",
     "age": "Введите Ваш возраст (полных лет):",
     "info": """Расскажите о себе (или нажмите 'Пропустить'):

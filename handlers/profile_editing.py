@@ -145,7 +145,7 @@ async def edit_name(callback: CallbackQuery, state: FSMContext, db):
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_name)
 
-    await safe_edit_message(callback, "Введите новое имя и фамилию:", kb.cancel_edit())
+    await safe_edit_message(callback, "Введите новое имя:", kb.cancel_edit())
     await callback.answer()
 
 @router.callback_query(F.data == "edit_nickname")
@@ -325,7 +325,7 @@ async def edit_photo(callback: CallbackQuery, state: FSMContext, db):
 @router.message(EditProfileForm.edit_name)
 async def process_edit_name(message: Message, state: FSMContext, db):
     if not message.text:
-        await message.answer("Отправьте текстовое сообщение с именем и фамилией", parse_mode='HTML')
+        await message.answer("Отправьте текстовое сообщение с именем", parse_mode='HTML')
         return
 
     name = message.text.strip()
@@ -455,7 +455,7 @@ async def process_edit_photo(message: Message, state: FSMContext, db):
 
 @router.message(EditProfileForm.edit_name, ~F.text)
 async def wrong_edit_name_format(message: Message):
-    await message.answer("Отправьте текстовое сообщение с именем и фамилией", parse_mode='HTML')
+    await message.answer("Отправьте текстовое сообщение с именем", parse_mode='HTML')
 
 @router.message(EditProfileForm.edit_nickname, ~F.text)
 async def wrong_edit_nickname_format(message: Message):
