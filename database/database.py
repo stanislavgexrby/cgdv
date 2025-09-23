@@ -264,12 +264,13 @@ class Database:
 
         profile = dict(row)
 
-        # Обработка позиций
+        # Обработка поsзиций
         positions = profile.get('positions', [])
         if isinstance(positions, str):
             try:
                 positions = json.loads(positions)
-            except:
+            except (json.JSONDecodeError, TypeError) as e:
+                logger.warning(f"Ошибка парсинга позиций для профиля {profile.get('telegram_id')}: {e}")
                 positions = []
         profile['positions'] = positions
 

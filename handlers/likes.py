@@ -219,50 +219,54 @@ async def show_my_matches(callback: CallbackQuery, state: FSMContext, db):
 
 @router.callback_query(F.data.startswith("switch_and_likes_"))
 async def switch_and_show_likes(callback: CallbackQuery, state: FSMContext, db):
-    """Переключение игры и показ лайков из уведомления"""
-    parts = callback.data.split("_")
+    try:
+        parts = callback.data.split("_")
+        if len(parts) < 4 or not parts[3]:
+            raise ValueError("Неполные данные")
 
-    if len(parts) < 4:
-        logger.error(f"Неверный формат callback_data: {callback.data}")
-        await callback.answer("Ошибка данных", show_alert=True)
+        game = parts[3]
+        if game not in settings.GAMES:
+            raise ValueError(f"Неверная игра: {game}")
+        user_id = callback.from_user.id
+
+        if game not in settings.GAMES:
+            logger.error(f"Неверная игра в callback: {game}")
+            await callback.answer("Неверная игра", show_alert=True)
+            return
+
+        logger.info(f"Переключение на игру {game} для показа лайков пользователя {user_id}")
+
+        if not await db.switch_game(user_id, game):
+            await callback.answer("Ошибка переключения игры", show_alert=True)
+            return
+
+        if await db.is_user_banned(user_id):
+            ban_info = await db.get_user_ban(user_id)
+            game_name = settings.GAMES.get(game, game)
+            text = f"Вы заблокированы в {game_name}"
+            if ban_info:
+                expires_at = ban_info['expires_at']
+                ban_end = _format_expire_date(expires_at)
+                text += f" до {ban_end}"
+
+            await safe_edit_message(callback, text, kb.back())
+            await callback.answer()
+            return
+
+        profile = await db.get_user_profile(user_id, game)
+        if not profile:
+            game_name = settings.GAMES.get(game, game)
+            await callback.answer(f"Сначала создайте анкету для {game_name}", show_alert=True)
+            return
+
+        from handlers.likes import _show_likes_internal
+        await _show_likes_internal(callback, user_id, game, state, db)
+        await callback.answer(f"Переключено на {settings.GAMES.get(game, game)}")
+
+    except (ValueError, IndexError) as e:
+        logger.error(f"Некорректный callback: {callback.data}, ошибка: {e}")
+        await callback.answer("Ошибка обработки данных", show_alert=True)
         return
-
-    game = parts[3]
-    user_id = callback.from_user.id
-
-    if game not in settings.GAMES:
-        logger.error(f"Неверная игра в callback: {game}")
-        await callback.answer("Неверная игра", show_alert=True)
-        return
-
-    logger.info(f"Переключение на игру {game} для показа лайков пользователя {user_id}")
-
-    if not await db.switch_game(user_id, game):
-        await callback.answer("Ошибка переключения игры", show_alert=True)
-        return
-
-    if await db.is_user_banned(user_id):
-        ban_info = await db.get_user_ban(user_id)
-        game_name = settings.GAMES.get(game, game)
-        text = f"Вы заблокированы в {game_name}"
-        if ban_info:
-            expires_at = ban_info['expires_at']
-            ban_end = _format_expire_date(expires_at)
-            text += f" до {ban_end}"
-
-        await safe_edit_message(callback, text, kb.back())
-        await callback.answer()
-        return
-
-    profile = await db.get_user_profile(user_id, game)
-    if not profile:
-        game_name = settings.GAMES.get(game, game)
-        await callback.answer(f"Сначала создайте анкету для {game_name}", show_alert=True)
-        return
-
-    from handlers.likes import _show_likes_internal
-    await _show_likes_internal(callback, user_id, game, state, db)
-    await callback.answer(f"Переключено на {settings.GAMES.get(game, game)}")
 
 @router.callback_query(F.data.startswith("switch_and_matches_"))
 async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db):

@@ -338,7 +338,6 @@ async def process_edit_name(message: Message, state: FSMContext, db):
 
     await update_user_activity(message.from_user.id, 'available', db)
 
-
     if success:
         await message.answer("Имя обновлено!", reply_markup=kb.back_to_editing(), parse_mode='HTML')
     else:
