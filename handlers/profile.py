@@ -1,5 +1,5 @@
 import logging
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 
@@ -514,98 +514,195 @@ async def rating_need(callback: CallbackQuery):
     """Напоминание о необходимости выбора рейтинга"""
     await callback.answer("Выберите рейтинг", show_alert=True)
 
-@router.callback_query(F.data == "region_select_any", ProfileForm.region)
-async def select_any_region(callback: CallbackQuery, state: FSMContext):
-    """Выбор опции 'Любой регион'"""
+@router.callback_query(F.data == "country_select_any", ProfileForm.region)
+async def select_any_country(callback: CallbackQuery, state: FSMContext):
+    """Выбор опции 'Не указана'"""
     data = await state.get_data()
-    current_region = data.get('region')
+    current_country = data.get('region')
     
-    if current_region == "any":
-        await callback.answer("Уже выбрано 'Не указан'")
+    if current_country == "any":
+        await callback.answer("Уже выбрано 'Не указана'")
         return
     
     await state.update_data(region="any")
     
-    keyboard = kb.regions(selected_region="any", with_navigation=True)
+    keyboard = kb.countries(selected_country="any", with_navigation=True)
     try:
         await callback.message.edit_reply_markup(reply_markup=keyboard)
     except Exception as e:
-        logger.warning(f"Ошибка обновления клавиатуры региона: {e}")
+        logger.warning(f"Ошибка обновления клавиатуры страны: {e}")
     
     await callback.answer()
 
-@router.callback_query(F.data == "region_remove_any", ProfileForm.region)
-async def remove_any_region(callback: CallbackQuery, state: FSMContext):
-    """Сброс выбора 'Любой регион'"""
+@router.callback_query(F.data == "country_remove_any", ProfileForm.region)
+async def remove_any_country(callback: CallbackQuery, state: FSMContext):
+    """Сброс выбора 'Не указана'"""
     data = await state.get_data()
-    current_region = data.get('region')
+    current_country = data.get('region')
     
-    if current_region != "any":
-        await callback.answer("'Не указан' не выбран")
+    if current_country != "any":
+        await callback.answer("'Не указана' не выбрана")
         return
     
     if 'region' in data:
         del data['region']
         await state.set_data(data)
     
-    keyboard = kb.regions(selected_region=None, with_navigation=True)
+    keyboard = kb.countries(selected_country=None, with_navigation=True)
     try:
         await callback.message.edit_reply_markup(reply_markup=keyboard)
     except Exception as e:
-        logger.warning(f"Ошибка обновления клавиатуры региона: {e}")
+        logger.warning(f"Ошибка обновления клавиатуры страны: {e}")
     
     await callback.answer()
 
-@router.callback_query(F.data.startswith("region_select_"), ProfileForm.region)
-async def select_region(callback: CallbackQuery, state: FSMContext):
-    """Выбор конкретного региона"""
-    region = callback.data.split("_", 2)[2]
+@router.callback_query(F.data.startswith("country_select_"), ProfileForm.region)
+async def select_country(callback: CallbackQuery, state: FSMContext):
+    """Выбор конкретной страны"""
+    country = callback.data.split("_", 2)[2]
     data = await state.get_data()
-    current_region = data.get('region')
+    current_country = data.get('region')
     
-    if current_region == region:
-        await callback.answer("Этот регион уже выбран")
+    if current_country == country:
+        await callback.answer("Эта страна уже выбрана")
         return
     
-    await state.update_data(region=region)
+    await state.update_data(region=country)
     
-    keyboard = kb.regions(selected_region=region, with_navigation=True)
+    keyboard = kb.countries(selected_country=country, with_navigation=True)
     try:
         await callback.message.edit_reply_markup(reply_markup=keyboard)
     except Exception as e:
-        logger.warning(f"Ошибка обновления клавиатуры региона: {e}")
+        logger.warning(f"Ошибка обновления клавиатуры страны: {e}")
     
     await callback.answer()
 
-@router.callback_query(F.data.startswith("region_remove_"), ProfileForm.region)
-async def remove_region(callback: CallbackQuery, state: FSMContext):
-    """Сброс выбора конкретного региона"""
-    region = callback.data.split("_", 2)[2]
+@router.callback_query(F.data.startswith("country_remove_"), ProfileForm.region)
+async def remove_country(callback: CallbackQuery, state: FSMContext):
+    """Сброс выбора конкретной страны"""
+    country = callback.data.split("_", 2)[2]
     data = await state.get_data()
-    current_region = data.get('region')
+    current_country = data.get('region')
     
-    if current_region != region:
-        await callback.answer("Этот регион не выбран")
+    if current_country != country:
+        await callback.answer("Эта страна не выбрана")
         return
     
     if 'region' in data:
         del data['region']
         await state.set_data(data)
     
-    keyboard = kb.regions(selected_region=None, with_navigation=True)
+    keyboard = kb.countries(selected_country=None, with_navigation=True)
     try:
         await callback.message.edit_reply_markup(reply_markup=keyboard)
     except Exception as e:
-        logger.warning(f"Ошибка обновления клавиатуры региона: {e}")
+        logger.warning(f"Ошибка обновления клавиатуры страны: {e}")
     
     await callback.answer()
 
-@router.callback_query(F.data == "region_done", ProfileForm.region)
-async def region_done(callback: CallbackQuery, state: FSMContext):
-    """Подтверждение выбора региона"""
+@router.callback_query(F.data == "country_other", ProfileForm.region)
+async def select_other_country(callback: CallbackQuery, state: FSMContext):
+    """Выбор 'Другое' - переход к вводу страны вручную"""
+    await state.set_state(ProfileForm.country_input)
+    
+    text = "Введите название страны:\n\nНапример: Молдова, Эстония, Литва, Польша, Германия и т.д."
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Назад", callback_data="country_back")]
+    ])
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard)
+    except Exception as e:
+        logger.warning(f"Ошибка при переходе к вводу страны: {e}")
+    
+    await callback.answer()
+
+@router.callback_query(F.data == "country_back", ProfileForm.country_input)
+async def back_to_country_selection(callback: CallbackQuery, state: FSMContext):
+    """Возврат к выбору страны"""
+    await state.set_state(ProfileForm.region)
+    data = await state.get_data()
+    current_country = data.get('region')
+    
+    text = "Выберите страну:"
+    keyboard = kb.countries(selected_country=current_country, with_navigation=True)
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard)
+    except Exception as e:
+        logger.warning(f"Ошибка при возврате к выбору страны: {e}")
+    
+    await callback.answer()
+
+@router.message(ProfileForm.country_input)
+async def process_country_input(message: Message, state: FSMContext):
+    """Обработка ввода названия страны"""
+    search_name = message.text.strip()
+    
+    country_key = settings.find_country_by_name(search_name)
+    
+    if country_key:
+        country_name = settings.COUNTRIES_DICT[country_key]
+        text = f"Найдена страна: {country_name}\n\nВыберите действие:"
+        
+        keyboard = kb.confirm_country(country_key)
+        
+        await message.answer(text, reply_markup=keyboard)
+    else:
+        text = f"Страна '{search_name}' не найдена в словаре.\n\nПопробуйте ввести другое название или вернитесь к выбору из списка."
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Попробовать еще раз", callback_data="retry_country_input")],
+            [InlineKeyboardButton(text="Назад к списку", callback_data="country_back")]
+        ])
+        
+        await message.answer(text, reply_markup=keyboard)
+
+@router.callback_query(F.data == "retry_country_input", ProfileForm.country_input)
+async def handle_retry_country_input(callback: CallbackQuery, state: FSMContext):
+    """Обработчик повторного ввода страны при создании профиля"""
+    text = "Введите название страны:\n\nНапример: Молдова, Эстония, Литва, Польша, Германия и т.д."
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Назад", callback_data="country_back")]
+    ])
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard)
+    except Exception as e:
+        logger.warning(f"Ошибка при повторном вводе страны: {e}")
+    
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("confirm_country_"), ProfileForm.country_input)
+async def confirm_selected_country(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение выбранной страны"""
+    country_key = callback.data.split("_", 2)[2]
+    
+    # Сохраняем выбранную страну
+    await state.update_data(region=country_key)
+    await state.set_state(ProfileForm.region)
+    
+    country_name = settings.COUNTRIES_DICT[country_key]
+    text = f"Выбрана страна: {country_name}\n\nВыберите страну:"
+    
+    keyboard = kb.countries(selected_country=country_key, with_navigation=True)
+    
+    try:
+        await callback.message.edit_text(text, reply_markup=keyboard)
+    except Exception as e:
+        logger.warning(f"Ошибка при подтверждении страны: {e}")
+    
+    await callback.answer()
+
+# Переименовать region_done в country_done:
+@router.callback_query(F.data == "country_done", ProfileForm.region)
+async def country_done(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение выбора страны"""
     data = await state.get_data()
     if not data.get('region'):
-        await callback.answer("Выберите регион", show_alert=True)
+        await callback.answer("Выберите страну", show_alert=True)
         return
     
     has_next_data = bool(data.get('positions_selected'))
@@ -613,10 +710,10 @@ async def region_done(callback: CallbackQuery, state: FSMContext):
     await show_profile_step(callback, state, ProfileStep.POSITIONS, show_current=has_next_data)
     await callback.answer()
 
-@router.callback_query(F.data == "region_need", ProfileForm.region)
-async def region_need(callback: CallbackQuery):
-    """Напоминание о необходимости выбора региона"""
-    await callback.answer("Выберите регион", show_alert=True)
+@router.callback_query(F.data == "country_need", ProfileForm.region)
+async def country_need(callback: CallbackQuery):
+    """Напоминание о необходимости выбора страны"""
+    await callback.answer("Выберите страну", show_alert=True)
 
 @router.callback_query(F.data == "pos_add_any", ProfileForm.positions)
 async def add_any_position(callback: CallbackQuery, state: FSMContext):

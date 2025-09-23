@@ -18,6 +18,7 @@ class ProfileForm(StatesGroup):
     rating = State()
     profile_url = State()
     region = State()
+    country_input = State()
     positions = State()
     goals = State()
     additional_info = State()
@@ -54,7 +55,8 @@ class EditProfileForm(StatesGroup):
     edit_age = State()
     edit_rating = State()
     edit_profile_url = State()
-    edit_region = State()
+    edit_country = State()
+    edit_country_input = State()
     edit_positions = State()
     edit_goals = State()
     edit_info = State()
@@ -72,82 +74,78 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
             current = data.get('age', '')
             return f"Текущий возраст: <b>{current}</b>\n\nВведите новый возраст или нажмите 'Продолжить':"
         elif step == ProfileStep.RATING:
-            current = data.get('rating', '')
-            if current:
-                game = data.get('game', 'dota')
-                rating_name = settings.RATINGS[game].get(current, current)
-                return f"Текущий рейтинг: <b>{rating_name}</b>\n\nВыберите новый рейтинг или продолжите с текущим:"
+            current_rating = data.get('rating')
+            if current_rating == 'any':
+                current_text = 'Не указан'
+            elif current_rating:
+                current_text = settings.RATINGS.get(data.get('game', 'dota'), {}).get(current_rating, current_rating)
+            else:
+                current_text = 'Не указан'
+            return f"Текущий рейтинг: <b>{current_text}</b>\n\nВыберите новый рейтинг или нажмите 'Продолжить':"
         elif step == ProfileStep.PROFILE_URL:
-            current = data.get('profile_url', '')
-            game = data.get('game', 'dota')
-            if current:
-                if game == 'dota':
-                    return f"Текущая ссылка: <b>{current}</b>\n\nВведите новую ссылку на Dotabuff или нажмите 'Продолжить':"
-                else:
-                    return f"Текущая ссылка: <b>{current}</b>\n\nВведите новую ссылку на FACEIT или нажмите 'Продолжить':"
-            else:
-                if game == 'dota':
-                    return "Ссылка не задана\n\nВведите ссылку на Dotabuff или нажмите 'Продолжить':"
-                else:
-                    return "Ссылка не задана\n\nВведите ссылку на FACEIT или нажмите 'Продолжить':"
+            current = data.get('profile_url', 'Не указана')
+            return f"Текущая ссылка: <b>{current}</b>\n\nВведите новую ссылку или нажмите 'Продолжить':"
         elif step == ProfileStep.REGION:
-            current = data.get('region', '')
-            if current:
-                region_name = settings.REGIONS.get(current, current)
-                return f"Текущий регион: <b>{region_name}</b>\n\nВыберите новый регион или продолжите с текущим:"
+            current_country = data.get('region')
+            if current_country == 'any':
+                current_text = 'Не указана'
+            elif current_country:
+                current_text = settings.MAIN_COUNTRIES.get(current_country) or settings.COUNTRIES_DICT.get(current_country, current_country)
+            else:
+                current_text = 'Не указана'
+            return f"Текущая страна: <b>{current_text}</b>\n\nВыберите новую страну или нажмите 'Продолжить':"
         elif step == ProfileStep.POSITIONS:
-            current = data.get('positions_selected', [])
-            if current:
+            selected_positions = data.get('positions_selected', [])
+            if 'any' in selected_positions:
+                current_text = 'Не указаны'
+            elif selected_positions:
                 game = data.get('game', 'dota')
-                if "any" in current:
-                    pos_text = "Любая позиция"
-                else:
-                    position_names = [settings.POSITIONS[game].get(pos, pos) for pos in current]
-                    pos_text = ", ".join(position_names)
-                return f"Текущие позиции: <b>{pos_text}</b>\n\nИзмените выбор или продолжите с текущими:"
+                pos_names = []
+                for pos in selected_positions:
+                    pos_names.append(settings.POSITIONS.get(game, {}).get(pos, pos))
+                current_text = ', '.join(pos_names)
+            else:
+                current_text = 'Не указаны'
+            return f"Текущие позиции: <b>{current_text}</b>\n\nВыберите новые позиции или нажмите 'Продолжить':"
         elif step == ProfileStep.GOALS:
-            current = data.get('goals_selected', []) if show_current else []
-            if current and show_current:
-                if "any" in current:
-                    goals_text = "Любая цель"
-                else:
-                    goals_names = [settings.GOALS.get(goal, goal) for goal in current]
-                    goals_text = ", ".join(goals_names)
-                return f"Текущие цели: <b>{goals_text}</b>\n\nИзмените выбор или продолжите с текущими:"
-            return "Выберите ваши цели (можно несколько):"
+            selected_goals = data.get('goals_selected', [])
+            if 'any' in selected_goals:
+                current_text = 'Не указаны'
+            elif selected_goals:
+                goal_names = []
+                for goal in selected_goals:
+                    goal_names.append(settings.GOALS.get(goal, goal))
+                current_text = ', '.join(goal_names)
+            else:
+                current_text = 'Не указаны'
+            return f"Текущие цели: <b>{current_text}</b>\n\nВыберите новые цели или нажмите 'Продолжить':"
         elif step == ProfileStep.INFO:
-            current = data.get('additional_info', '')
-            if current:
-                return f"Текущее описание: <b>{current}</b>\n\nВведите новое описание или нажмите 'Продолжить':"
-            else:
-                return "Описание не задано\n\nВведите описание или нажмите 'Продолжить':"
+            current = data.get('additional_info', 'Не указано')
+            return f"Текущее описание: <b>{current}</b>\n\nВведите новое описание или нажмите 'Продолжить':"
         elif step == ProfileStep.PHOTO:
-            current = data.get('photo_id', '')
-            if current:
-                return "Фото загружено\n\nОтправьте новое фото или нажмите 'Продолжить':"
-            else:
-                return "Фото не загружено\n\nОтправьте фото или нажмите 'Продолжить':"
+            current = 'Установлено' if data.get('photo_id') else 'Не указано'
+            return f"Текущее фото: <b>{current}</b>\n\nОтправьте новое фото или нажмите 'Продолжить':"
     
     if step == ProfileStep.NAME:
-        return texts.QUESTIONS['name']
+        return texts.QUESTIONS.get('name', "Введите имя:")
     elif step == ProfileStep.NICKNAME:
-        return texts.QUESTIONS['nickname'] 
+        return texts.QUESTIONS.get('nickname', "Введите никнейм:")
     elif step == ProfileStep.AGE:
-        return texts.QUESTIONS['age']
+        return texts.QUESTIONS.get('age', "Введите возраст:")
     elif step == ProfileStep.INFO:
         return texts.QUESTIONS['info']
     elif step == ProfileStep.PHOTO:
         return texts.QUESTIONS['photo']
     elif step == ProfileStep.RATING:
         return "Выберите рейтинг:"
-    if step == ProfileStep.PROFILE_URL:
+    elif step == ProfileStep.PROFILE_URL:
         game = data.get('game', 'dota') if data else 'dota'
         if game == 'dota':
-            return "Введите ссылку на ваш Dotabuff профиль или нажмите 'Пропустить':\n\nПример: https://www.dotabuff.com/players/123456789"
-        else:
-            return "Введите ссылку на ваш FACEIT профиль или нажмите 'Пропустить':\n\nПример: https://www.faceit.com/en/players/nickname"
+            return "Введите ссылку на профиль Dotabuff/OpenDota или нажмите 'Пропустить':\n\nНапример: https://www.dotabuff.com/players/123456789"
+        elif game == 'cs':
+            return "Введите ссылку на профиль Steam/FACEIT или нажмите 'Пропустить':\n\nНапример: https://www.faceit.com/en/players/nickname"
     elif step == ProfileStep.REGION:
-        return "Выберите регион:"
+        return "Выберите страну:"
     elif step == ProfileStep.POSITIONS:
         return "Выберите позиции (можно несколько):"
     elif step == ProfileStep.GOALS:
@@ -214,8 +212,8 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
 
     elif step == ProfileStep.REGION:
         await state.set_state(ProfileForm.region)
-        current_region = data.get('region') if show_existing_data else None
-        keyboard = kb.regions(selected_region=current_region, with_navigation=True)
+        region = data.get('region') if show_existing_data else None
+        keyboard = kb.countries(selected_country=region, with_navigation=True)
         
     elif step == ProfileStep.POSITIONS:
         await state.set_state(ProfileForm.positions)

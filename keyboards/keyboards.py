@@ -151,34 +151,35 @@ def ratings(game: str, selected_rating: str = None, with_navigation: bool = Fals
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def regions(selected_region: str = None, with_navigation: bool = False, 
-           for_profile: bool = True, with_cancel: bool = False) -> InlineKeyboardMarkup:
-    """Интерактивный выбор региона"""
+def countries(selected_country: str = None, with_navigation: bool = False, 
+              for_profile: bool = True, with_cancel: bool = False) -> InlineKeyboardMarkup:
+    """Интерактивный выбор страны"""
     buttons = []
 
-    for key, name in settings.REGIONS.items():
-        if key == selected_region:
+    for key, name in settings.MAIN_COUNTRIES.items():
+        if key == selected_country:
             text = f"✅ {name}"
-            callback = f"region_remove_{key}"
+            callback = f"country_remove_{key}"
         else:
             text = name
-            callback = f"region_select_{key}"
-        
+            callback = f"country_select_{key}"
+
         buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
 
+    buttons.append([InlineKeyboardButton(text="🌍 Другое", callback_data="country_other")])
+
     if for_profile:
-        if selected_region == "any":
-            buttons.append([InlineKeyboardButton(text="✅ Не указан", callback_data="region_remove_any")])
+        if selected_country == "any":
+            buttons.append([InlineKeyboardButton(text="✅ Не указана", callback_data="country_remove_any")])
         else:
-            buttons.append([InlineKeyboardButton(text="Не указан", callback_data="region_select_any")])
+            buttons.append([InlineKeyboardButton(text="Не указана", callback_data="country_select_any")])
 
     if with_navigation:
-        if selected_region:
-            buttons.append([InlineKeyboardButton(text="Готово", callback_data="region_done")])
+        if selected_country:
+            buttons.append([InlineKeyboardButton(text="Готово", callback_data="country_done")])
         else:
-            buttons.append([InlineKeyboardButton(text="Выберите регион", callback_data="region_need")])
+            buttons.append([InlineKeyboardButton(text="Выберите страну", callback_data="country_need")])
 
-    if with_navigation:
         nav_buttons = [
             InlineKeyboardButton(text="Назад", callback_data="profile_back"),
             InlineKeyboardButton(text="Отмена", callback_data="cancel")
@@ -348,7 +349,7 @@ def edit_profile_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Изменить никнейм", callback_data="edit_nickname")],
         [InlineKeyboardButton(text="Изменить возраст", callback_data="edit_age")],
         [InlineKeyboardButton(text="Изменить рейтинг", callback_data="edit_rating")],
-        [InlineKeyboardButton(text="Изменить регион", callback_data="edit_region")],
+        [InlineKeyboardButton(text="Изменить страну", callback_data="edit_country")],
         [InlineKeyboardButton(text="Изменить позиции", callback_data="edit_positions")],
         [InlineKeyboardButton(text="Изменить цели", callback_data="edit_goals")],
         [InlineKeyboardButton(text="Изменить профиль", callback_data="edit_profile_url")],
@@ -407,7 +408,7 @@ def filters_setup_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Рейтинг", callback_data="filter_rating")],
         [InlineKeyboardButton(text="Позиция", callback_data="filter_position")],
-        [InlineKeyboardButton(text="Регион", callback_data="filter_region")],
+        [InlineKeyboardButton(text="Страна", callback_data="filter_country")],  # Изменено с "filter_region"
         [InlineKeyboardButton(text="Цель", callback_data="filter_goals")],
         [InlineKeyboardButton(text="Сбросить все", callback_data="reset_all_filters")],
         [InlineKeyboardButton(text="Назад к поиску", callback_data="back_to_search")]
@@ -427,15 +428,17 @@ def ratings_filter(game: str) -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def regions_filter() -> InlineKeyboardMarkup:
-    """Фильтр по региону"""
+def countries_filter() -> InlineKeyboardMarkup:
+    """Фильтр по странам для поиска"""
     buttons = []
 
-    for key, name in settings.REGIONS.items():
-        buttons.append([InlineKeyboardButton(text=name, callback_data=f"region_filter_{key}")])
+    for key, name in settings.MAIN_COUNTRIES.items():
+        buttons.append([InlineKeyboardButton(text=name, callback_data=f"country_filter_{key}")])
+
+    buttons.append([InlineKeyboardButton(text="🌍 Другое", callback_data="country_filter_other")])
 
     buttons.extend([
-        [InlineKeyboardButton(text="Сбросить фильтр", callback_data="region_reset")],
+        [InlineKeyboardButton(text="Сбросить фильтр", callback_data="country_reset")],
         [InlineKeyboardButton(text="Отмена", callback_data="cancel_filter")]
     ])
 
@@ -467,6 +470,18 @@ def profile_actions(user_id: int) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="Главное меню", callback_data="main_menu")
         ]
     ])
+
+def confirm_country(country_key: str) -> InlineKeyboardMarkup:
+    """Подтверждение выбранной страны из поиска"""
+    country_name = settings.COUNTRIES_DICT.get(country_key, country_key)
+
+    buttons = [
+        [InlineKeyboardButton(text=f"✅ Выбрать {country_name}", callback_data=f"confirm_country_{country_key}")],
+        [InlineKeyboardButton(text="Попробовать еще раз", callback_data="retry_country_input")],
+        [InlineKeyboardButton(text="Назад", callback_data="country_back")]
+    ]
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 # ==================== ЛАЙКИ И МЭТЧИ ====================
 

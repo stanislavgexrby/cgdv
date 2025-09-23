@@ -52,12 +52,15 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
                     goals_text.append(goal)
             text += f"<b>Цель:</b> {', '.join(goals_text)}\n"
 
-    # Регион
     region = user.get('region', '')
     if region == 'any':
-        text += f"<b>Регион:</b> Не указан\n"
-    elif region and region in settings.REGIONS:
-        text += f"<b>Регион:</b> {settings.REGIONS[region]}\n"
+        text += f"<b>Страна:</b> Не указана\n"
+    elif region:
+        country_name = settings.MAIN_COUNTRIES.get(region) or settings.COUNTRIES_DICT.get(region)
+        if country_name:
+            text += f"<b>Страна:</b> {country_name}\n"
+        else:
+            text += f"<b>Страна:</b> {region}\n"
 
     # Дополнительная информация
     if user.get('additional_info'):
@@ -102,6 +105,7 @@ QUESTIONS = {
     "name": "Введите Ваше имя:",
     "nickname": "Введите игровой никнейм:",
     "age": "Введите Ваш возраст (полных лет):",
+    "region": "Выберите страну:",
     "info": """Расскажите о себе (или нажмите 'Пропустить'):
 
 Например:

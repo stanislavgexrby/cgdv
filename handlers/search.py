@@ -1,6 +1,6 @@
 import logging
 from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 
 from handlers.basic import check_ban_and_profile, safe_edit_message, SearchForm
@@ -38,12 +38,12 @@ async def update_filters_display(callback: CallbackQuery, state: FSMContext, mes
     else:
         filters_text.append("<b>Позиция:</b> не указана")
 
-    region_filter = data.get('region_filter')
-    if region_filter:
-        region_name = settings.REGIONS.get(region_filter, region_filter)
-        filters_text.append(f"<b>Регион:</b> {region_name}")
+    country_filter = data.get('country_filter')
+    if country_filter:
+        country_name = settings.MAIN_COUNTRIES.get(country_filter) or settings.COUNTRIES_DICT.get(country_filter, country_filter)
+        filters_text.append(f"<b>Страна:</b> {country_name}")
     else:
-        filters_text.append("<b>Регион:</b> не указан")
+        filters_text.append("<b>Страна:</b> не указана")
 
     goals_filter = data.get('goals_filter')
     if goals_filter:
@@ -261,10 +261,13 @@ async def set_position_filter(callback: CallbackQuery, state: FSMContext):
     await safe_edit_message(callback, "Выберите позицию:", kb.position_filter_menu(game))
     await callback.answer()
 
-@router.callback_query(F.data == "filter_region", SearchForm.filters)
-async def set_region_filter(callback: CallbackQuery, state: FSMContext):
-    """Показать меню выбора региона"""
-    await safe_edit_message(callback, "Выберите регион:", kb.regions_filter())
+@router.callback_query(F.data == "filter_country", SearchForm.filters)
+async def set_country_filter(callback: CallbackQuery, state: FSMContext):
+    """Настройка фильтра по стране"""
+    text = "Выберите страну для поиска:"
+    keyboard = kb.countries_filter()
+    
+    await safe_edit_message(callback, text, keyboard)
     await callback.answer()
 
 @router.callback_query(F.data == "filter_goals", SearchForm.filters)
@@ -333,27 +336,103 @@ async def save_position_filter(callback: CallbackQuery, state: FSMContext):
     position_name = settings.POSITIONS[game].get(position, position)
     await update_filters_display(callback, state, f"Фильтр по позиции: {position_name}")
 
-@router.callback_query(F.data.startswith("region_filter_"), SearchForm.filters)
-async def save_region_filter(callback: CallbackQuery, state: FSMContext):
-    """Сохранение выбранного региона"""
+@router.callback_query(F.data.startswith("country_filter_"), SearchForm.filters)
+async def save_country_filter(callback: CallbackQuery, state: FSMContext):
+    """Сохранение выбранной страны в фильтре"""
     parts = callback.data.split("_")
+    
     if len(parts) < 3:
         return
 
-    region = parts[2]
+    if parts[2] == "other":
+        await state.set_state(SearchForm.country_filter_input)
 
-    if region not in settings.REGIONS:
+        text = "Введите название страны для поиска:\n\nНапример: Молдова, Эстония, Литва, Польша, Германия и т.д."
+
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Назад", callback_data="back_country_filter")]
+        ])
+
+        await safe_edit_message(callback, text, keyboard)
+        await callback.answer()
+        return
+
+    country = parts[2]
+
+    if country not in settings.MAIN_COUNTRIES:
         return
 
     data = await state.get_data()
-    current_region = data.get('region_filter')
-    if current_region == region:
-        await callback.answer("Этот регион уже выбран")
+    current_country = data.get('country_filter')
+    if current_country == country:
+        await callback.answer("Эта страна уже выбрана")
         return
 
-    await state.update_data(region_filter=region)
-    region_name = settings.REGIONS.get(region, region)
-    await update_filters_display(callback, state, f"Фильтр по региону: {region_name}")
+    await state.update_data(country_filter=country)
+    country_name = settings.MAIN_COUNTRIES.get(country, country)
+    await update_filters_display(callback, state, f"Фильтр по стране: {country_name}")
+
+@router.callback_query(F.data == "back_country_filter", SearchForm.country_filter_input)
+async def back_to_country_filter(callback: CallbackQuery, state: FSMContext):
+    """Возврат к выбору страны в фильтре"""
+    await state.set_state(SearchForm.filters)
+    
+    text = "Выберите страну для поиска:"
+    keyboard = kb.countries_filter()
+    
+    await safe_edit_message(callback, text, keyboard)
+    await callback.answer()
+
+@router.message(SearchForm.country_filter_input)
+async def process_country_filter_input(message: Message, state: FSMContext):
+    """Обработка ввода названия страны для фильтра"""
+    search_name = message.text.strip()
+    
+    country_key = settings.find_country_by_name(search_name)
+    
+    if country_key:
+        country_name = settings.COUNTRIES_DICT[country_key]
+        text = f"Найдена страна: {country_name}\n\nВыберите действие:"
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"✅ Использовать {country_name}", callback_data=f"confirm_filter_country_{country_key}")],
+            [InlineKeyboardButton(text="Попробовать еще раз", callback_data="retry_country_filter_input")],
+            [InlineKeyboardButton(text="Назад", callback_data="back_country_filter")]
+        ])
+        
+        await message.answer(text, reply_markup=keyboard)
+    else:
+        text = f"Страна '{search_name}' не найдена в словаре.\n\nПопробуйте ввести другое название."
+        
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Попробовать еще раз", callback_data="retry_country_filter_input")],
+            [InlineKeyboardButton(text="Назад", callback_data="back_country_filter")]
+        ])
+        
+        await message.answer(text, reply_markup=keyboard)
+
+@router.callback_query(F.data == "retry_country_filter_input", SearchForm.country_filter_input)
+async def handle_retry_country_filter_input(callback: CallbackQuery, state: FSMContext):
+    """Обработчик повторного ввода страны в фильтре поиска"""  
+    text = "Введите название страны для поиска:\n\nНапример: Молдова, Эстония, Литва, Польша, Германия и т.д."
+    
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Назад", callback_data="back_country_filter")]
+    ])
+    
+    await safe_edit_message(callback, text, keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("confirm_filter_country_"), SearchForm.country_filter_input)
+async def confirm_country_filter(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение выбранной страны для фильтра"""
+    country_key = callback.data.split("_", 3)[3]
+    
+    await state.update_data(country_filter=country_key)
+    await state.set_state(SearchForm.filters)
+    
+    country_name = settings.COUNTRIES_DICT[country_key]
+    await update_filters_display(callback, state, f"Фильтр по стране: {country_name}")
 
 @router.callback_query(F.data.startswith("goals_filter_"), SearchForm.filters)
 async def save_goals_filter(callback: CallbackQuery, state: FSMContext):
@@ -389,10 +468,10 @@ async def reset_position_filter(callback: CallbackQuery, state: FSMContext):
     await state.update_data(position_filter=None)
     await update_filters_display(callback, state, "Фильтр по позиции сброшен")
 
-@router.callback_query(F.data == "region_reset", SearchForm.filters)
-async def reset_region_filter(callback: CallbackQuery, state: FSMContext):
-    await state.update_data(region_filter=None)
-    await update_filters_display(callback, state, "Фильтр по региону сброшен")
+@router.callback_query(F.data == "country_reset", SearchForm.filters)
+async def reset_country_filter(callback: CallbackQuery, state: FSMContext):
+    await state.update_data(country_filter=None)
+    await update_filters_display(callback, state, "Фильтр по стране сброшен")
 
 @router.callback_query(F.data == "goals_reset", SearchForm.filters)
 async def reset_goals_filter(callback: CallbackQuery, state: FSMContext):

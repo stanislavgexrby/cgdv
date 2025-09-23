@@ -140,11 +140,204 @@ POSITIONS = {
     }
 }
 
-REGIONS = {
-    "eeu": "Восточная Европа (EEU)",
-    "weu": "Западная Европа (WEU)",
-    "asia": "Азия (Asia)"
+MAIN_COUNTRIES = {
+    "russia": "🇷🇺 Россия",
+    "belarus": "🇧🇾 Беларусь", 
+    "ukraine": "🇺🇦 Украина",
+    "kazakhstan": "🇰🇿 Казахстан"
 }
+
+COUNTRIES_DICT = {
+    # СНГ
+    "russia": "🇷🇺 Россия",
+    "belarus": "🇧🇾 Беларусь",
+    "ukraine": "🇺🇦 Украина", 
+    "kazakhstan": "🇰🇿 Казахстан",
+    "armenia": "🇦🇲 Армения",
+    "azerbaijan": "🇦🇿 Азербайджан",
+    "georgia": "🇬🇪 Грузия",
+    "moldova": "🇲🇩 Молдова",
+    "kyrgyzstan": "🇰🇬 Киргизия",
+    "tajikistan": "🇹🇯 Таджикистан",
+    "turkmenistan": "🇹🇲 Туркменистан",
+    "uzbekistan": "🇺🇿 Узбекистан",
+    
+    # Европа
+    "poland": "🇵🇱 Польша",
+    "germany": "🇩🇪 Германия",
+    "france": "🇫🇷 Франция",
+    "italy": "🇮🇹 Италия",
+    "spain": "🇪🇸 Испания",
+    "uk": "🇬🇧 Великобритания",
+    "netherlands": "🇳🇱 Нидерланды",
+    "sweden": "🇸🇪 Швеция",
+    "norway": "🇳🇴 Норвегия",
+    "finland": "🇫🇮 Финляндия",
+    "denmark": "🇩🇰 Дания",
+    "czech": "🇨🇿 Чехия",
+    "slovakia": "🇸🇰 Словакия",
+    "hungary": "🇭🇺 Венгрия",
+    "romania": "🇷🇴 Румыния",
+    "bulgaria": "🇧🇬 Болгария",
+    "croatia": "🇭🇷 Хорватия",
+    "serbia": "🇷🇸 Сербия",
+    "bosnia": "🇧🇦 Босния и Герцеговина",
+    "montenegro": "🇲🇪 Черногория",
+    "albania": "🇦🇱 Албания",
+    "macedonia": "🇲🇰 Северная Македония",
+    "slovenia": "🇸🇮 Словения",
+    "lithuania": "🇱🇹 Литва",
+    "latvia": "🇱🇻 Латвия",
+    "estonia": "🇪🇪 Эстония",
+    
+    # Азия
+    "china": "🇨🇳 Китай",
+    "japan": "🇯🇵 Япония",
+    "south_korea": "🇰🇷 Южная Корея",
+    "india": "🇮🇳 Индия",
+    "thailand": "🇹🇭 Таиланд",
+    "vietnam": "🇻🇳 Вьетнам",
+    "singapore": "🇸🇬 Сингапур",
+    "malaysia": "🇲🇾 Малайзия",
+    "indonesia": "🇮🇩 Индонезия",
+    "philippines": "🇵🇭 Филиппины",
+    "turkey": "🇹🇷 Турция",
+    "israel": "🇮🇱 Израиль",
+    "iran": "🇮🇷 Иран",
+    "mongolia": "🇲🇳 Монголия",
+    
+    # Америка
+    "usa": "🇺🇸 США",
+    "canada": "🇨🇦 Канада",
+    "mexico": "🇲🇽 Мексика",
+    "brazil": "🇧🇷 Бразилия",
+    "argentina": "🇦🇷 Аргентина",
+    "chile": "🇨🇱 Чили",
+    "colombia": "🇨🇴 Колумбия",
+    "peru": "🇵🇪 Перу",
+    "venezuela": "🇻🇪 Венесуэла",
+    "ecuador": "🇪🇨 Эквадор",
+    "uruguay": "🇺🇾 Уругвай",
+    
+    # Африка и Океания
+    "australia": "🇦🇺 Австралия",
+    "new_zealand": "🇳🇿 Новая Зеландия",
+    "south_africa": "🇿🇦 ЮАР",
+    "egypt": "🇪🇬 Египет"
+}
+
+def find_country_by_name(search_name: str) -> str:
+    """Поиск страны по названию (без учета регистра)"""
+    search_name = search_name.lower().strip()
+    
+    alternative_names = {
+        'россия': 'russia',
+        'беларусь': 'belarus',
+        'белоруссия': 'belarus',
+        'украина': 'ukraine',
+        'казахстан': 'kazakhstan',
+        'армения': 'armenia',
+        'азербайджан': 'azerbaijan',
+        'грузия': 'georgia',
+        'молдова': 'moldova',
+        'молдавия': 'moldova',
+        'киргизия': 'kyrgyzstan',
+        'кыргызстан': 'kyrgyzstan',
+        'таджикистан': 'tajikistan',
+        'туркменистан': 'turkmenistan',
+        'узбекистан': 'uzbekistan',
+        'польша': 'poland',
+        'германия': 'germany',
+        'франция': 'france',
+        'италия': 'italy',
+        'испания': 'spain',
+        'великобритания': 'uk',
+        'англия': 'uk',
+        'нидерланды': 'netherlands',
+        'голландия': 'netherlands',
+        'швеция': 'sweden',
+        'норвегия': 'norway',
+        'финляндия': 'finland',
+        'дания': 'denmark',
+        'чехия': 'czech',
+        'словакия': 'slovakia',
+        'венгрия': 'hungary',
+        'румыния': 'romania',
+        'болгария': 'bulgaria',
+        'хорватия': 'croatia',
+        'сербия': 'serbia',
+        'китай': 'china',
+        'япония': 'japan',
+        'корея': 'south_korea',
+        'южная корея': 'south_korea',
+        'индия': 'india',
+        'турция': 'turkey',
+        'израиль': 'israel',
+        'сша': 'usa',
+        'америка': 'usa',
+        'канада': 'canada',
+        'мексика': 'mexico',
+        'бразилия': 'brazil',
+        'аргентина': 'argentina',
+        'австралия': 'australia',
+        
+        # Английские названия
+        'russia': 'russia',
+        'belarus': 'belarus',
+        'ukraine': 'ukraine',
+        'kazakhstan': 'kazakhstan',
+        'armenia': 'armenia',
+        'azerbaijan': 'azerbaijan',
+        'georgia': 'georgia',
+        'moldova': 'moldova',
+        'poland': 'poland',
+        'germany': 'germany',
+        'france': 'france',
+        'italy': 'italy',
+        'spain': 'spain',
+        'uk': 'uk',
+        'united kingdom': 'uk',
+        'england': 'uk',
+        'netherlands': 'netherlands',
+        'holland': 'netherlands',
+        'sweden': 'sweden',
+        'norway': 'norway',
+        'finland': 'finland',
+        'denmark': 'denmark',
+        'czech': 'czech',
+        'slovakia': 'slovakia',
+        'hungary': 'hungary',
+        'romania': 'romania',
+        'bulgaria': 'bulgaria',
+        'croatia': 'croatia',
+        'serbia': 'serbia',
+        'china': 'china',
+        'japan': 'japan',
+        'south korea': 'south_korea',
+        'korea': 'south_korea',
+        'india': 'india',
+        'turkey': 'turkey',
+        'israel': 'israel',
+        'usa': 'usa',
+        'america': 'usa',
+        'united states': 'usa',
+        'canada': 'canada',
+        'mexico': 'mexico',
+        'brazil': 'brazil',
+        'argentina': 'argentina',
+        'australia': 'australia'
+    }
+    
+    if search_name in alternative_names:
+        country_key = alternative_names[search_name]
+        return country_key if country_key in COUNTRIES_DICT else None
+    
+    for key, value in COUNTRIES_DICT.items():
+        country_name = value.split(' ', 1)[1].lower() if ' ' in value else value.lower()
+        if search_name in country_name or country_name.startswith(search_name):
+            return key
+    
+    return None
 
 GOALS = {
     "publics": "Паблики",
