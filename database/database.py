@@ -236,6 +236,7 @@ class Database:
 
                 # === ЧАСТИЧНЫЕ ИНДЕКСЫ ДЛЯ АКТИВНЫХ ЗАПИСЕЙ ===
                 "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_active_with_photo ON profiles(game, telegram_id) WHERE photo_id IS NOT NULL",
+                "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_updated_at ON profiles(updated_at)"
             ]
 
             try:
@@ -833,6 +834,25 @@ class Database:
             return True
 
     # === СЛУЖЕБНЫЕ МЕТОДЫ ===
+
+    async def get_users_for_monthly_reminder(self) -> List[Dict]:
+        """Получение пользователей для ежемесячного напоминания об обновлении анкеты"""
+        async with self._pg_pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT DISTINCT p.telegram_id, p.game, u.username, p.updated_at
+                FROM profiles p
+                JOIN users u ON p.telegram_id = u.telegram_id
+                WHERE p.updated_at < NOW() - INTERVAL '25 days'
+                    AND p.created_at < NOW() - INTERVAL '7 days'
+                    AND NOT EXISTS (
+                        SELECT 1 FROM bans b
+                        WHERE b.user_id = p.telegram_id
+                        AND b.expires_at > NOW()
+                    )
+                ORDER BY p.updated_at ASC
+                LIMIT 1000
+            """)
+            return [dict(row) for row in rows]
 
     async def get_database_stats(self) -> Dict[str, Union[int, str]]:
         """Получение детальной статистики базы данных"""

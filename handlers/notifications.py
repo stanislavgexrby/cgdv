@@ -314,3 +314,28 @@ async def wait_all_notifications():
         logger.info(f"Ожидаем завершения {len(_notification_queue._active_tasks)} уведомлений...")
         await asyncio.gather(*_notification_queue._active_tasks, return_exceptions=True)
         logger.info("Все уведомления завершены")
+
+async def notify_monthly_profile_reminder(bot: Bot, user_id: int, game: str, db) -> bool:
+    """Ежемесячное напоминание об обновлении анкеты"""
+    async def _notify():
+        try:
+            game_name = settings.GAMES.get(game, game)
+            text = (f"🔄 Время обновить анкету!\n\n"
+                    f"Ваша анкета в {game_name} не обновлялась больше месяца. "
+                    f"Рекомендуем проверить актуальность информации:\n\n"
+                    f"• Рейтинг\n• Позиции\n• Описание\n\n"
+                    f"Актуальные анкеты показываются в поиске чаще!")
+
+            quick_actions = [
+                ("Редактировать анкету", "edit_profile"),
+                ("Посмотреть анкету", "view_profile")
+            ]
+
+            return await smart_notification(bot, user_id, text, quick_actions, None, db)
+
+        except Exception as e:
+            logger.error(f"Ошибка отправки напоминания об обновлении: {e}")
+            return False
+
+    await _notification_queue.add_notification(_notify(), f"monthly reminder to {user_id}")
+    return True
