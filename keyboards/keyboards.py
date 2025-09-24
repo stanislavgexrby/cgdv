@@ -342,8 +342,10 @@ def confirm_cancel_profile() -> InlineKeyboardMarkup:
 
 # ==================== РЕДАКТИРОВАНИЕ ПРОФИЛЕЙ ====================
 
-def edit_profile_menu() -> InlineKeyboardMarkup:
-    """Меню редактирования профиля"""
+def edit_profile_menu(game: str = 'dota') -> InlineKeyboardMarkup:
+    """Меню редактирования профиля с учетом игры"""
+    profile_button_text = "Изменить Dotabuff" if game == 'dota' else "Изменить FACEIT"
+    
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Изменить имя", callback_data="edit_name")],
         [InlineKeyboardButton(text="Изменить никнейм", callback_data="edit_nickname")],
@@ -352,7 +354,7 @@ def edit_profile_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Изменить страну", callback_data="edit_country")],
         [InlineKeyboardButton(text="Изменить позиции", callback_data="edit_positions")],
         [InlineKeyboardButton(text="Изменить цели", callback_data="edit_goals")],
-        [InlineKeyboardButton(text="Изменить профиль", callback_data="edit_profile_url")],
+        [InlineKeyboardButton(text=profile_button_text, callback_data="edit_profile_url")],
         [InlineKeyboardButton(text="Изменить описание", callback_data="edit_info")],
         [InlineKeyboardButton(text="Изменить фото", callback_data="edit_photo")],
         [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]

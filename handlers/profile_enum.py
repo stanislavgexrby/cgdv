@@ -75,35 +75,37 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
             return f"Текущий возраст: <b>{current}</b>\n\nВведите новый возраст или нажмите 'Продолжить':"
         elif step == ProfileStep.RATING:
             current_rating = data.get('rating')
-            if current_rating == 'any':
-                current_text = 'Не указан'
-            elif current_rating:
-                current_text = settings.RATINGS.get(data.get('game', 'dota'), {}).get(current_rating, current_rating)
+            if current_rating:
+                game = data.get('game', 'dota')
+                rating_name = settings.RATINGS.get(game, {}).get(current_rating, current_rating)
+                current_text = rating_name
             else:
                 current_text = 'Не указан'
             return f"Текущий рейтинг: <b>{current_text}</b>\n\nВыберите новый рейтинг или нажмите 'Продолжить':"
         elif step == ProfileStep.PROFILE_URL:
-            current = data.get('profile_url', 'Не указана')
+            current = data.get('profile_url', '')
+            # Исправление: проверяем пустую строку
+            if not current:  # Если пустая строка или None
+                current = 'Не указана'
             return f"Текущая ссылка: <b>{current}</b>\n\nВведите новую ссылку или нажмите 'Продолжить':"
         elif step == ProfileStep.REGION:
-            current_country = data.get('region')
-            if current_country == 'any':
-                current_text = 'Не указана'
-            elif current_country:
-                current_text = settings.MAIN_COUNTRIES.get(current_country) or settings.COUNTRIES_DICT.get(current_country, current_country)
+            current_region = data.get('region')
+            if current_region:
+                region_name = settings.MAIN_COUNTRIES.get(current_region) or settings.COUNTRIES_DICT.get(current_region) or current_region
+                current_text = region_name
             else:
                 current_text = 'Не указана'
             return f"Текущая страна: <b>{current_text}</b>\n\nВыберите новую страну или нажмите 'Продолжить':"
         elif step == ProfileStep.POSITIONS:
             selected_positions = data.get('positions_selected', [])
             if 'any' in selected_positions:
-                current_text = 'Не указаны'
+                current_text = 'Любые'
             elif selected_positions:
                 game = data.get('game', 'dota')
-                pos_names = []
+                position_names = []
                 for pos in selected_positions:
-                    pos_names.append(settings.POSITIONS.get(game, {}).get(pos, pos))
-                current_text = ', '.join(pos_names)
+                    position_names.append(settings.POSITIONS.get(game, {}).get(pos, pos))
+                current_text = ', '.join(position_names)
             else:
                 current_text = 'Не указаны'
             return f"Текущие позиции: <b>{current_text}</b>\n\nВыберите новые позиции или нажмите 'Продолжить':"
@@ -120,12 +122,16 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
                 current_text = 'Не указаны'
             return f"Текущие цели: <b>{current_text}</b>\n\nВыберите новые цели или нажмите 'Продолжить':"
         elif step == ProfileStep.INFO:
-            current = data.get('additional_info', 'Не указано')
+            current = data.get('additional_info', '')
+            # Исправление: проверяем пустую строку
+            if not current:  # Если пустая строка или None
+                current = 'Не указано'
             return f"Текущее описание: <b>{current}</b>\n\nВведите новое описание или нажмите 'Продолжить':"
         elif step == ProfileStep.PHOTO:
             current = 'Установлено' if data.get('photo_id') else 'Не указано'
             return f"Текущее фото: <b>{current}</b>\n\nОтправьте новое фото или нажмите 'Продолжить':"
     
+    # Базовые тексты для шагов без текущих данных
     if step == ProfileStep.NAME:
         return texts.QUESTIONS.get('name', "Введите имя:")
     elif step == ProfileStep.NICKNAME:
@@ -166,7 +172,7 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
         has_data = True
     elif step == ProfileStep.RATING and data.get('rating'):
         has_data = True
-    elif step == ProfileStep.PROFILE_URL and data.get('profile_url') is not None:
+    elif step == ProfileStep.PROFILE_URL and data.get('profile_url'):
         has_data = True
     elif step == ProfileStep.REGION and data.get('region'):
         has_data = True
@@ -174,7 +180,7 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
         has_data = True
     elif step == ProfileStep.GOALS and data.get('goals_selected'):
         has_data = True
-    elif step == ProfileStep.INFO and 'additional_info' in data:
+    elif step == ProfileStep.INFO and data.get('additional_info'):
         has_data = True
     elif step == ProfileStep.PHOTO and data.get('photo_id'):
         has_data = True

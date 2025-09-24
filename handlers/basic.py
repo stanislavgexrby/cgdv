@@ -480,15 +480,15 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
     """Возврат к меню редактирования"""
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
-    game = user['current_game']
+    game = user['current_game']  # ← ВАЖНО: game уже есть
     profile = await db.get_user_profile(user_id, game)
 
     game_name = settings.GAMES.get(game, game)
     current_info = f"Редактирование анкеты в {game_name}:\n\n"
     current_info += texts.format_profile(profile, show_contact=True)
     current_info += "\n\nЧто хотите изменить?"
-
-    keyboard = kb.edit_profile_menu()
+    
+    keyboard = kb.edit_profile_menu(game)  # ← ИСПРАВЛЕНИЕ 1
 
     try:
         await callback.message.delete()
@@ -512,6 +512,7 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
         logger.error(f"Ошибка отображения профиля для редактирования: {e}")
         try:
             if profile.get('photo_id'):
+                keyboard = kb.edit_profile_menu(game)  # ← ИСПРАВЛЕНИЕ 2 (в блоке except)
                 await callback.bot.send_photo(
                     chat_id=callback.message.chat.id,
                     photo=profile['photo_id'],
@@ -521,6 +522,7 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
                     disable_web_page_preview=True
                 )
             else:
+                keyboard = kb.edit_profile_menu(game)  # ← ИСПРАВЛЕНИЕ 3 (в блоке except)
                 await callback.bot.send_message(
                     chat_id=callback.message.chat.id,
                     text=current_info,

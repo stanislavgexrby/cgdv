@@ -58,7 +58,7 @@ async def edit_profile(callback: CallbackQuery, db):
     """Показ меню редактирования профиля"""
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
-    game = user['current_game']
+    game = user['current_game']  # ← ВАЖНО: game уже есть
     profile = await db.get_user_profile(user_id, game)
 
     await update_user_activity(user_id, 'profile_editing', db)
@@ -67,8 +67,8 @@ async def edit_profile(callback: CallbackQuery, db):
     current_info = f"Редактирование анкеты в {game_name}:\n\n"
     current_info += texts.format_profile(profile, show_contact=True)
     current_info += "\n\nЧто хотите изменить?"
-
-    keyboard = kb.edit_profile_menu()
+    
+    keyboard = kb.edit_profile_menu(game)  # ← ИСПРАВЛЕНИЕ
 
     try:
         if profile.get('photo_id'):
@@ -390,7 +390,16 @@ async def process_edit_age(message: Message, state: FSMContext, db):
 @router.message(EditProfileForm.edit_profile_url)
 async def process_edit_profile_url(message: Message, state: FSMContext, db):
     if not message.text:
-        await message.answer("Отправьте ссылку на профиль или используйте кнопки", parse_mode='HTML')
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Удалить ссылку", callback_data="delete_profile_url")],
+            [InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")]
+        ])
+        await message.answer(
+            "Отправьте ссылку на профиль или используйте кнопки", 
+            reply_markup=keyboard,
+            parse_mode='HTML',
+            disable_web_page_preview=True
+        )
         return
 
     data = await state.get_data()
@@ -400,7 +409,16 @@ async def process_edit_profile_url(message: Message, state: FSMContext, db):
     is_valid, error_msg = validate_profile_input('profile_url', profile_url, game)
 
     if not is_valid:
-        await message.answer(error_msg, parse_mode='HTML')
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="Удалить ссылку", callback_data="delete_profile_url")],
+            [InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")]
+        ])
+        await message.answer(
+            error_msg, 
+            reply_markup=keyboard,
+            parse_mode='HTML',
+            disable_web_page_preview=True
+        )
         return
 
     success = await update_profile_field(message.from_user.id, 'profile_url', profile_url, db)
@@ -465,7 +483,16 @@ async def wrong_edit_age_format(message: Message):
 
 @router.message(EditProfileForm.edit_profile_url, ~F.text)
 async def wrong_edit_profile_url_format(message: Message):
-    await message.answer("Отправьте ссылку на профиль или используйте кнопки", parse_mode='HTML')
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Удалить ссылку", callback_data="delete_profile_url")],
+        [InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")]
+    ])
+    await message.answer(
+        "Отправьте ссылку на профиль или используйте кнопки", 
+        reply_markup=keyboard,
+        parse_mode='HTML',
+        disable_web_page_preview=True
+    )
 
 @router.message(EditProfileForm.edit_info, ~F.text)
 async def wrong_edit_info_format(message: Message):
