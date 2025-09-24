@@ -283,7 +283,7 @@ async def cmd_start(message: Message, db):
 
 @router.message(Command("help"))
 async def cmd_help(message: Message):
-    help_text = """TeammateBot - Помощь
+    help_text = """Cardigans Gaming Team Finder - Помощь
 
 Функции:
 - Создание анкеты для каждой игры

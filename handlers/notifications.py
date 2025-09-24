@@ -267,7 +267,7 @@ async def notify_user_unbanned(bot: Bot, user_id: int) -> bool:
     """Уведомление о снятии бана (умное)"""
     async def _notify():
         try:
-            text = "Блокировка снята! Теперь вы можете снова пользоваться ботом."
+            text = "Блокировка снята! Теперь вы можете снова пользоваться ботом"
             quick_actions = [("Главное меню", "main_menu")]
             return await smart_notification(bot, user_id, text, quick_actions, None, None)
 
