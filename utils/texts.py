@@ -72,7 +72,7 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
 
     return text
 
-WELCOME = """<b>ДОБРО ПОЖАЛОВАТЬ В CG TEAMUP</b>
+WELCOME = """<b>ДОБРО ПОЖАЛОВАТЬ В Cardigans Gaming Team Finder</b>
 
 Этот бот поможет найти сокомандников для Dota 2 и CS2
 
