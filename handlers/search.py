@@ -131,7 +131,7 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
             ])
 
             await safe_edit_message(callback, text, keyboard)
-            logger.info(f"Матч: {user_id} <-> {target_user_id}")
+            logger.info(f"Мэтч: {user_id} <-> {target_user_id}")
         else:
             await callback.answer("Лайк отправлен!")
             await notify_about_like(callback.bot, target_user_id, game, db)

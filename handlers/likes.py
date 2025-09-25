@@ -164,15 +164,15 @@ async def _show_matches_internal(callback: CallbackQuery, user_id: int, game: st
     game_name = settings.GAMES.get(game, game)
 
     if not matches:
-        text = f"У вас пока нет матчей в {game_name}\n\n"
-        text += "Чтобы получить матчи:\n"
+        text = f"У вас пока нет мэтчей в {game_name}\n\n"
+        text += "Чтобы получить мэтчи:\n"
         text += "• Лайкайте анкеты в поиске\n"
         text += "• Отвечайте на лайки других игроков"
 
         await show_empty_state(callback, text)
         return
 
-    text = f"Ваши матчи в {game_name} ({len(matches)}):\n\n"
+    text = f"Ваши мэтчи в {game_name} ({len(matches)}):\n\n"
     for i, match in enumerate(matches, 1):
         name = match['name']
         username = match.get('username', 'нет username')
@@ -286,7 +286,7 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db
         await callback.answer("Неверная игра", show_alert=True)
         return
 
-    logger.info(f"Переключение на игру {game} для показа матчей пользователя {user_id}")
+    logger.info(f"Переключение на игру {game} для показа мэтчей пользователя {user_id}")
 
     if not await db.switch_game(user_id, game):
         await callback.answer("Ошибка переключения игры", show_alert=True)
