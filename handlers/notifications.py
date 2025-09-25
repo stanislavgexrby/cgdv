@@ -179,7 +179,7 @@ async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: s
             return await smart_notification(bot, user_id, text, quick_actions, None, db)
 
         except Exception as e:
-            logger.error(f"Ошибка отправки уведомления о матче: {e}")
+            logger.error(f"Ошибка отправки уведомления о мэтче: {e}")
             return False
 
     await _notification_queue.add_notification(_notify(), f"match notification to {user_id}")

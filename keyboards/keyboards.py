@@ -127,17 +127,23 @@ def ratings(game: str, selected_rating: str = None, with_navigation: bool = Fals
         
         buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
 
+    # Объединяем кнопки "Не указывать" и "Готово" в одну строку
+    bottom_row = []
+    
     if for_profile:
         if selected_rating == "any":
-            buttons.append([InlineKeyboardButton(text="✅ Не указан", callback_data="rating_remove_any")])
+            bottom_row.append(InlineKeyboardButton(text="✅ Не указывать", callback_data="rating_remove_any"))
         else:
-            buttons.append([InlineKeyboardButton(text="Не указан", callback_data="rating_select_any")])
+            bottom_row.append(InlineKeyboardButton(text="Не указывать", callback_data="rating_select_any"))
 
     if with_navigation:
         if selected_rating:
-            buttons.append([InlineKeyboardButton(text="Готово", callback_data="rating_done")])
+            bottom_row.append(InlineKeyboardButton(text="Готово", callback_data="rating_done"))
         else:
-            buttons.append([InlineKeyboardButton(text="Выберите рейтинг", callback_data="rating_need")])
+            bottom_row.append(InlineKeyboardButton(text="Выберите рейтинг", callback_data="rating_need"))
+    
+    if bottom_row:
+        buttons.append(bottom_row)
 
     if with_navigation:
         nav_buttons = [
@@ -168,18 +174,25 @@ def countries(selected_country: str = None, with_navigation: bool = False,
 
     buttons.append([InlineKeyboardButton(text="🌍 Другое", callback_data="country_other")])
 
+    # Объединяем кнопки "Не указывать" и "Готово" в одну строку  
+    bottom_row = []
+    
     if for_profile:
         if selected_country == "any":
-            buttons.append([InlineKeyboardButton(text="✅ Не указана", callback_data="country_remove_any")])
+            bottom_row.append(InlineKeyboardButton(text="✅ Не указывать", callback_data="country_remove_any"))
         else:
-            buttons.append([InlineKeyboardButton(text="Не указана", callback_data="country_select_any")])
+            bottom_row.append(InlineKeyboardButton(text="Не указывать", callback_data="country_select_any"))
 
     if with_navigation:
         if selected_country:
-            buttons.append([InlineKeyboardButton(text="Готово", callback_data="country_done")])
+            bottom_row.append(InlineKeyboardButton(text="Готово", callback_data="country_done"))
         else:
-            buttons.append([InlineKeyboardButton(text="Выберите страну", callback_data="country_need")])
+            bottom_row.append(InlineKeyboardButton(text="Выберите страну", callback_data="country_need"))
+    
+    if bottom_row:
+        buttons.append(bottom_row)
 
+    if with_navigation:
         nav_buttons = [
             InlineKeyboardButton(text="Назад", callback_data="profile_back"),
             InlineKeyboardButton(text="Отмена", callback_data="cancel")
@@ -209,22 +222,28 @@ def positions(game: str, selected: List[str] = None, with_navigation: bool = Fal
 
         buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
 
+    # Объединяем кнопки "Не указывать" и "Готово" в одну строку
+    bottom_row = []
+    
     if for_profile or editing:
         if "any" in selected:
-            buttons.append([InlineKeyboardButton(text="✅ Не указана", callback_data="pos_remove_any")])
+            bottom_row.append(InlineKeyboardButton(text="✅ Не указывать", callback_data="pos_remove_any"))
         else:
-            buttons.append([InlineKeyboardButton(text="Не указана", callback_data="pos_add_any")])
+            bottom_row.append(InlineKeyboardButton(text="Не указывать", callback_data="pos_add_any"))
 
     if with_navigation:
         if selected:
-            buttons.append([InlineKeyboardButton(text="Готово", callback_data="pos_done")])
+            bottom_row.append(InlineKeyboardButton(text="Готово", callback_data="pos_done"))
         else:
-            buttons.append([InlineKeyboardButton(text="Выберите позицию", callback_data="pos_need")])
+            bottom_row.append(InlineKeyboardButton(text="Выберите позицию", callback_data="pos_need"))
     elif editing:
         if selected:
-            buttons.append([InlineKeyboardButton(text="Сохранить", callback_data="pos_save_edit")])
+            bottom_row.append(InlineKeyboardButton(text="Сохранить", callback_data="pos_save_edit"))
         else:
-            buttons.append([InlineKeyboardButton(text="Выберите позицию", callback_data="pos_need")])
+            bottom_row.append(InlineKeyboardButton(text="Выберите позицию", callback_data="pos_need"))
+    
+    if bottom_row:
+        buttons.append(bottom_row)
 
     if with_navigation:
         nav_buttons = [
@@ -257,22 +276,28 @@ def goals(selected: List[str] = None, with_navigation: bool = False,
 
         buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
 
+# Объединяем кнопки "Не указывать" и "Готово" в одну строку
+    bottom_row = []
+    
     if for_profile or editing:
         if "any" in selected:
-            buttons.append([InlineKeyboardButton(text="✅ Не указана", callback_data="goals_remove_any")])
+            bottom_row.append(InlineKeyboardButton(text="✅ Не указывать", callback_data="goals_remove_any"))
         else:
-            buttons.append([InlineKeyboardButton(text="Не указана", callback_data="goals_add_any")])
+            bottom_row.append(InlineKeyboardButton(text="Не указывать", callback_data="goals_add_any"))
 
     if with_navigation:
         if selected:
-            buttons.append([InlineKeyboardButton(text="Готово", callback_data="goals_done")])
+            bottom_row.append(InlineKeyboardButton(text="Готово", callback_data="goals_done"))
         else:
-            buttons.append([InlineKeyboardButton(text="Выберите цель", callback_data="goals_need")])
+            bottom_row.append(InlineKeyboardButton(text="Выберите цель", callback_data="goals_need"))
     elif editing:
         if selected:
-            buttons.append([InlineKeyboardButton(text="Сохранить", callback_data="goals_save_edit")])
+            bottom_row.append(InlineKeyboardButton(text="Сохранить", callback_data="goals_save_edit"))
         else:
-            buttons.append([InlineKeyboardButton(text="Выберите цель", callback_data="goals_need")])
+            bottom_row.append(InlineKeyboardButton(text="Выберите цель", callback_data="goals_need"))
+    
+    if bottom_row:
+        buttons.append(bottom_row)
 
     if with_navigation:
         nav_buttons = [
