@@ -483,86 +483,219 @@ class Database:
                                    position_filter: str = None,
                                    country_filter: str = None,
                                    goals_filter: str = None,
-                                   limit: int = 10,
+                                   limit: int = 20,
                                    offset: int = 0) -> List[Dict]:
-        """Оптимизированный поиск потенциальных матчей с пагинацией"""
+        """Оптимизированный поиск потенциальных матчей с учетом пропусков и фильтров"""
 
+        # Генерация ключа кэша с учетом всех параметров
         filters_hash = self._generate_filters_hash(
             rating_filter, position_filter, country_filter, goals_filter
         )
         cache_key = f"search:{user_id}:{game}:{filters_hash}:{offset//limit}"
 
-        if offset < 100:
+        # Кэшируем только первые 3 страницы (offset < 60)
+        if offset < 60:
             cached = await self._get_cache(cache_key)
             if cached:
                 return cached
-        
+
+        # Основной запрос с оптимизацией
         query = '''
-            WITH excluded_users AS (
-                SELECT DISTINCT to_user as user_id FROM likes
+            WITH user_filters AS (
+                SELECT 
+                    $1::bigint as user_id,
+                    $2::text as game,
+                    $3::text as rating_filter,
+                    $4::text as position_filter, 
+                    $5::text as country_filter,
+                    $6::text as goals_filter
+            ),
+            excluded_users AS (
+                -- Пользователи, которых уже лайкнули
+                SELECT DISTINCT to_user as excluded_id 
+                FROM likes 
                 WHERE from_user = $1 AND game = $2
+
                 UNION
-                SELECT DISTINCT reported_user_id as user_id FROM reports
+
+                -- Пользователи, на которых уже жаловались
+                SELECT DISTINCT reported_user_id as excluded_id
+                FROM reports 
                 WHERE reporter_id = $1 AND game = $2
+
                 UNION
-                SELECT DISTINCT user_id FROM bans
+
+                -- Забаненные пользователи
+                SELECT DISTINCT user_id as excluded_id
+                FROM bans 
                 WHERE expires_at > CURRENT_TIMESTAMP
+            ),
+            skipped_users AS (
+                -- Пользователи, которых пропускали в поиске
+                SELECT 
+                    skipped_user_id as skipped_id,
+                    skip_count,
+                    last_skipped
+                FROM search_skipped 
+                WHERE user_id = $1 AND game = $2
+            ),
+            potential_profiles AS (
+                SELECT 
+                    p.*,
+                    u.username,
+                    COALESCE(s.skip_count, 0) as skip_count,
+                    s.last_skipped,
+                    -- Приоритет: 0 = новый, 1 = пропущенный давно, 2 = пропущенный недавно
+                    CASE 
+                        WHEN s.skipped_id IS NULL THEN 0
+                        WHEN s.last_skipped < NOW() - INTERVAL '7 days' THEN 1
+                        ELSE 2
+                    END as display_priority,
+                    -- Рейтинг совместимости на основе фильтров
+                    CASE 
+                        WHEN $3 IS NOT NULL AND p.rating = $3 THEN 1
+                        ELSE 0
+                    END as rating_match,
+                    CASE 
+                        WHEN $4 IS NOT NULL AND (p.positions ? $4 OR p.positions ? 'any') THEN 1
+                        ELSE 0
+                    END as position_match,
+                    CASE 
+                        WHEN $5 IS NOT NULL AND (p.region = $5 OR p.region = 'any') THEN 1
+                        ELSE 0
+                    END as country_match,
+                    CASE 
+                        WHEN $6 IS NOT NULL AND p.goals ? $6 THEN 1
+                        ELSE 0
+                    END as goals_match,
+                    -- Приоритет для анкет с фото
+                    CASE WHEN p.photo_id IS NOT NULL THEN 0 ELSE 1 END as photo_priority,
+                    -- Приоритет для заполненных полей (не по умолчанию)
+                    CASE 
+                        WHEN p.rating IS NOT NULL AND p.rating != '' AND p.rating != 'any' THEN 1 
+                        ELSE 0 
+                    END as rating_filled,
+                    CASE 
+                        WHEN p.positions IS NOT NULL AND p.positions != '[]'::jsonb AND p.positions != '["any"]'::jsonb THEN 1 
+                        ELSE 0 
+                    END as positions_filled,
+                    CASE 
+                        WHEN p.region IS NOT NULL AND p.region != '' AND p.region != 'any' THEN 1 
+                        ELSE 0 
+                    END as region_filled,
+                    CASE 
+                        WHEN p.goals IS NOT NULL AND p.goals != '[]'::jsonb AND p.goals != '["any"]'::jsonb THEN 1 
+                        ELSE 0 
+                    END as goals_filled
+                FROM profiles p
+                JOIN users u ON p.telegram_id = u.telegram_id
+                LEFT JOIN skipped_users s ON p.telegram_id = s.skipped_id
+                WHERE p.telegram_id != $1
+                    AND p.game = $2
+                    AND p.telegram_id NOT IN (SELECT excluded_id FROM excluded_users)
+            ),
+            filtered_profiles AS (
+                SELECT *,
+                    (rating_match + position_match + country_match + goals_match) as match_score,
+                    -- Общий счет заполненности полей
+                    (rating_filled + positions_filled + region_filled + goals_filled) as filled_score
+                FROM potential_profiles
+                WHERE 
+                    -- Применяем фильтры, если они заданы
+                    ($3 IS NULL OR rating_match = 1)
+                    AND ($4 IS NULL OR position_match = 1) 
+                    AND ($5 IS NULL OR country_match = 1)
+                    AND ($6 IS NULL OR goals_match = 1)
             )
+            SELECT 
+                telegram_id, game, name, nickname, age, rating, region, 
+                positions, goals, additional_info, photo_id, profile_url,
+                username, created_at, updated_at
+            FROM filtered_profiles
+            ORDER BY 
+                display_priority ASC,        -- Сначала новые, потом старые пропуски
+                photo_priority ASC,          -- Сначала анкеты с фото
+                match_score DESC,            -- Лучшие совпадения по фильтрам
+                filled_score DESC,           -- Анкеты с заполненными полями выше
+                skip_count ASC,              -- Реже пропущенные
+                last_skipped ASC NULLS FIRST,-- Давно пропущенные показываем раньше
+                created_at DESC              -- Новые анкеты优先
+            LIMIT $7
+            OFFSET $8
+        '''
+
+        params = [
+            user_id, game, 
+            rating_filter if rating_filter and rating_filter != 'any' else None,
+            position_filter if position_filter and position_filter != 'any' else None,
+            country_filter if country_filter and country_filter != 'any' else None,
+            goals_filter if goals_filter and goals_filter != 'any' else None,
+            limit, offset
+        ]
+
+        async with self._pg_pool.acquire() as conn:
+            try:
+                rows = await conn.fetch(query, *params)
+                results = [self._format_profile(row) for row in rows]
+
+                # Перемешиваем только новые анкеты (display_priority = 0) на первой странице
+                if offset == 0 and len(results) > 1:
+                    # Разделяем на приоритетные группы
+                    new_profiles = [p for p in results if p.get('display_priority', 0) == 0]
+                    skipped_profiles = [p for p in results if p.get('display_priority', 0) > 0]
+
+                    if new_profiles:
+                        # Детерминированное перемешивание новых анкет
+                        import hashlib
+                        seed_str = f"{user_id}{game}{filters_hash}"
+                        seed = int(hashlib.md5(seed_str.encode()).hexdigest()[:8], 16)
+                        import random
+                        random.seed(seed)
+                        random.shuffle(new_profiles)
+
+                    # Собираем обратно: сначала перемешанные новые, потом пропущенные
+                    results = new_profiles + skipped_profiles
+
+                # Кэшируем только первые страницы
+                if offset < 60:
+                    await self._set_cache(cache_key, results, self._cache_ttl['search'])
+
+                return results
+
+            except Exception as e:
+                logger.error(f"Ошибка поиска анкет: {e}")
+                # Fallback запрос на случай ошибок
+                return await self._fallback_search(user_id, game, limit, offset)
+
+    async def _fallback_search(self, user_id: int, game: str, limit: int, offset: int) -> List[Dict]:
+        """Резервный поиск при ошибках в основном запросе"""
+        query = '''
             SELECT p.*, u.username
             FROM profiles p
             JOIN users u ON p.telegram_id = u.telegram_id
-            WHERE p.telegram_id != $1
+            WHERE p.telegram_id != $1 
                 AND p.game = $2
-                AND p.telegram_id NOT IN (SELECT user_id FROM excluded_users WHERE user_id IS NOT NULL)
+                AND NOT EXISTS (
+                    SELECT 1 FROM likes 
+                    WHERE from_user = $1 AND to_user = p.telegram_id AND game = $2
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM reports 
+                    WHERE reporter_id = $1 AND reported_user_id = p.telegram_id AND game = $2
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM bans 
+                    WHERE user_id = p.telegram_id AND expires_at > CURRENT_TIMESTAMP
+                )
+            ORDER BY 
+                CASE WHEN p.photo_id IS NOT NULL THEN 0 ELSE 1 END,  -- Сначала с фото
+                p.created_at DESC
+            LIMIT $3 OFFSET $4
         '''
-        
-        params = [user_id, game]
-        param_count = 2
-        
-        if rating_filter and rating_filter != 'any':
-            param_count += 1
-            query += f" AND p.rating = ${param_count}"
-            params.append(rating_filter)
-        
-        if position_filter and position_filter != 'any':
-            param_count += 1
-            query += f" AND (p.positions ? ${param_count} OR p.positions ? 'any')"
-            params.append(position_filter)
-        
-        if country_filter and country_filter != 'any':
-            param_count += 1
-            query += f" AND (p.region = ${param_count} OR p.region = 'any')"
-            params.append(country_filter)
-        
-        if goals_filter and goals_filter != 'any':
-            param_count += 1
-            query += f" AND p.goals ? ${param_count}"
-            params.append(goals_filter)
-        
-        param_count += 1
-        query += f" ORDER BY p.created_at DESC, p.id LIMIT ${param_count}"
-        params.append(limit)
-        
-        if offset > 0:
-            param_count += 1
-            query += f" OFFSET ${param_count}"
-            params.append(offset)
-        
+
         async with self._pg_pool.acquire() as conn:
-            rows = await conn.fetch(query, *params)
-            results = [self._format_profile(row) for row in rows]
-            
-            if offset == 0 and len(results) > 1:
-                import hashlib
-                seed = int(hashlib.md5(f"{user_id}{game}".encode()).hexdigest()[:8], 16)
-                import random
-                random.seed(seed)
-                random.shuffle(results)
-            
-            if offset < 100:
-                await self._set_cache(cache_key, results, self._cache_ttl['search'])
-            
-            return results
+            rows = await conn.fetch(query, user_id, game, limit, offset)
+            return [self._format_profile(row) for row in rows]
 
     async def add_search_skip(self, user_id: int, skipped_user_id: int, game: str) -> bool:
         """Добавление пропуска в поиске"""
@@ -574,6 +707,7 @@ class Database:
                    DO UPDATE SET skip_count = search_skipped.skip_count + 1, last_skipped = CURRENT_TIMESTAMP''',
                 user_id, skipped_user_id, game
             )
+            await self._clear_pattern_cache(f"search:{user_id}:{game}:*")
             return True
 
     # === ЛАЙКИ И МАТЧИ ===
