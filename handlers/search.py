@@ -107,14 +107,14 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
     user_id = callback.from_user.id
     data = await state.get_data()
     game = data['game']
-
+    
     if action == "like":
         is_match = await db.add_like(user_id, target_user_id, game)
-
+        
         if is_match:
             target_profile = await db.get_user_profile(target_user_id, game)
             await notify_about_match(callback.bot, target_user_id, user_id, game, db)
-
+            
             if target_profile:
                 match_text = texts.format_profile(target_profile, show_contact=True)
                 text = f"{texts.MATCH_CREATED}\n\n{match_text}"
@@ -124,35 +124,35 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
                     text += f"\n\n@{target_profile['username']}"
                 else:
                     text += "\n\n(У пользователя нет @username)"
-
+            
             keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
                 [kb.InlineKeyboardButton(text="Продолжить поиск", callback_data="continue_search")],
                 [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
             ])
-
+            
             await safe_edit_message(callback, text, keyboard)
             logger.info(f"Мэтч: {user_id} <-> {target_user_id}")
         else:
             await callback.answer("Лайк отправлен!")
             await notify_about_like(callback.bot, target_user_id, game, db)
             logger.info(f"Лайк: {user_id} -> {target_user_id}")
-            await show_next_profile(callback, state)
-
+            await show_next_profile(callback, state, db)
+    
     elif action == "skip":
         await db.add_search_skip(user_id, target_user_id, game)
         logger.info(f"Пропуск в поиске: {user_id} пропустил {target_user_id}")
-        await show_next_profile(callback, state)
-
+        await show_next_profile(callback, state, db)
+    
     elif action == "report":
         success = await db.add_report(user_id, target_user_id, game)
-
+        
         if success:
             await db._clear_pattern_cache(f"search:{user_id}:{game}:*")
-
+            
             await callback.answer("Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время")
             await notify_admin_new_report(callback.bot, user_id, target_user_id, game)
             logger.info(f"Жалоба добавлена: {user_id} пожаловался на {target_user_id}")
-            await show_next_profile(callback, state)
+            await show_next_profile(callback, state, db)
         else:
             await callback.answer("Вы уже жаловались на эту анкету", show_alert=True)
 
@@ -185,10 +185,36 @@ async def show_current_profile(callback: CallbackQuery, state: FSMContext):
         kb.profile_actions(profile['telegram_id'])
     )
 
-async def show_next_profile(callback: CallbackQuery, state: FSMContext):
-    """Показ следующего профиля"""
+async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
+    """Показ следующего профиля с автоподгрузкой"""
     data = await state.get_data()
     current_index = data.get('current_index', 0)
+    profiles = data.get('profiles', [])
+    
+    # Если осталось меньше 5 анкет, подгружаем еще
+    if current_index >= len(profiles) - 5:
+        last_offset = data.get('last_loaded_offset', 0)
+        new_offset = last_offset + 20
+        
+        # Подгружаем следующую порцию
+        new_batch = await db.get_potential_matches(
+            user_id=data['user_id'],
+            game=data['game'],
+            rating_filter=data.get('rating_filter'),
+            position_filter=data.get('position_filter'),
+            country_filter=data.get('country_filter'),
+            goals_filter=data.get('goals_filter'),
+            limit=20,
+            offset=new_offset
+        )
+        
+        if new_batch:
+            profiles.extend(new_batch)
+            await state.update_data(
+                profiles=profiles,
+                last_loaded_offset=new_offset
+            )
+    
     await state.update_data(current_index=current_index + 1)
     await show_current_profile(callback, state)
 
@@ -495,28 +521,35 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
     """Начать поиск с применением фильтров"""
     data = await state.get_data()
     current_state = await state.get_state()
-
+    
     if current_state == SearchForm.menu:
         await state.set_state(SearchForm.filters)
         data = await state.get_data()
-
+    
     await update_user_activity(data['user_id'], 'search_browsing', db)
-
-    profiles = await db.get_potential_matches(
-        user_id=data['user_id'],
-        game=data['game'],
-        rating_filter=data.get('rating_filter'),
-        position_filter=data.get('position_filter'),
-        country_filter=data.get('country_filter'),
-        goals_filter=data.get('goals_filter'),
-        limit=20
-    )
-
-    if not profiles:
+    
+    all_profiles = []
+    for batch_offset in [0, 20, 40]:
+        batch = await db.get_potential_matches(
+            user_id=data['user_id'],
+            game=data['game'],
+            rating_filter=data.get('rating_filter'),
+            position_filter=data.get('position_filter'),
+            country_filter=data.get('country_filter'),
+            goals_filter=data.get('goals_filter'),
+            limit=20,
+            offset=batch_offset
+        )
+        if batch:
+            all_profiles.extend(batch)
+        else:
+            break
+    
+    if not all_profiles:
         await state.clear()
         game_name = settings.GAMES.get(data['game'], data['game'])
-        text = f"Анкеты в {game_name} не найдены! Попробуйте изменить фильтры или зайти позже"
-
+        text = f"Анкеты в {game_name} не найдены!\n\nПопробуйте изменить фильтры или зайти позже"
+        
         keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
             [kb.InlineKeyboardButton(text="Новый поиск", callback_data="search")],
             [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
@@ -524,9 +557,13 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
         await safe_edit_message(callback, text, keyboard)
         await callback.answer()
         return
-
+    
     await state.set_state(SearchForm.browsing)
-    await state.update_data(profiles=profiles, current_index=0)
+    await state.update_data(
+        profiles=all_profiles,  # Используем profiles для совместимости
+        current_index=0,
+        last_loaded_offset=40  # Запоминаем последний загруженный offset
+    )
     await show_current_profile(callback, state)
 
 # ==================== ДЕЙСТВИЯ В ПОИСКЕ ====================
@@ -561,6 +598,6 @@ async def report_profile(callback: CallbackQuery, state: FSMContext, db):
     await handle_search_action(callback, "report", target_user_id, state, db)
 
 @router.callback_query(F.data == "continue_search", SearchForm.browsing)
-async def continue_search(callback: CallbackQuery, state: FSMContext):
+async def continue_search(callback: CallbackQuery, state: FSMContext, db):
     """Продолжить поиск после лайка"""
-    await show_next_profile(callback, state)
+    await show_next_profile(callback, state, db)

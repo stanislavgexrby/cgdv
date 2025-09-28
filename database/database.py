@@ -479,19 +479,24 @@ class Database:
     # === ОПТИМИЗИРОВАННЫЙ ПОИСК ===
 
     async def get_potential_matches(self, user_id: int, game: str,
-                        rating_filter: str = None,
-                        position_filter: str = None,
-                        country_filter: str = None,
-                        goals_filter: str = None,
-                        limit: int = 10) -> List[Dict]:
-        """Оптимизированный поиск потенциальных матчей"""
+                                   rating_filter: str = None,
+                                   position_filter: str = None,
+                                   country_filter: str = None,
+                                   goals_filter: str = None,
+                                   limit: int = 10,
+                                   offset: int = 0) -> List[Dict]:
+        """Оптимизированный поиск потенциальных матчей с пагинацией"""
 
-        filters_hash = self._generate_filters_hash(rating_filter, position_filter, country_filter, goals_filter)
-        cache_key = f"search:{user_id}:{game}:{filters_hash}"
-        cached = await self._get_cache(cache_key)
-        if cached:
-            return cached
+        filters_hash = self._generate_filters_hash(
+            rating_filter, position_filter, country_filter, goals_filter
+        )
+        cache_key = f"search:{user_id}:{game}:{filters_hash}:{offset//limit}"
 
+        if offset < 100:
+            cached = await self._get_cache(cache_key)
+            if cached:
+                return cached
+        
         query = '''
             WITH excluded_users AS (
                 SELECT DISTINCT to_user as user_id FROM likes
@@ -510,46 +515,53 @@ class Database:
                 AND p.game = $2
                 AND p.telegram_id NOT IN (SELECT user_id FROM excluded_users WHERE user_id IS NOT NULL)
         '''
-
+        
         params = [user_id, game]
         param_count = 2
-
+        
         if rating_filter and rating_filter != 'any':
             param_count += 1
             query += f" AND p.rating = ${param_count}"
             params.append(rating_filter)
-
+        
         if position_filter and position_filter != 'any':
             param_count += 1
             query += f" AND (p.positions ? ${param_count} OR p.positions ? 'any')"
             params.append(position_filter)
-
+        
         if country_filter and country_filter != 'any':
             param_count += 1
             query += f" AND (p.region = ${param_count} OR p.region = 'any')"
             params.append(country_filter)
-
+        
         if goals_filter and goals_filter != 'any':
             param_count += 1
             query += f" AND p.goals ? ${param_count}"
             params.append(goals_filter)
-
+        
         param_count += 1
         query += f" ORDER BY p.created_at DESC, p.id LIMIT ${param_count}"
-        params.append(limit * 3)
-
+        params.append(limit)
+        
+        if offset > 0:
+            param_count += 1
+            query += f" OFFSET ${param_count}"
+            params.append(offset)
+        
         async with self._pg_pool.acquire() as conn:
             rows = await conn.fetch(query, *params)
-            all_results = [self._format_profile(row) for row in rows]
-
-            import hashlib
-            seed = int(hashlib.md5(f"{user_id}{game}".encode()).hexdigest()[:8], 16)
-            import random
-            random.seed(seed)
-            random.shuffle(all_results)
-            results = all_results[:limit]
-
-            await self._set_cache(cache_key, results, self._cache_ttl['search'])
+            results = [self._format_profile(row) for row in rows]
+            
+            if offset == 0 and len(results) > 1:
+                import hashlib
+                seed = int(hashlib.md5(f"{user_id}{game}".encode()).hexdigest()[:8], 16)
+                import random
+                random.seed(seed)
+                random.shuffle(results)
+            
+            if offset < 100:
+                await self._set_cache(cache_key, results, self._cache_ttl['search'])
+            
             return results
 
     async def add_search_skip(self, user_id: int, skipped_user_id: int, game: str) -> bool:
