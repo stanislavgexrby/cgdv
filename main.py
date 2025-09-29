@@ -13,6 +13,7 @@ from handlers.notifications import wait_all_notifications, notify_monthly_profil
 from database.database import Database
 from config.settings import ADMIN_IDS
 from middleware.database import DatabaseMiddleware
+from middleware.state_recovery import StateRecoveryMiddleware
 
 # В main.py функция setup_logging() - ВАРИАНТЫ НАСТРОЙКИ
 
@@ -228,6 +229,8 @@ async def main():
         # Подключаем middleware
         dp.update.middleware(DatabaseMiddleware(db))
         logger.info("🔧 DatabaseMiddleware подключен")
+
+        dp.callback_query.middleware(StateRecoveryMiddleware())
 
         # Регистрируем обработчики
         register_handlers(dp)
