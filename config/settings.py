@@ -103,7 +103,8 @@ RATINGS = {
         "immortal1": "Immortal (5620-7000)",
         "immortal2": "Immortal (7000-9000)",
         "immortal3": "Immortal (9000-11000)",
-        "immortal4": "Immortal (11000+)"
+        "immortal4": "Immortal (11000-13000)",
+        "immortal5": "Immortal (13000+)"
     },
     "cs": {
         "1": "FACEIT Level 1 (100-500)",
