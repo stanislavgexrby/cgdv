@@ -3,6 +3,7 @@ from aiogram.fsm.context import FSMContext
 from enum import Enum
 import logging
 from aiogram import Router
+from utils.texts import format_age
 
 import config.settings as settings
 import keyboards.keyboards as kb
@@ -72,7 +73,7 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
             return f"Текущий игровой никнейм: <b>{current}</b>\n\nВведите новый никнейм или нажмите 'Продолжить':"
         elif step == ProfileStep.AGE:
             current = data.get('age', '')
-            return f"Текущий возраст: <b>{current}</b>\n\nВведите новый возраст или нажмите 'Продолжить':"
+            return f"Текущий возраст: <b>{format_age(current)}</b>\n\nВведите новый возраст или нажмите 'Продолжить':"
         elif step == ProfileStep.RATING:
             current_rating = data.get('rating')
             if current_rating:

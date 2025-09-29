@@ -1,5 +1,17 @@
 import config.settings as settings
 
+
+def format_age(age: int) -> str:
+    """Правильное склонение слова 'год' в зависимости от возраста"""
+    if 11 <= age % 100 <= 19:
+        return f"{age} лет"
+    elif age % 10 == 1:
+        return f"{age} год"
+    elif 2 <= age % 10 <= 4:
+        return f"{age} года"
+    else:
+        return f"{age} лет"
+    
 def format_profile(user: dict, show_contact: bool = False) -> str:
     if not user:
         return "Профиль не найден"
@@ -12,7 +24,7 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
     else:
         nickname_with_link = user['nickname']
     # Имя с ссылкой на профиль в игре
-    text = f"{user['name']} <b>{nickname_with_link}</b>, {user['age']} лет\n\n"
+    text = f"{user['name']} <b>{nickname_with_link}</b>, {format_age(user['age'])}\n\n"
 
     # Рейтинг
     rating = user['rating']
