@@ -813,7 +813,7 @@ async def show_search_end(message: Message, state: FSMContext, game: str):
     text = f"Больше анкет в {game_name} не найдено.\n\nПопробуйте изменить фильтры или вернитесь позже!"
     
     keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
-        [kb.InlineKeyboardButton(text="Настроить фильтры", callback_data="setup_filters")],
+        [kb.InlineKeyboardButton(text="Настроить фильтры", callback_data="search")],
         [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
     ])
     
