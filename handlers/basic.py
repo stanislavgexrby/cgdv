@@ -485,20 +485,25 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
     """Возврат к меню редактирования"""
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
-    game = user['current_game']  # ← ВАЖНО: game уже есть
+    game = user['current_game']
     profile = await db.get_user_profile(user_id, game)
 
     game_name = settings.GAMES.get(game, game)
     current_info = f"Редактирование анкеты в {game_name}:\n\n"
     current_info += texts.format_profile(profile, show_contact=True)
     current_info += "\n\nЧто хотите изменить?"
-    
-    keyboard = kb.edit_profile_menu(game)  # ← ИСПРАВЛЕНИЕ 1
+
+    role = profile.get('role', 'player')
+    keyboard = kb.edit_profile_menu(game, role)
 
     try:
-        await callback.message.delete()
-        
+        # Если в профиле есть фото - всегда показываем с фото
         if profile.get('photo_id'):
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass  # Игнорируем если сообщение уже удалено
+            
             await callback.message.answer_photo(
                 photo=profile['photo_id'],
                 caption=current_info,
@@ -507,36 +512,26 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
                 disable_web_page_preview=True
             )
         else:
-            await callback.message.answer(
-                text=current_info,
-                reply_markup=keyboard,
-                parse_mode='HTML',
+            # Если нет фото - редактируем текущее сообщение
+            await callback.message.edit_text(
+                current_info, 
+                reply_markup=keyboard, 
+                parse_mode='HTML', 
                 disable_web_page_preview=True
             )
     except Exception as e:
-        logger.error(f"Ошибка отображения профиля для редактирования: {e}")
+        # Если что-то пошло не так - создаём новое сообщение
+        logger.error(f"Ошибка отображения меню редактирования: {e}")
         try:
-            if profile.get('photo_id'):
-                keyboard = kb.edit_profile_menu(game)  # ← ИСПРАВЛЕНИЕ 2 (в блоке except)
-                await callback.bot.send_photo(
-                    chat_id=callback.message.chat.id,
-                    photo=profile['photo_id'],
-                    caption=current_info,
-                    reply_markup=keyboard,
-                    parse_mode='HTML',
-                    disable_web_page_preview=True
-                )
-            else:
-                keyboard = kb.edit_profile_menu(game)  # ← ИСПРАВЛЕНИЕ 3 (в блоке except)
-                await callback.bot.send_message(
-                    chat_id=callback.message.chat.id,
-                    text=current_info,
-                    reply_markup=keyboard,
-                    parse_mode='HTML',
-                    disable_web_page_preview=True
-                )
-        except Exception as e2:
-            logger.error(f"Критическая ошибка отображения меню редактирования: {e2}")
-            await callback.answer("Ошибка загрузки", show_alert=True)
+            await callback.message.delete()
+        except Exception:
+            pass
+        
+        await callback.bot.send_message(
+            chat_id=callback.message.chat.id,
+            text=current_info, 
+            reply_markup=keyboard, 
+            parse_mode='HTML'
+        )
 
     await callback.answer()

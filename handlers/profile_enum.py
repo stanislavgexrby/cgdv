@@ -16,6 +16,7 @@ class ProfileForm(StatesGroup):
     name = State()
     nickname = State()
     age = State()
+    role = State()
     rating = State()
     profile_url = State()
     region = State()
@@ -29,6 +30,7 @@ class ProfileStep(Enum):
     NAME = "name"
     NICKNAME = "nickname"
     AGE = "age"
+    ROLE = "role"
     RATING = "rating"
     PROFILE_URL = "profile_url"
     REGION = "region"
@@ -41,6 +43,7 @@ PROFILE_STEPS_ORDER = [
     ProfileStep.NAME,
     ProfileStep.NICKNAME,
     ProfileStep.AGE,
+    ProfileStep.ROLE,
     ProfileStep.RATING,
     ProfileStep.PROFILE_URL,
     ProfileStep.REGION,
@@ -54,6 +57,7 @@ class EditProfileForm(StatesGroup):
     edit_name = State()
     edit_nickname = State()
     edit_age = State()
+    edit_role = State()
     edit_rating = State()
     edit_profile_url = State()
     edit_country = State()
@@ -74,6 +78,10 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
         elif step == ProfileStep.AGE:
             current = data.get('age', '')
             return f"Текущий возраст: <b>{format_age(current)}</b>\n\nВведите новый возраст или нажмите 'Продолжить':"
+        elif step == ProfileStep.ROLE:
+            current = data.get('role', '')
+            role_name = settings.ROLES.get(current, current) if current else ''
+            return f"Текущая роль: <b>{role_name}</b>\n\nВыберите роль или нажмите 'Продолжить':"
         elif step == ProfileStep.RATING:
             current_rating = data.get('rating')
             if current_rating:
@@ -139,6 +147,8 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
         return texts.QUESTIONS.get('nickname', "Введите никнейм:")
     elif step == ProfileStep.AGE:
         return texts.QUESTIONS.get('age', "Введите возраст:")
+    elif step == ProfileStep.ROLE:
+        return "Выберите вашу роль:"
     elif step == ProfileStep.INFO:
         return texts.QUESTIONS['info']
     elif step == ProfileStep.PHOTO:
@@ -170,6 +180,8 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
     elif step == ProfileStep.NICKNAME and data.get('nickname'):
         has_data = True
     elif step == ProfileStep.AGE and data.get('age'):
+        has_data = True
+    elif step == ProfileStep.ROLE and data.get('role'):
         has_data = True
     elif step == ProfileStep.RATING and data.get('rating'):
         has_data = True
@@ -205,6 +217,10 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
         await state.set_state(ProfileForm.age)
         keyboard = kb.profile_creation_navigation(step.value, show_continue_button)
         
+    elif step == ProfileStep.ROLE:
+        await state.set_state(ProfileForm.role)
+        current_role = data.get('role') if show_existing_data else None
+        keyboard = kb.roles(selected_role=current_role, with_navigation=True)
     elif step == ProfileStep.RATING:
         await state.set_state(ProfileForm.rating)
         current_rating = data.get('rating') if show_existing_data else None

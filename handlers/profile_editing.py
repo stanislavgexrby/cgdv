@@ -37,12 +37,13 @@ async def update_profile_field(user_id: int, field: str, value, db) -> bool:
         nickname=profile['nickname'] if field != 'nickname' else value,
         age=profile['age'] if field != 'age' else value,
         rating=profile['rating'] if field != 'rating' else value,
-        region=profile.get('region', 'russia') if field != 'region' else value,
+        region=profile.get('region', 'any') if field != 'region' else value,
         positions=profile['positions'] if field != 'positions' else value,
         goals=profile.get('goals', ['any']) if field != 'goals' else value,
         additional_info=profile['additional_info'] if field != 'additional_info' else value,
         photo_id=profile.get('photo_id') if field != 'photo_id' else value,
-        profile_url=profile.get('profile_url', '') if field != 'profile_url' else value
+        profile_url=profile.get('profile_url', '') if field != 'profile_url' else value,
+        role=profile.get('role', 'player') if field != 'role' else value
     )
 
     if success:
@@ -58,7 +59,7 @@ async def edit_profile(callback: CallbackQuery, db):
     """Показ меню редактирования профиля"""
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
-    game = user['current_game']  # ← ВАЖНО: game уже есть
+    game = user['current_game']
     profile = await db.get_user_profile(user_id, game)
 
     await update_user_activity(user_id, 'profile_editing', db)
@@ -67,8 +68,9 @@ async def edit_profile(callback: CallbackQuery, db):
     current_info = f"Редактирование анкеты в {game_name}:\n\n"
     current_info += texts.format_profile(profile, show_contact=True)
     current_info += "\n\nЧто хотите изменить?"
-    
-    keyboard = kb.edit_profile_menu(game)  # ← ИСПРАВЛЕНИЕ
+
+    role = profile.get('role', 'player')  # ← ДОБАВИТЬ
+    keyboard = kb.edit_profile_menu(game, role)  # ← ИЗМЕНИТЬ: передаём роль
 
     try:
         if profile.get('photo_id'):
@@ -170,6 +172,33 @@ async def edit_age(callback: CallbackQuery, state: FSMContext, db):
 
     await safe_edit_message(callback, "Введите новый возраст:", kb.cancel_edit())
     await callback.answer()
+
+@router.callback_query(F.data == "edit_role")
+@check_ban_and_profile()
+async def edit_role(callback: CallbackQuery, state: FSMContext, db):
+    """Редактирование роли"""
+    user_id = callback.from_user.id
+    await update_user_activity(user_id, 'editing_profile', db)
+    
+    user = await db.get_user(user_id)
+    if not user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+    
+    profile = await db.get_user_profile(user_id, user['current_game'])
+    if not profile:
+        await callback.answer("Профиль не найден", show_alert=True)
+        return
+    
+    current_role = profile.get('role', 'player')
+    await state.update_data(user_id=user_id, current_game=user['current_game'])
+    await state.set_state(EditProfileForm.edit_role)
+    
+    text = "Выберите новую роль:"
+    # Создаём специальную клавиатуру для редактирования
+    keyboard = kb.roles_for_edit(selected_role=current_role)  # ← ИЗМЕНИТЬ
+    
+    await safe_edit_message(callback, text, keyboard)
 
 @router.callback_query(F.data == "edit_rating")
 @check_ban_and_profile()
@@ -387,6 +416,8 @@ async def process_edit_age(message: Message, state: FSMContext, db):
     else:
         await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML')
 
+
+
 @router.message(EditProfileForm.edit_profile_url)
 async def process_edit_profile_url(message: Message, state: FSMContext, db):
     if not message.text:
@@ -507,6 +538,82 @@ async def wrong_edit_photo_format(message: Message):
     )
 
 # ==================== ОБРАБОТЧИКИ CALLBACK ====================
+
+@router.callback_query(F.data.startswith("role_select_"), EditProfileForm.edit_role)
+async def process_edit_role_select(callback: CallbackQuery, state: FSMContext, db):
+    """Обработка выбора роли при редактировании"""
+    role = callback.data.split("_")[-1]
+    
+    if role not in settings.ROLES:
+        await callback.answer("Некорректная роль", show_alert=True)
+        return
+    
+    user_id = callback.from_user.id
+    user = await db.get_user(user_id)
+    game = user['current_game']
+    profile = await db.get_user_profile(user_id, game)
+    
+    if not profile:
+        await callback.answer("Профиль не найден", show_alert=True)
+        return
+    
+    old_role = profile.get('role', 'player')
+    
+    # Если меняем роль на не-игрока, сбрасываем игровые поля
+    if role != 'player' and old_role == 'player':
+        # Устанавливаем дефолтные значения для игровых полей
+        success = await db.update_user_profile(
+            telegram_id=user_id,
+            game=game,
+            name=profile['name'],
+            nickname=profile['nickname'],
+            age=profile['age'],
+            rating='any',  # Сбрасываем
+            region=profile.get('region', 'any'),
+            positions=['any'],  # Сбрасываем
+            goals=['any'],  # Сбрасываем
+            additional_info=profile.get('additional_info', ''),
+            photo_id=profile.get('photo_id'),
+            profile_url='',  # Сбрасываем
+            role=role
+        )
+    # Если меняем роль на игрока с не-игрока, тоже ставим дефолты
+    elif role == 'player' and old_role != 'player':
+        success = await db.update_user_profile(
+            telegram_id=user_id,
+            game=game,
+            name=profile['name'],
+            nickname=profile['nickname'],
+            age=profile['age'],
+            rating='any',  # Не указан по умолчанию
+            region=profile.get('region', 'any'),
+            positions=['any'],  # Не указаны
+            goals=['any'],  # Не указаны
+            additional_info=profile.get('additional_info', ''),
+            photo_id=profile.get('photo_id'),
+            profile_url='',
+            role=role
+        )
+    else:
+        # Просто меняем роль без изменения других полей
+        success = await update_profile_field(user_id, 'role', role, db)
+    
+    await state.clear()
+    await update_user_activity(user_id, 'available', db)
+
+    if success:
+        role_name = settings.ROLES.get(role, role)
+        if old_role != role and role != 'player':
+            text = f"Роль обновлена на {role_name}!\n\nИгровые поля (рейтинг, позиции, цели, ссылка) были сброшены, так как они не актуальны для этой роли."
+        elif old_role != role and role == 'player':
+            text = f"Роль обновлена на {role_name}!\n\nИгровые поля установлены как 'Не указано'. Вы можете заполнить их в меню редактирования."
+        else:
+            text = f"Роль обновлена на {role_name}!"
+        await safe_edit_message(callback, text, kb.back_to_editing())
+    else:
+        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
+
+    await callback.answer()
 
 @router.callback_query(F.data.startswith("rating_"), EditProfileForm.edit_rating)
 async def process_edit_rating(callback: CallbackQuery, state: FSMContext, db):

@@ -112,6 +112,40 @@ def profile_creation_navigation(step: str, has_prev_data: bool = False) -> Inlin
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def roles(selected_role: str = None, with_navigation: bool = False, with_cancel: bool = False, for_profile: bool = True) -> InlineKeyboardMarkup:
+    """Выбор роли пользователя"""
+    buttons = []
+    
+    for key, name in settings.ROLES.items():
+        if key == selected_role:
+            text = f"✅ {name}"
+            callback = f"role_remove_{key}"
+        else:
+            text = name
+            callback = f"role_select_{key}"
+        
+        buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
+    
+    if with_navigation:
+        bottom_row = []
+        if selected_role:
+            bottom_row.append(InlineKeyboardButton(text="Готово", callback_data="role_done"))
+        else:
+            bottom_row.append(InlineKeyboardButton(text="Выберите роль", callback_data="role_need"))
+        
+        if bottom_row:
+            buttons.append(bottom_row)
+        
+        nav_buttons = [
+            InlineKeyboardButton(text="Назад", callback_data="profile_back"),
+            InlineKeyboardButton(text="Отмена", callback_data="cancel")
+        ]
+        buttons.append(nav_buttons)
+    elif with_cancel:  # ← ДОБАВИТЬ этот блок
+        buttons.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 def ratings(game: str, selected_rating: str = None, with_navigation: bool = False, 
            for_profile: bool = True, with_cancel: bool = False) -> InlineKeyboardMarkup:
     """Интерактивный выбор рейтинга"""
@@ -326,6 +360,20 @@ def goals_filter() -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def role_filter() -> InlineKeyboardMarkup:
+    """Фильтр по роли"""
+    buttons = []
+
+    for key, name in settings.ROLES.items():
+        buttons.append([InlineKeyboardButton(text=name, callback_data=f"role_filter_{key}")])
+
+    buttons.extend([
+        [InlineKeyboardButton(text="Сбросить фильтр", callback_data="role_reset")],
+        [InlineKeyboardButton(text="Отмена", callback_data="cancel_filter")]
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 def skip_profile_url() -> InlineKeyboardMarkup:
     """Пропуск ссылки профиля с навигацией"""
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -430,16 +478,55 @@ def search_filters() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
     ])
 
-def filters_setup_menu() -> InlineKeyboardMarkup:
-    """Меню настройки фильтров"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Рейтинг", callback_data="filter_rating")],
-        [InlineKeyboardButton(text="Позиция", callback_data="filter_position")],
-        [InlineKeyboardButton(text="Страна", callback_data="filter_country")],  # Изменено с "filter_region"
-        [InlineKeyboardButton(text="Цель", callback_data="filter_goals")],
-        [InlineKeyboardButton(text="Сбросить все", callback_data="reset_all_filters")],
-        [InlineKeyboardButton(text="Назад к поиску", callback_data="back_to_search")]
+def edit_profile_menu(game: str = 'dota', role: str = 'player') -> InlineKeyboardMarkup:
+    """Меню редактирования профиля с учетом роли"""
+    buttons = []
+    
+    # Общие поля для всех ролей
+    buttons.extend([
+        [InlineKeyboardButton(text="Изменить имя", callback_data="edit_name")],
+        [InlineKeyboardButton(text="Изменить никнейм", callback_data="edit_nickname")],
+        [InlineKeyboardButton(text="Изменить возраст", callback_data="edit_age")],
+        [InlineKeyboardButton(text="Изменить роль", callback_data="edit_role")],
+        [InlineKeyboardButton(text="Изменить страну", callback_data="edit_country")]
     ])
+    
+    # Поля только для игроков
+    if role == 'player':
+        profile_button_text = "Изменить Dotabuff" if game == 'dota' else "Изменить FACEIT"
+        buttons.extend([
+            [InlineKeyboardButton(text="Изменить рейтинг", callback_data="edit_rating")],
+            [InlineKeyboardButton(text="Изменить позиции", callback_data="edit_positions")],
+            [InlineKeyboardButton(text="Изменить цели", callback_data="edit_goals")],
+            [InlineKeyboardButton(text=profile_button_text, callback_data="edit_profile_url")]
+        ])
+    
+    # Общие поля для всех
+    buttons.extend([
+        [InlineKeyboardButton(text="Изменить описание", callback_data="edit_info")],
+        [InlineKeyboardButton(text="Изменить фото", callback_data="edit_photo")],
+        [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def roles_for_edit(selected_role: str = None) -> InlineKeyboardMarkup:
+    """Выбор роли при редактировании (отличается callback_data)"""
+    buttons = []
+    
+    for key, name in settings.ROLES.items():
+        if key == selected_role:
+            text = f"✅ {name}"
+            callback = f"edit_role_select_{key}"  # ← Другой префикс
+        else:
+            text = name
+            callback = f"edit_role_select_{key}"  # ← Другой префикс
+        
+        buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
+    
+    buttons.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def ratings_filter(game: str) -> InlineKeyboardMarkup:
     """Фильтр по рейтингу"""

@@ -32,6 +32,8 @@ async def save_profile_unified(user_id: int, data: dict, photo_id: str = None,
             logger.info(f"Старая анкета удалена при пересоздании: {user_id} в {data['game']}")
     
     profile_url = data.get('profile_url', '')
+    role = data.get('role', 'player')  # ← ДОБАВИТЬ
+    
     goals = data.get('goals', []) or data.get('goals_selected', [])
     if not goals:
         goals = ['any']
@@ -40,19 +42,29 @@ async def save_profile_unified(user_id: int, data: dict, photo_id: str = None,
     if not positions:
         positions = ['any']
     
+    # Для не-игроков устанавливаем дефолтные значения для игровых полей
+    if role != 'player':  # ← ДОБАВИТЬ
+        rating = 'any'
+        positions = ['any']
+        goals = ['any']
+        profile_url = ''
+    else:
+        rating = data.get('rating', 'any')
+    
     success = await db.update_user_profile(
         telegram_id=user_id,
         game=data['game'],
         name=data['name'],
         nickname=data['nickname'],
         age=data['age'],
-        rating=data['rating'],
+        rating=rating,  # ← ИЗМЕНИТЬ (теперь может быть 'any' для не-игроков)
         region=data.get('region', 'eeu'),
         positions=positions,
         goals=goals,
         additional_info=data.get('additional_info', ''),
         photo_id=photo_id,
-        profile_url=profile_url
+        profile_url=profile_url,
+        role=role  # ← ДОБАВИТЬ
     )
     
     if state:
@@ -176,6 +188,7 @@ async def profile_go_back(callback: CallbackQuery, state: FSMContext):
     """Переход к предыдущему шагу создания профиля"""
     data = await state.get_data()
     current_step = data.get('current_step', ProfileStep.NAME.value)
+    role = data.get('role', 'player')
     
     try:
         current_step_enum = ProfileStep(current_step)
@@ -183,6 +196,17 @@ async def profile_go_back(callback: CallbackQuery, state: FSMContext):
         
         if current_index > 0:
             prev_step = PROFILE_STEPS_ORDER[current_index - 1]
+            
+            # Для не-игроков пропускаем специфичные для игроков шаги при навигации назад
+            if role != 'player':
+                while prev_step in [ProfileStep.RATING, ProfileStep.PROFILE_URL, 
+                                   ProfileStep.POSITIONS, ProfileStep.GOALS]:
+                    current_index -= 1
+                    if current_index <= 0:
+                        prev_step = ProfileStep.NAME
+                        break
+                    prev_step = PROFILE_STEPS_ORDER[current_index - 1]
+            
             await show_profile_step(callback, state, prev_step, show_current=True)
         else:
             await callback.answer("Это первый шаг", show_alert=True)
@@ -197,6 +221,7 @@ async def profile_continue(callback: CallbackQuery, state: FSMContext, db):
     """Продолжить создание профиля с текущими данными"""
     data = await state.get_data()
     current_step = data.get('current_step', ProfileStep.NAME.value)
+    role = data.get('role', 'player')
     
     try:
         current_step_enum = ProfileStep(current_step)
@@ -205,12 +230,23 @@ async def profile_continue(callback: CallbackQuery, state: FSMContext, db):
         if current_index < len(PROFILE_STEPS_ORDER) - 1:
             next_step = PROFILE_STEPS_ORDER[current_index + 1]
             
+            # Пропускаем шаги для не-игроков
+            if role != 'player':
+                while next_step in [ProfileStep.RATING, ProfileStep.PROFILE_URL, 
+                                   ProfileStep.POSITIONS, ProfileStep.GOALS]:
+                    current_index += 1
+                    if current_index >= len(PROFILE_STEPS_ORDER) - 1:
+                        break
+                    next_step = PROFILE_STEPS_ORDER[current_index + 1]
+            
             next_has_data = False
             if next_step == ProfileStep.NAME and data.get('name'):
                 next_has_data = True
             elif next_step == ProfileStep.NICKNAME and data.get('nickname'):
                 next_has_data = True
             elif next_step == ProfileStep.AGE and data.get('age'):
+                next_has_data = True
+            elif next_step == ProfileStep.ROLE and data.get('role'):
                 next_has_data = True
             elif next_step == ProfileStep.RATING and data.get('rating'):
                 next_has_data = True
@@ -314,9 +350,10 @@ async def process_age(message: Message, state: FSMContext):
     await state.update_data(age=age)
     
     data = await state.get_data()
-    has_next_data = bool(data.get('rating'))
+    has_next_data = bool(data.get('role'))  # ← ИЗМЕНИТЬ: теперь проверяем роль
     
-    await show_profile_step(message, state, ProfileStep.RATING, show_current=has_next_data)
+    # ← ИЗМЕНИТЬ: переходим к ROLE вместо RATING
+    await show_profile_step(message, state, ProfileStep.ROLE, show_current=has_next_data)
 
 @router.message(ProfileForm.age, ~F.text)
 async def wrong_age_format(message: Message, state: FSMContext):
@@ -405,6 +442,60 @@ async def process_photo(message: Message, state: FSMContext, db):
 async def wrong_photo_format(message: Message, state: FSMContext):
     """Обработка неправильного формата при загрузке фото"""
     await show_validation_error(message, state, "Отправьте фотографию или нажмите 'Пропустить'")
+
+# Обработчики для выбора роли
+@router.callback_query(F.data.startswith("role_select_"))
+async def select_role(callback: CallbackQuery, state: FSMContext):
+    """Выбор роли"""
+    role = callback.data.split("_")[-1]
+    await state.update_data(role=role)
+    
+    data = await state.get_data()
+    keyboard = kb.roles(selected_role=role, with_navigation=True)
+    
+    role_name = settings.ROLES.get(role, role)
+    text = f"Выбрана роль: <b>{role_name}</b>\n\nПодтвердите выбор:"
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
+    await callback.answer()
+
+@router.callback_query(F.data == "role_remove_any")
+async def remove_role_selection(callback: CallbackQuery, state: FSMContext):
+    """Снять выбор роли"""
+    await state.update_data(role=None)
+    
+    keyboard = kb.roles(selected_role=None, with_navigation=True)
+    text = "Выберите вашу роль:"
+    
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
+    await callback.answer()
+
+@router.callback_query(F.data == "role_need")
+async def role_need_selection(callback: CallbackQuery):
+    """Напоминание о необходимости выбрать роль"""
+    await callback.answer("Пожалуйста, выберите роль", show_alert=True)
+
+@router.callback_query(F.data == "role_done")
+async def role_confirmed(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение выбора роли"""
+    data = await state.get_data()
+    role = data.get('role')
+    
+    if not role:
+        await callback.answer("Выберите роль", show_alert=True)
+        return
+    
+    # Определяем следующий шаг в зависимости от роли
+    if role == 'player':
+        # Для игрока - следующий шаг рейтинг
+        has_next_data = bool(data.get('rating'))
+        await show_profile_step(callback, state, ProfileStep.RATING, show_current=has_next_data)
+    else:
+        # Для тренера/менеджера пропускаем рейтинг, ссылку, позиции, цели - сразу к стране
+        has_next_data = bool(data.get('region'))
+        await show_profile_step(callback, state, ProfileStep.REGION, show_current=has_next_data)
+    
+    await callback.answer()
 
 @router.callback_query(F.data == "rating_select_any", ProfileForm.rating)
 async def select_any_rating(callback: CallbackQuery, state: FSMContext):
@@ -1034,6 +1125,8 @@ async def continue_profile_creation(callback: CallbackQuery, state: FSMContext):
         elif current_step_enum == ProfileStep.NICKNAME and data.get('nickname'):
             has_current_data = True
         elif current_step_enum == ProfileStep.AGE and data.get('age'):
+            has_current_data = True
+        elif current_step_enum == ProfileStep.ROLE and data.get('role'):  # ← ДОБАВИТЬ
             has_current_data = True
         elif current_step_enum == ProfileStep.RATING and data.get('rating'):
             has_current_data = True

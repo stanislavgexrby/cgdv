@@ -271,7 +271,7 @@ class Database:
 
         profile = dict(row)
 
-        # Обработка поsзиций
+        # Обработка позиций
         positions = profile.get('positions', [])
         if isinstance(positions, str):
             try:
@@ -291,6 +291,11 @@ class Database:
         profile['goals'] = goals
 
         profile['current_game'] = profile.get('game')
+
+        # ← ДОБАВИТЬ ТОЛЬКО ЭТУ СТРОКУ:
+        if 'role' not in profile or profile['role'] is None:
+            profile['role'] = 'player'
+
         return profile
 
     def _generate_filters_hash(self, rating_filter, position_filter, region_filter, goals_filter) -> str:
@@ -396,19 +401,20 @@ class Database:
             return cached
 
         async with self._pg_pool.acquire() as conn:
-            row = await conn.fetchrow("""
-                SELECT p.*, u.username
-                FROM profiles p
-                JOIN users u ON p.telegram_id = u.telegram_id
-                WHERE p.telegram_id = $1 AND p.game = $2
-            """, telegram_id, game)
+            row = await conn.fetchrow(
+                '''SELECT p.*, u.username
+                   FROM profiles p
+                   LEFT JOIN users u ON p.telegram_id = u.telegram_id
+                   WHERE p.telegram_id = $1 AND p.game = $2''',
+                telegram_id, game
+            )
 
-            if not row:
-                return None
+            if row:
+                profile = self._format_profile(row)
+                await self._set_cache(cache_key, profile, self._cache_ttl['profile'])
+                return profile
 
-            profile = self._format_profile(row)
-            await self._set_cache(cache_key, profile, self._cache_ttl['profile'])
-            return profile
+            return None
 
     async def has_profile(self, telegram_id: int, game: str) -> bool:
         """Проверка наличия профиля с кэшированием"""
@@ -416,24 +422,54 @@ class Database:
         return profile is not None
 
     async def update_user_profile(self, telegram_id: int, game: str, name: str, nickname: str,
-                        age: int, rating: str, region: str, positions: List[str],
-                        goals: List[str], additional_info: str, photo_id: str = None,
-                        profile_url: str = None) -> bool:
-        """Создание/обновление профиля пользователя"""
+                                 age: int, rating: str, region: str, positions: List[str],
+                                 goals: List[str], additional_info: str = "", photo_id: str = None,
+                                 profile_url: str = None, username: str = None,
+                                 role: str = 'player'):  # ← ДОБАВИТЬ параметр
+        """Создание или обновление профиля пользователя"""
+
         async with self._pg_pool.acquire() as conn:
-            await conn.execute(
-                '''INSERT INTO profiles (telegram_id, game, name, nickname, age, rating, region, positions, goals, additional_info, photo_id, profile_url)
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                ON CONFLICT (telegram_id, game)
-                DO UPDATE SET
-                    name = $3, nickname = $4, age = $5, rating = $6,
-                    region = $7, positions = $8, goals = $9, additional_info = $10, photo_id = $11, profile_url = $12''',
-                telegram_id, game, name, nickname, age, rating, region,
-                json.dumps(positions), json.dumps(goals), additional_info, photo_id, profile_url
-            )
-            await self._clear_user_cache(telegram_id)
-            await self._clear_pattern_cache(f"search:*:{game}:*")
-            return True
+            try:
+                # Проверяем существует ли профиль
+                existing = await conn.fetchrow(
+                    'SELECT telegram_id FROM profiles WHERE telegram_id = $1 AND game = $2',
+                    telegram_id, game
+                )
+
+                if existing:
+                    # ОБНОВЛЕНИЕ существующего профиля - ИЗМЕНИТЬ запрос
+                    await conn.execute(
+                        '''UPDATE profiles 
+                           SET name = $3, nickname = $4, age = $5, rating = $6, region = $7,
+                               positions = $8, goals = $9, additional_info = $10, photo_id = $11,
+                               profile_url = $12, username = $13, role = $14, updated_at = NOW()
+                           WHERE telegram_id = $1 AND game = $2''',
+                        telegram_id, game, name, nickname, age, rating, region,
+                        json.dumps(positions), json.dumps(goals), additional_info,
+                        photo_id, profile_url, username, role  # ← ДОБАВИТЬ role
+                    )
+                else:
+                    # СОЗДАНИЕ нового профиля - ИЗМЕНИТЬ запрос
+                    await conn.execute(
+                        '''INSERT INTO profiles 
+                           (telegram_id, game, name, nickname, age, rating, region, positions, goals,
+                            additional_info, photo_id, profile_url, username, role, created_at, updated_at)
+                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())''',
+                        telegram_id, game, name, nickname, age, rating, region,
+                        json.dumps(positions), json.dumps(goals), additional_info,
+                        photo_id, profile_url, username, role  # ← ДОБАВИТЬ role
+                    )
+
+                # Инвалидация кэша
+                await self._invalidate_cache(f"profile:{telegram_id}:{game}")
+                await self._invalidate_cache(f"search:{telegram_id}:{game}:*")
+
+                logger.info(f"Профиль обновлён: {telegram_id} в {game}, роль: {role}")
+                return True
+
+            except Exception as e:
+                logger.error(f"Ошибка обновления профиля: {e}")
+                return False
 
     async def delete_profile(self, telegram_id: int, game: str) -> bool:
         """Удаление профиля и связанных данных"""
@@ -490,13 +526,14 @@ class Database:
                                    position_filter: str = None,
                                    country_filter: str = None,
                                    goals_filter: str = None,
+                                   role_filter: str = None,
                                    limit: int = 20,
                                    offset: int = 0) -> List[Dict]:
         """Оптимизированный поиск потенциальных матчей с учетом пропусков и фильтров"""
 
         # Генерация ключа кэша с учетом всех параметров
         filters_hash = self._generate_filters_hash(
-            rating_filter, position_filter, country_filter, goals_filter
+            rating_filter, position_filter, country_filter, goals_filter, role_filter
         )
         cache_key = f"search:{user_id}:{game}:{filters_hash}:{offset//limit}"
 
@@ -515,7 +552,8 @@ class Database:
                     $3::text as rating_filter,
                     $4::text as position_filter, 
                     $5::text as country_filter,
-                    $6::text as goals_filter
+                    $6::text as goals_filter,
+                    $7::text as role_filter
             ),
             excluded_users AS (
                 -- Пользователи, которых уже лайкнули
@@ -551,7 +589,7 @@ class Database:
                     p.telegram_id, p.game, p.name, p.nickname, p.age, 
                     p.rating, p.region, p.positions, p.goals,
                     p.additional_info, p.photo_id, p.profile_url,
-                    p.created_at, p.updated_at,
+                    p.created_at, p.updated_at, p.role,
                     u.username,
                     COALESCE(s.skip_count, 0) as skip_count,
                     s.last_skipped,
@@ -603,6 +641,7 @@ class Database:
                 WHERE p.telegram_id != $1
                     AND p.game = $2
                     AND p.telegram_id NOT IN (SELECT excluded_id FROM excluded_users)
+                    AND p.role = $7
             ),
             filtered_profiles AS (
                 SELECT *,
@@ -620,7 +659,7 @@ class Database:
             SELECT 
                 telegram_id, game, name, nickname, age, rating, region, 
                 positions, goals, additional_info, photo_id, profile_url,
-                username, created_at, updated_at
+                username, created_at, updated_at, role
             FROM filtered_profiles
             ORDER BY 
                 display_priority ASC,        -- Сначала новые, потом старые пропуски
@@ -629,9 +668,9 @@ class Database:
                 filled_score DESC,           -- Анкеты с заполненными полями выше
                 skip_count ASC,              -- Реже пропущенные
                 last_skipped ASC NULLS FIRST,-- Давно пропущенные показываем раньше
-                created_at DESC              -- Новые анкеты优先
-            LIMIT $7
-            OFFSET $8
+                created_at DESC              -- Новые анкеты приоритетнее
+            LIMIT $8
+            OFFSET $9
         '''
 
         params = [
@@ -640,6 +679,7 @@ class Database:
             position_filter if position_filter and position_filter != 'any' else None,
             country_filter if country_filter and country_filter != 'any' else None,
             goals_filter if goals_filter and goals_filter != 'any' else None,
+            role_filter if role_filter else None,
             limit, offset
         ]
 

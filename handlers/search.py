@@ -18,84 +18,100 @@ router = Router()
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
 async def update_filters_display(callback: CallbackQuery, state: FSMContext, message: str = None):
-    """Отображение текущих фильтров"""
+    """Отображение текущих фильтров с учётом роли"""
     data = await state.get_data()
     game = data.get('game', 'dota')
     game_name = settings.GAMES.get(game, game)
+    role_filter = data.get('role_filter', 'player')
 
     filters_text = []
 
-    rating_filter = data.get('rating_filter')
-    if rating_filter:
-        rating_name = settings.RATINGS[game].get(rating_filter, rating_filter)
-        filters_text.append(f"<b>Рейтинг:</b> {rating_name}")
-    else:
-        filters_text.append("<b>Рейтинг:</b> не указан")
+    # Роль показываем всегда
+    role_name = settings.ROLES.get(role_filter, 'Игрок')
+    filters_text.append(f"<b>Роль:</b> {role_name}")
 
-    position_filter = data.get('position_filter')
-    if position_filter:
-        position_name = settings.POSITIONS[game].get(position_filter, position_filter)
-        filters_text.append(f"<b>Позиция:</b> {position_name}")
-    else:
-        filters_text.append("<b>Позиция:</b> не указана")
+    # Для игроков показываем игровые фильтры
+    if role_filter == 'player':
+        rating_filter = data.get('rating_filter')
+        if rating_filter:
+            rating_name = settings.RATINGS[game].get(rating_filter, rating_filter)
+            filters_text.append(f"<b>Рейтинг:</b> {rating_name}")
+        else:
+            filters_text.append("<b>Рейтинг:</b> не указан")
 
+        position_filter = data.get('position_filter')
+        if position_filter:
+            position_name = settings.POSITIONS[game].get(position_filter, position_filter)
+            filters_text.append(f"<b>Позиция:</b> {position_name}")
+        else:
+            filters_text.append("<b>Позиция:</b> не указана")
+
+        goals_filter = data.get('goals_filter')
+        if goals_filter:
+            goals_name = settings.GOALS.get(goals_filter, goals_filter)
+            filters_text.append(f"<b>Цель:</b> {goals_name}")
+        else:
+            filters_text.append("<b>Цель:</b> не указана")
+
+    # Страна показываем для всех
     country_filter = data.get('country_filter')
     if country_filter:
         country_name = settings.MAIN_COUNTRIES.get(country_filter) or settings.COUNTRIES_DICT.get(country_filter, country_filter)
         filters_text.append(f"<b>Страна:</b> {country_name}")
     else:
         filters_text.append("<b>Страна:</b> не указана")
-
-    goals_filter = data.get('goals_filter')
-    if goals_filter:
-        goals_name = settings.GOALS.get(goals_filter, goals_filter)
-        filters_text.append(f"<b>Цель:</b> {goals_name}")
-    else:
-        filters_text.append("<b>Цель:</b> не указана")
 
     text = f"Настройка фильтров для {game_name}\n\n"
     text += "\n".join(filters_text)
     text += "\n\nВыберите что настроить:"
 
-    await safe_edit_message(callback, text, kb.filters_setup_menu())
+    await safe_edit_message(callback, text, kb.filters_setup_menu(role_filter))  # ← ИСПРАВЛЕНО
 
     if message:
         await callback.answer(message)
 
 async def get_full_filters_display(data: dict) -> str:
-    """Полное отображение всех фильтров как в меню настройки"""
+    """Полное отображение всех фильтров с учётом роли"""
     game = data.get('game', 'dota')
     game_name = settings.GAMES.get(game, game)
+    role_filter = data.get('role_filter', 'player')
 
     filters_text = []
 
-    rating_filter = data.get('rating_filter')
-    if rating_filter:
-        rating_name = settings.RATINGS[game].get(rating_filter, rating_filter)
-        filters_text.append(f"<b>Рейтинг:</b> {rating_name}")
-    else:
-        filters_text.append("<b>Рейтинг:</b> не указан")
+    # Роль показываем всегда
+    role_name = settings.ROLES.get(role_filter, 'Игрок')
+    filters_text.append(f"<b>Роль:</b> {role_name}")
 
-    position_filter = data.get('position_filter')
-    if position_filter:
-        position_name = settings.POSITIONS[game].get(position_filter, position_filter)
-        filters_text.append(f"<b>Позиция:</b> {position_name}")
-    else:
-        filters_text.append("<b>Позиция:</b> не указана")
+    # Для игроков показываем игровые фильтры
+    if role_filter == 'player':
+        rating_filter = data.get('rating_filter')
+        if rating_filter:
+            rating_name = settings.RATINGS[game].get(rating_filter, rating_filter)
+            filters_text.append(f"<b>Рейтинг:</b> {rating_name}")
+        else:
+            filters_text.append("<b>Рейтинг:</b> не указан")
 
+        position_filter = data.get('position_filter')
+        if position_filter:
+            position_name = settings.POSITIONS[game].get(position_filter, position_filter)
+            filters_text.append(f"<b>Позиция:</b> {position_name}")
+        else:
+            filters_text.append("<b>Позиция:</b> не указана")
+
+        goals_filter = data.get('goals_filter')
+        if goals_filter:
+            goals_name = settings.GOALS.get(goals_filter, goals_filter)
+            filters_text.append(f"<b>Цель:</b> {goals_name}")
+        else:
+            filters_text.append("<b>Цель:</b> не указана")
+
+    # Страна показываем для всех
     country_filter = data.get('country_filter')
     if country_filter:
         country_name = settings.MAIN_COUNTRIES.get(country_filter) or settings.COUNTRIES_DICT.get(country_filter, country_filter)
         filters_text.append(f"<b>Страна:</b> {country_name}")
     else:
         filters_text.append("<b>Страна:</b> не указана")
-
-    goals_filter = data.get('goals_filter')
-    if goals_filter:
-        goals_name = settings.GOALS.get(goals_filter, goals_filter)
-        filters_text.append(f"<b>Цель:</b> {goals_name}")
-    else:
-        filters_text.append("<b>Цель:</b> не указана")
 
     text = f"Поиск в {game_name}\n\n"
     text += "\n".join(filters_text)
@@ -230,6 +246,7 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
                 position_filter=data.get('position_filter'),
                 country_filter=data.get('country_filter'),
                 goals_filter=data.get('goals_filter'),
+                role_filter=data.get('role_filter'),
                 limit=20,
                 offset=new_offset
             )
@@ -269,6 +286,7 @@ async def start_search_menu(callback: CallbackQuery, state: FSMContext, db):
             position_filter=None,
             region_filter=None,
             goals_filter=None,
+            role_filter='player',
             profiles=[],
             current_index=0
         )
@@ -298,6 +316,12 @@ async def back_to_search_menu(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
 
 # ==================== НАСТРОЙКА ФИЛЬТРОВ ====================
+
+@router.callback_query(F.data == "filter_role", SearchForm.filters)
+async def set_role_filter(callback: CallbackQuery, state: FSMContext):
+    """Показать меню выбора роли"""
+    await safe_edit_message(callback, "Выберите роль:", kb.role_filter())
+    await callback.answer()
 
 @router.callback_query(F.data == "filter_rating", SearchForm.filters)
 async def set_rating_filter(callback: CallbackQuery, state: FSMContext):
@@ -337,11 +361,45 @@ async def reset_all_filters(callback: CallbackQuery, state: FSMContext):
         rating_filter=None,
         position_filter=None,
         country_filter=None,
-        goals_filter=None
+        goals_filter=None,
+        role_filter='player'
     )
     await update_filters_display(callback, state, "Все фильтры сброшены")
 
 # ==================== СОХРАНЕНИЕ ФИЛЬТРОВ ====================
+
+@router.callback_query(F.data.startswith("role_filter_"), SearchForm.filters)
+async def save_role_filter(callback: CallbackQuery, state: FSMContext):
+    """Сохранение выбранной роли"""
+    parts = callback.data.split("_")
+    if len(parts) < 3:
+        return
+
+    role = parts[2]
+
+    if role not in settings.ROLES:
+        return
+
+    data = await state.get_data()
+    current_role = data.get('role_filter', 'player')
+    
+    if current_role == role:
+        await callback.answer("Эта роль уже выбрана")
+        return
+
+    # Сохраняем роль
+    await state.update_data(role_filter=role)
+    
+    # ВАЖНО: Если сменили на не-игрока, сбрасываем игровые фильтры
+    if role != 'player':
+        await state.update_data(
+            rating_filter=None,
+            position_filter=None,
+            goals_filter=None
+        )
+    
+    role_name = settings.ROLES.get(role, role)
+    await update_filters_display(callback, state, f"Фильтр по роли: {role_name}")
 
 @router.callback_query(F.data.startswith("rating_"), SearchForm.filters)
 async def save_rating_filter(callback: CallbackQuery, state: FSMContext):
@@ -518,6 +576,12 @@ async def save_goals_filter(callback: CallbackQuery, state: FSMContext):
 
 # ==================== СБРОС ФИЛЬТРОВ ====================
 
+@router.callback_query(F.data == "role_reset", SearchForm.filters)
+async def reset_role_filter(callback: CallbackQuery, state: FSMContext):
+    """Сброс фильтра по роли"""
+    await state.update_data(role_filter=None)
+    await update_filters_display(callback, state, "Фильтр по роли сброшен")
+
 @router.callback_query(F.data == "rating_reset", SearchForm.filters)
 async def reset_rating_filter(callback: CallbackQuery, state: FSMContext):
     await state.update_data(rating_filter=None)
@@ -565,6 +629,7 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
             position_filter=data.get('position_filter'),
             country_filter=data.get('country_filter'),
             goals_filter=data.get('goals_filter'),
+            role_filter=data.get('role_filter'),
             limit=20,
             offset=batch_offset
         )
