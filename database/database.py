@@ -298,9 +298,9 @@ class Database:
 
         return profile
 
-    def _generate_filters_hash(self, rating_filter, position_filter, region_filter, goals_filter) -> str:
+    def _generate_filters_hash(self, rating_filter, position_filter, region_filter, goals_filter, role_filter) -> str:
         """Генерация хэша для фильтров поиска"""
-        filters_str = f"{rating_filter or 'any'}_{position_filter or 'any'}_{region_filter or 'any'}_{goals_filter or 'any'}"
+        filters_str = f"{rating_filter or 'any'}_{position_filter or 'any'}_{region_filter or 'any'}_{goals_filter or 'any'}_{role_filter or 'player'}"
         return hashlib.md5(filters_str.encode()).hexdigest()[:8]
 
     # === ОПТИМИЗИРОВАННОЕ КЭШИРОВАНИЕ ===
@@ -425,7 +425,7 @@ class Database:
                                  age: int, rating: str, region: str, positions: List[str],
                                  goals: List[str], additional_info: str = "", photo_id: str = None,
                                  profile_url: str = None, username: str = None,
-                                 role: str = 'player'):  # ← ДОБАВИТЬ параметр
+                                 role: str = 'player'):
         """Создание или обновление профиля пользователя"""
 
         async with self._pg_pool.acquire() as conn:
@@ -437,32 +437,42 @@ class Database:
                 )
 
                 if existing:
-                    # ОБНОВЛЕНИЕ существующего профиля - ИЗМЕНИТЬ запрос
+                    # ОБНОВЛЕНИЕ существующего профиля (БЕЗ username)
                     await conn.execute(
                         '''UPDATE profiles 
                            SET name = $3, nickname = $4, age = $5, rating = $6, region = $7,
                                positions = $8, goals = $9, additional_info = $10, photo_id = $11,
-                               profile_url = $12, username = $13, role = $14, updated_at = NOW()
+                               profile_url = $12, role = $13, updated_at = NOW()
                            WHERE telegram_id = $1 AND game = $2''',
                         telegram_id, game, name, nickname, age, rating, region,
                         json.dumps(positions), json.dumps(goals), additional_info,
-                        photo_id, profile_url, username, role  # ← ДОБАВИТЬ role
+                        photo_id, profile_url, role
                     )
                 else:
-                    # СОЗДАНИЕ нового профиля - ИЗМЕНИТЬ запрос
+                    # СОЗДАНИЕ нового профиля (БЕЗ username)
                     await conn.execute(
                         '''INSERT INTO profiles 
                            (telegram_id, game, name, nickname, age, rating, region, positions, goals,
-                            additional_info, photo_id, profile_url, username, role, created_at, updated_at)
-                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())''',
+                            additional_info, photo_id, profile_url, role, created_at, updated_at)
+                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())''',
                         telegram_id, game, name, nickname, age, rating, region,
                         json.dumps(positions), json.dumps(goals), additional_info,
-                        photo_id, profile_url, username, role  # ← ДОБАВИТЬ role
+                        photo_id, profile_url, role
+                    )
+
+                # Если передан username, обновляем его в таблице users
+                if username is not None:
+                    await conn.execute(
+                        '''INSERT INTO users (telegram_id, username, current_game)
+                           VALUES ($1, $2, $3)
+                           ON CONFLICT (telegram_id)
+                           DO UPDATE SET username = $2''',
+                        telegram_id, username, game
                     )
 
                 # Инвалидация кэша
-                await self._invalidate_cache(f"profile:{telegram_id}:{game}")
-                await self._invalidate_cache(f"search:{telegram_id}:{game}:*")
+                await self._clear_user_cache(telegram_id)
+                await self._clear_pattern_cache(f"search:*:{game}:*")
 
                 logger.info(f"Профиль обновлён: {telegram_id} в {game}, роль: {role}")
                 return True

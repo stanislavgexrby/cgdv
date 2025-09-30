@@ -478,6 +478,32 @@ def search_filters() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
     ])
 
+def filters_setup_menu(role_filter: str = 'player') -> InlineKeyboardMarkup:
+    """Меню выбора какой фильтр настроить (с учетом роли)"""
+    buttons = []
+    
+    # Роль показываем всегда
+    buttons.append([InlineKeyboardButton(text="Роль", callback_data="filter_role")])
+    
+    # Для игроков показываем игровые фильтры
+    if role_filter == 'player':
+        buttons.extend([
+            [InlineKeyboardButton(text="Рейтинг", callback_data="filter_rating")],
+            [InlineKeyboardButton(text="Позиция", callback_data="filter_position")],
+            [InlineKeyboardButton(text="Цели", callback_data="filter_goals")]
+        ])
+    
+    # Страна для всех
+    buttons.append([InlineKeyboardButton(text="Страна", callback_data="filter_country")])
+    
+    # Нижние кнопки
+    buttons.extend([
+        [InlineKeyboardButton(text="Сбросить все", callback_data="reset_all_filters")],
+        [InlineKeyboardButton(text="Назад", callback_data="back_to_search")]
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 def edit_profile_menu(game: str = 'dota', role: str = 'player') -> InlineKeyboardMarkup:
     """Меню редактирования профиля с учетом роли"""
     buttons = []
@@ -511,16 +537,16 @@ def edit_profile_menu(game: str = 'dota', role: str = 'player') -> InlineKeyboar
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def roles_for_edit(selected_role: str = None) -> InlineKeyboardMarkup:
-    """Выбор роли при редактировании (отличается callback_data)"""
+    """Выбор роли при редактировании"""
     buttons = []
     
     for key, name in settings.ROLES.items():
         if key == selected_role:
             text = f"✅ {name}"
-            callback = f"edit_role_select_{key}"  # ← Другой префикс
+            callback = f"role_select_{key}"  # Убрать edit_
         else:
             text = name
-            callback = f"edit_role_select_{key}"  # ← Другой префикс
+            callback = f"role_select_{key}"  # Убрать edit_
         
         buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
     

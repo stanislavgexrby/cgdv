@@ -195,10 +195,10 @@ async def edit_role(callback: CallbackQuery, state: FSMContext, db):
     await state.set_state(EditProfileForm.edit_role)
     
     text = "Выберите новую роль:"
-    # Создаём специальную клавиатуру для редактирования
-    keyboard = kb.roles_for_edit(selected_role=current_role)  # ← ИЗМЕНИТЬ
+    keyboard = kb.roles_for_edit(selected_role=current_role)  # ← ИСПОЛЬЗУЕМ ПРАВИЛЬНУЮ КЛАВИАТУРУ
     
     await safe_edit_message(callback, text, keyboard)
+    await callback.answer()
 
 @router.callback_query(F.data == "edit_rating")
 @check_ban_and_profile()
@@ -559,43 +559,35 @@ async def process_edit_role_select(callback: CallbackQuery, state: FSMContext, d
     
     old_role = profile.get('role', 'player')
     
-    # Если меняем роль на не-игрока, сбрасываем игровые поля
-    if role != 'player' and old_role == 'player':
-        # Устанавливаем дефолтные значения для игровых полей
+    # Если роль не изменилась
+    if old_role == role:
+        role_name = settings.ROLES.get(role, role)
+        await safe_edit_message(callback, f"Роль уже установлена на {role_name}", kb.back_to_editing())
+        await callback.answer()
+        return
+    
+    # Определяем нужно ли сбрасывать игровые поля
+    should_reset_game_fields = (role != 'player' and old_role == 'player') or (role == 'player' and old_role != 'player')
+    
+    if should_reset_game_fields:
+        # Сбрасываем игровые поля при смене категории роли
         success = await db.update_user_profile(
             telegram_id=user_id,
             game=game,
             name=profile['name'],
             nickname=profile['nickname'],
             age=profile['age'],
-            rating='any',  # Сбрасываем
+            rating='any',
             region=profile.get('region', 'any'),
-            positions=['any'],  # Сбрасываем
-            goals=['any'],  # Сбрасываем
-            additional_info=profile.get('additional_info', ''),
-            photo_id=profile.get('photo_id'),
-            profile_url='',  # Сбрасываем
-            role=role
-        )
-    # Если меняем роль на игрока с не-игрока, тоже ставим дефолты
-    elif role == 'player' and old_role != 'player':
-        success = await db.update_user_profile(
-            telegram_id=user_id,
-            game=game,
-            name=profile['name'],
-            nickname=profile['nickname'],
-            age=profile['age'],
-            rating='any',  # Не указан по умолчанию
-            region=profile.get('region', 'any'),
-            positions=['any'],  # Не указаны
-            goals=['any'],  # Не указаны
+            positions=['any'],
+            goals=['any'],
             additional_info=profile.get('additional_info', ''),
             photo_id=profile.get('photo_id'),
             profile_url='',
             role=role
         )
     else:
-        # Просто меняем роль без изменения других полей
+        # Просто меняем роль без изменения других полей (например, player -> player или coach -> manager)
         success = await update_profile_field(user_id, 'role', role, db)
     
     await state.clear()
@@ -603,15 +595,15 @@ async def process_edit_role_select(callback: CallbackQuery, state: FSMContext, d
 
     if success:
         role_name = settings.ROLES.get(role, role)
-        if old_role != role and role != 'player':
-            text = f"Роль обновлена на {role_name}!\n\nИгровые поля (рейтинг, позиции, цели, ссылка) были сброшены, так как они не актуальны для этой роли."
-        elif old_role != role and role == 'player':
-            text = f"Роль обновлена на {role_name}!\n\nИгровые поля установлены как 'Не указано'. Вы можете заполнить их в меню редактирования."
+        if role != 'player' and old_role == 'player':
+            text = f"Роль обновлена на {role_name}!\n\nИгровые поля (рейтинг, позиции, цели, ссылка) были сброшены, так как они не актуальны для этой роли"
+        elif role == 'player' and old_role != 'player':
+            text = f"Роль обновлена на {role_name}!\n\nИгровые поля установлены как 'Не указано'. Вы можете заполнить их в меню редактирования"
         else:
             text = f"Роль обновлена на {role_name}!"
         await safe_edit_message(callback, text, kb.back_to_editing())
     else:
-        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
+        await safe_edit_message(callback, "Ошибка обновления роли", kb.back_to_editing())
 
     await callback.answer()
 

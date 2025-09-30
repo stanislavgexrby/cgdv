@@ -360,7 +360,7 @@ def get_main_menu_photo(game: str = None) -> str:
         return MAIN_MENU_PHOTO_DEFAULT
 
 ROLES = {
-    'player': '🎮 Игрок',
-    'coach': '📋 Тренер',
-    'manager': '💼 Менеджер'
+    'player': 'Игрок',
+    'coach': 'Тренер',
+    'manager': 'Менеджер'
 }

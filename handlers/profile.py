@@ -31,9 +31,9 @@ async def save_profile_unified(user_id: int, data: dict, photo_id: str = None,
             await db.delete_profile(user_id, data['game'])
             logger.info(f"Старая анкета удалена при пересоздании: {user_id} в {data['game']}")
     
-    profile_url = data.get('profile_url', '')
-    role = data.get('role', 'player')  # ← ДОБАВИТЬ
+    role = data.get('role', 'player')
     
+    # Получаем значения из data
     goals = data.get('goals', []) or data.get('goals_selected', [])
     if not goals:
         goals = ['any']
@@ -42,14 +42,15 @@ async def save_profile_unified(user_id: int, data: dict, photo_id: str = None,
     if not positions:
         positions = ['any']
     
-    # Для не-игроков устанавливаем дефолтные значения для игровых полей
-    if role != 'player':  # ← ДОБАВИТЬ
+    rating = data.get('rating', 'any')
+    profile_url = data.get('profile_url', '')
+    
+    # Для не-игроков принудительно устанавливаем дефолтные значения для игровых полей
+    if role != 'player':
         rating = 'any'
         positions = ['any']
         goals = ['any']
         profile_url = ''
-    else:
-        rating = data.get('rating', 'any')
     
     success = await db.update_user_profile(
         telegram_id=user_id,
@@ -57,14 +58,14 @@ async def save_profile_unified(user_id: int, data: dict, photo_id: str = None,
         name=data['name'],
         nickname=data['nickname'],
         age=data['age'],
-        rating=rating,  # ← ИЗМЕНИТЬ (теперь может быть 'any' для не-игроков)
+        rating=rating,
         region=data.get('region', 'eeu'),
         positions=positions,
         goals=goals,
         additional_info=data.get('additional_info', ''),
         photo_id=photo_id,
         profile_url=profile_url,
-        role=role  # ← ДОБАВИТЬ
+        role=role
     )
     
     if state:
@@ -84,7 +85,7 @@ async def save_profile_unified(user_id: int, data: dict, photo_id: str = None,
         await _show_save_result(callback, message, data, result_text)
     
     action = "пересоздан" if is_recreating else "создан"
-    logger.info(f"Профиль {action} для {user_id} в {data['game']}")
+    logger.info(f"Профиль {action} для {user_id} в {data['game']}, роль: {role}")
     return True
 
 async def _show_save_error(callback: CallbackQuery, message: Message, data: dict):
@@ -444,7 +445,7 @@ async def wrong_photo_format(message: Message, state: FSMContext):
     await show_validation_error(message, state, "Отправьте фотографию или нажмите 'Пропустить'")
 
 # Обработчики для выбора роли
-@router.callback_query(F.data.startswith("role_select_"))
+@router.callback_query(F.data.startswith("role_select_"), ProfileForm.role)
 async def select_role(callback: CallbackQuery, state: FSMContext):
     """Выбор роли"""
     role = callback.data.split("_")[-1]
@@ -459,7 +460,7 @@ async def select_role(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
     await callback.answer()
 
-@router.callback_query(F.data == "role_remove_any")
+@router.callback_query(F.data == "role_remove_any", ProfileForm.role)
 async def remove_role_selection(callback: CallbackQuery, state: FSMContext):
     """Снять выбор роли"""
     await state.update_data(role=None)
