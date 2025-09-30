@@ -490,6 +490,7 @@ def profile_actions(user_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="❤️", callback_data=f"like_{user_id}"),
+            InlineKeyboardButton(text="💌", callback_data=f"like_msg_{user_id}"),
             InlineKeyboardButton(text="👎", callback_data=f"skip_{user_id}")
         ],
         [

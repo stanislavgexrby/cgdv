@@ -69,7 +69,7 @@ async def process_like_action(callback: CallbackQuery, target_user_id: int, acti
     game = user['current_game']
 
     if action == "like":
-        is_match = await db.add_like(user_id, target_user_id, game)
+        is_match = await db.add_like(user_id, target_user_id, game, message=None)  # ДОБАВЛЕНО message=None
 
         if is_match:
             await handle_match_created(callback, target_user_id, game, db)
@@ -125,13 +125,17 @@ async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
     profile = likes[index]
     profile_text = texts.format_profile(profile)
     text = f"Этот игрок лайкнул вас:\n\n{profile_text}"
+    
+    # Добавляем сообщение, если оно есть
+    if profile.get('message'):
+        text += f"\n\n💌 Сообщение:\n\"{profile['message']}\""
 
     keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
         [
-            kb.InlineKeyboardButton(text="Лайк в ответ", callback_data=f"loves_back_{profile['telegram_id']}_{index}"),
-            kb.InlineKeyboardButton(text="Пропустить", callback_data=f"loves_skip_{profile['telegram_id']}_{index}")
+            kb.InlineKeyboardButton(text="❤️ Лайк в ответ", callback_data=f"loves_back_{profile['telegram_id']}_{index}"),
+            kb.InlineKeyboardButton(text="👎 Пропустить", callback_data=f"loves_skip_{profile['telegram_id']}_{index}")
         ],
-        [kb.InlineKeyboardButton(text="Пожаловаться", callback_data=f"loves_report_{profile['telegram_id']}_{index}")],
+        [kb.InlineKeyboardButton(text="🚫 Пожаловаться", callback_data=f"loves_report_{profile['telegram_id']}_{index}")],
         [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
     ])
 

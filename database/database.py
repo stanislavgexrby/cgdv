@@ -250,6 +250,13 @@ class Database:
             except Exception as e:
                 logger.warning(f"Миграция поля profile_url: {e}")
 
+            try:
+                await conn.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP")
+                await conn.execute("UPDATE profiles SET updated_at = created_at WHERE updated_at IS NULL")
+                logger.info("✅ Миграция: добавлена колонка updated_at в profiles")
+            except Exception as e:
+                logger.warning(f"Миграция поля updated_at: {e}")      
+
             for index_sql in optimized_indexes:
                 try:
                     await conn.execute(index_sql)
@@ -541,7 +548,10 @@ class Database:
             ),
             potential_profiles AS (
                 SELECT 
-                    p.*,
+                    p.telegram_id, p.game, p.name, p.nickname, p.age, 
+                    p.rating, p.region, p.positions, p.goals,
+                    p.additional_info, p.photo_id, p.profile_url,
+                    p.created_at, p.updated_at,
                     u.username,
                     COALESCE(s.skip_count, 0) as skip_count,
                     s.last_skipped,
@@ -712,8 +722,8 @@ class Database:
 
     # === ЛАЙКИ И МАТЧИ ===
 
-    async def add_like(self, from_user: int, to_user: int, game: str) -> bool:
-        """Добавление лайка с проверкой на матч (возвращает True если матч)"""
+    async def add_like(self, from_user: int, to_user: int, game: str, message: str = None) -> bool:
+        """Добавление лайка с опциональным сообщением (возвращает True если матч)"""
         async with self._pg_pool.acquire() as conn:
             async with conn.transaction():
                 existing = await conn.fetchval(
@@ -724,8 +734,8 @@ class Database:
                     return False
 
                 await conn.execute(
-                    "INSERT INTO likes (from_user, to_user, game) VALUES ($1, $2, $3)",
-                    from_user, to_user, game
+                    "INSERT INTO likes (from_user, to_user, game, message) VALUES ($1, $2, $3, $4)",
+                    from_user, to_user, game, message
                 )
 
                 mutual = await conn.fetchval(
@@ -748,7 +758,7 @@ class Database:
                 return False
 
     async def get_likes_for_user(self, user_id: int, game: str) -> List[Dict]:
-        """Получение лайков для пользователя с кэшированием"""
+        """Получение лайков для пользователя с сообщениями"""
         cache_key = f"likes:{user_id}:{game}"
         cached = await self._get_cache(cache_key)
         if cached:
@@ -756,22 +766,27 @@ class Database:
 
         async with self._pg_pool.acquire() as conn:
             rows = await conn.fetch(
-                '''SELECT p.*, u.username 
-                   FROM profiles p
-                   JOIN users u ON p.telegram_id = u.telegram_id
-                   JOIN likes l ON p.telegram_id = l.from_user
-                   WHERE l.to_user = $1 AND l.game = $2 AND p.game = $2
-                   AND NOT EXISTS (
-                       SELECT 1 FROM matches m
-                       WHERE ((m.user1 = $1 AND m.user2 = p.telegram_id) OR
-                              (m.user1 = p.telegram_id AND m.user2 = $1))
-                       AND m.game = $2
-                   )
-                   AND NOT EXISTS (
-                       SELECT 1 FROM skipped_likes sl
-                       WHERE sl.user_id = $1 AND sl.skipped_user_id = p.telegram_id AND sl.game = $2
-                   )
-                   ORDER BY l.created_at DESC''',
+                '''SELECT p.telegram_id, p.game, p.name, p.nickname, p.age, 
+                        p.rating, p.region, p.positions, p.goals,
+                        p.additional_info, p.photo_id, p.profile_url,
+                        p.created_at, p.updated_at,
+                        u.username,
+                        l.message, l.created_at as like_created_at
+                FROM profiles p
+                JOIN users u ON p.telegram_id = u.telegram_id
+                JOIN likes l ON p.telegram_id = l.from_user AND l.game = p.game
+                WHERE l.to_user = $1 AND l.game = $2 AND p.game = $2
+                AND NOT EXISTS (
+                    SELECT 1 FROM matches m
+                    WHERE ((m.user1 = $1 AND m.user2 = p.telegram_id) OR
+                            (m.user1 = p.telegram_id AND m.user2 = $1))
+                    AND m.game = $2
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM skipped_likes sl
+                    WHERE sl.user_id = $1 AND sl.skipped_user_id = p.telegram_id AND sl.game = $2
+                )
+                ORDER BY l.created_at DESC''',
                 user_id, game
             )
 

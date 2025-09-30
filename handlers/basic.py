@@ -25,8 +25,13 @@ router = Router()
 class SearchForm(StatesGroup):
     menu = State()
     filters = State()
-    browsing = State()
+    rating_filter = State()
+    position_filter = State()
+    region_filter = State()
     country_filter_input = State()
+    goals_filter = State()
+    browsing = State()
+    waiting_message = State()
 
 __all__ = ['safe_edit_message', 'router', 'SearchForm']
 

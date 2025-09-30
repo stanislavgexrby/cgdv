@@ -2,6 +2,7 @@ import logging
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
+from handlers.likes import show_profile_with_photo
 
 from handlers.basic import check_ban_and_profile, safe_edit_message, SearchForm
 from handlers.notifications import notify_about_match, notify_about_like, update_user_activity, notify_admin_new_report
@@ -115,7 +116,7 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
         game = data['game']
     
     if action == "like":
-        is_match = await db.add_like(user_id, target_user_id, game)
+        is_match = await db.add_like(user_id, target_user_id, game, message=None)
         
         if is_match:
             target_profile = await db.get_user_profile(target_user_id, game)
@@ -605,8 +606,12 @@ async def skip_profile(callback: CallbackQuery, state: FSMContext, db):
         return
     await handle_search_action(callback, "skip", target_user_id, state, db)
 
-@router.callback_query(F.data.startswith("like_"))
+@router.callback_query(F.data.regexp(r"^like_\d+$"))
 async def like_profile(callback: CallbackQuery, state: FSMContext, db):
+    # Игнорируем like_msg_ - он обрабатывается отдельно
+    if callback.data.startswith("like_msg_"):
+        return
+    
     try:
         target_user_id = int(callback.data.split("_")[1])
     except Exception:
@@ -632,3 +637,204 @@ async def continue_search(callback: CallbackQuery, state: FSMContext, db):
         await begin_search(callback, state, db)
     else:
         await show_next_profile(callback, state, db)
+
+@router.callback_query(F.data.startswith("like_msg_"))
+async def like_with_message(callback: CallbackQuery, state: FSMContext, db):
+    """Инициация лайка с сообщением"""
+    try:
+        target_user_id = int(callback.data.split("_")[2])
+    except Exception:
+        await state.clear()
+        await callback.answer("Ошибка данных", show_alert=True)
+        return
+    
+    data = await state.get_data()
+    profiles = data.get('profiles', [])
+    current_index = data.get('current_index', 0)
+    
+    if current_index >= len(profiles):
+        await callback.answer("Анкета не найдена", show_alert=True)
+        return
+    
+    profile = profiles[current_index]
+    
+    # Сохраняем информацию о целевом пользователе И ID сообщения
+    await state.update_data(
+        message_target_user_id=target_user_id,
+        message_target_index=current_index,
+        last_search_message_id=callback.message.message_id  # ДОБАВИТЬ ЭТУ СТРОКУ
+    )
+    await state.set_state(SearchForm.waiting_message)
+    
+    # Редактируем сообщение
+    profile_text = texts.format_profile(profile)
+    text = f"{profile_text}\n\n<b>💌 Напишите сообщение этому пользователю:</b>"
+    
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+        [kb.InlineKeyboardButton(text="Отмена", callback_data="cancel_message")]
+    ])
+    
+    await show_profile_with_photo(callback, profile, text, keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data == "cancel_message", SearchForm.waiting_message)
+async def cancel_message(callback: CallbackQuery, state: FSMContext):
+    """Отмена отправки сообщения - возврат к текущей анкете"""
+    await state.set_state(SearchForm.browsing)
+    
+    # Удаляем временные данные о сообщении
+    data = await state.get_data()
+    if 'message_target_user_id' in data:
+        del data['message_target_user_id']
+    if 'message_target_index' in data:
+        del data['message_target_index']
+    await state.set_data(data)
+    
+    # Показываем текущий профиль заново
+    await show_current_profile(callback, state)
+    await callback.answer()
+
+@router.message(SearchForm.waiting_message, F.text)
+async def process_message_with_like(message: Message, state: FSMContext, db):
+    """Обработка сообщения и отправка лайка"""
+    user_id = message.from_user.id
+    data = await state.get_data()
+    
+    target_user_id = data.get('message_target_user_id')
+    game = data.get('game')
+    user_message = message.text.strip()
+    
+    if not target_user_id or not game:
+        await message.answer("Ошибка: данные не найдены")
+        await state.clear()
+        return
+    
+    # Валидация сообщения
+    if len(user_message) > 500:
+        await message.answer("Сообщение слишком длинное. Максимум 500 символов.")
+        return
+    
+    # ДОБАВИТЬ: Удаляем сообщение с анкетой, на которой была нажата кнопка
+    last_message_id = data.get('last_search_message_id')
+    if last_message_id:
+        try:
+            await message.bot.delete_message(chat_id=message.chat.id, message_id=last_message_id)
+        except Exception:
+            pass
+    
+    # Добавляем лайк с сообщением
+    is_match = await db.add_like(user_id, target_user_id, game, message=user_message)
+    
+    # Отправляем обычное уведомление о лайке
+    await notify_about_like(message.bot, target_user_id, game, db)
+    
+    # Удаляем сообщение пользователя
+    try:
+        await message.delete()
+    except Exception:
+        pass
+    
+    if is_match:
+        # Обработка мэтча
+        target_profile = await db.get_user_profile(target_user_id, game)
+        await notify_about_match(message.bot, target_user_id, user_id, game, db)
+        
+        if target_profile:
+            match_text = texts.format_profile(target_profile, show_contact=True)
+            text = f"{texts.MATCH_CREATED}\n\n{match_text}"
+        else:
+            text = texts.MATCH_CREATED
+            if target_profile and target_profile.get('username'):
+                text += f"\n\n@{target_profile['username']}"
+            else:
+                text += "\n\n(У пользователя нет @username)"
+        
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="Продолжить поиск", callback_data="continue_search")],
+            [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+        ])
+        
+        await message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+        logger.info(f"Мэтч с сообщением: {user_id}  {target_user_id}")
+    else:
+        logger.info(f"Лайк с сообщением: {user_id} -> {target_user_id}")
+        # Показываем успех и переходим к следующей анкете
+        await state.set_state(SearchForm.browsing)
+        
+        # Обновляем current_index для перехода к следующему профилю
+        current_index = data.get('current_index', 0)
+        await state.update_data(current_index=current_index + 1)
+        
+        # Показываем следующий профиль
+        profiles = data.get('profiles', [])
+        next_index = current_index + 1
+        
+        if next_index >= len(profiles):
+            # Нужно загрузить больше профилей или показать конец
+            await show_search_end(message, state, game)
+        else:
+            # Показываем следующую анкету
+            await show_next_search_profile(message, state, db)
+
+async def show_next_search_profile(message: Message, state: FSMContext, db):
+    """Показ следующего профиля после отправки сообщения"""
+    data = await state.get_data()
+    profiles = data.get('profiles', [])
+    current_index = data.get('current_index', 0)
+    
+    if current_index >= len(profiles):
+        game = data.get('game')
+        await show_search_end(message, state, game)
+        return
+    
+    profile = profiles[current_index]
+    profile_text = texts.format_profile(profile)
+    text = f"Поиск игроков:\n\n{profile_text}"
+    
+    keyboard = kb.profile_actions(profile['telegram_id'])
+    
+    # ДОБАВИТЬ: Удаляем предыдущее сообщение с анкетой
+    last_message_id = data.get('last_search_message_id')
+    if last_message_id:
+        try:
+            await message.bot.delete_message(chat_id=message.chat.id, message_id=last_message_id)
+        except Exception:
+            pass
+    
+    # Отправляем новое сообщение с анкетой
+    if profile.get('photo_id'):
+        try:
+            sent_msg = await message.answer_photo(
+                photo=profile['photo_id'],
+                caption=text,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+        except Exception:
+            sent_msg = await message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+    else:
+        sent_msg = await message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+    
+    # ДОБАВИТЬ: Сохраняем ID нового сообщения
+    await state.update_data(last_search_message_id=sent_msg.message_id)
+
+async def show_search_end(message: Message, state: FSMContext, game: str):
+    """Показ сообщения о конце анкет"""
+    await state.clear()
+    game_name = settings.GAMES.get(game, game)
+    text = f"Больше анкет в {game_name} не найдено.\n\nПопробуйте изменить фильтры или вернитесь позже!"
+    
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+        [kb.InlineKeyboardButton(text="Настроить фильтры", callback_data="setup_filters")],
+        [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+    ])
+    
+    await message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+
+@router.message(SearchForm.waiting_message)
+async def wrong_message_format(message: Message):
+    """Обработка неправильного формата сообщения"""
+    await message.answer(
+        "Пожалуйста, отправьте текстовое сообщение или нажмите 'Отмена'",
+        parse_mode='HTML'
+    )
