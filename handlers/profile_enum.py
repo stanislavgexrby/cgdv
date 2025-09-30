@@ -173,7 +173,19 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
     """Показать шаг создания профиля с улучшенной навигацией"""
     data = await state.get_data()
     game = data.get('game', 'dota')
-    
+    role = data.get('role', 'player')
+
+    if role != 'player' and step in [ProfileStep.RATING, ProfileStep.PROFILE_URL, 
+                                      ProfileStep.POSITIONS, ProfileStep.GOALS]:
+        current_index = PROFILE_STEPS_ORDER.index(step)
+        # Пропускаем к следующему неигровому шагу
+        while current_index < len(PROFILE_STEPS_ORDER) - 1:
+            current_index += 1
+            step = PROFILE_STEPS_ORDER[current_index]
+            if step not in [ProfileStep.RATING, ProfileStep.PROFILE_URL, 
+                           ProfileStep.POSITIONS, ProfileStep.GOALS]:
+                break
+
     has_data = False
     if step == ProfileStep.NAME and data.get('name'):
         has_data = True
