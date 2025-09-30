@@ -579,8 +579,8 @@ async def save_goals_filter(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "role_reset", SearchForm.filters)
 async def reset_role_filter(callback: CallbackQuery, state: FSMContext):
     """Сброс фильтра по роли"""
-    await state.update_data(role_filter=None)
-    await update_filters_display(callback, state, "Фильтр по роли сброшен")
+    await state.update_data(role_filter='player')
+    await update_filters_display(callback, state, "Фильтр по роли сброшен на 'Игрок'")
 
 @router.callback_query(F.data == "rating_reset", SearchForm.filters)
 async def reset_rating_filter(callback: CallbackQuery, state: FSMContext):
