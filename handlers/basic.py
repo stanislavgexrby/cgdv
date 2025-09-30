@@ -415,7 +415,7 @@ async def view_profile(callback: CallbackQuery, db):
     profile = await db.get_user_profile(user_id, game)
 
     game_name = settings.GAMES.get(game, game)
-    profile_text = texts.format_profile(profile, show_contact=True)
+    profile_text = texts.format_profile(profile)
     text = f"Ваша анкета в {game_name}:\n\n{profile_text}"
 
     keyboard = kb.view_profile_menu()
@@ -490,7 +490,7 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
 
     game_name = settings.GAMES.get(game, game)
     current_info = f"Редактирование анкеты в {game_name}:\n\n"
-    current_info += texts.format_profile(profile, show_contact=True)
+    current_info += texts.format_profile(profile)
     current_info += "\n\nЧто хотите изменить?"
 
     role = profile.get('role', 'player')

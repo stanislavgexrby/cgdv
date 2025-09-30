@@ -28,13 +28,10 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
     # Имя с ссылкой на профиль в игре
     text = f"{user['name']} <b>{nickname_with_link}</b>, {format_age(user['age'])}\n\n"
 
-    # ← ДОБАВИТЬ: Роль
-    role_name = settings.ROLES.get(role, 'Игрок')
-    text += f"<b>Роль:</b> {role_name}\n"
-
-    # ← ДОБАВИТЬ: Для не-игроков показываем только базовую информацию
     if role != 'player':
         # Для тренера/менеджера: только страна, описание
+        role_name = settings.ROLES.get(role, 'Игрок')
+        text += f"<b>Роль:</b> {role_name}\n"
         region = user.get('region', '')
         if region == 'any':
             text += f"<b>Страна:</b> Не указана\n"

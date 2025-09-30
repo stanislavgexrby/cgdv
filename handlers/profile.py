@@ -1079,7 +1079,7 @@ async def cancel_profile_confirmed(callback: CallbackQuery, state: FSMContext, d
         
         if is_recreating and has_profile:
             game_name = settings.GAMES.get(game, game)
-            profile_text = texts.format_profile(profile, show_contact=True)
+            profile_text = texts.format_profile(profile)
             text = f"Ваша анкета в {game_name}:\n\n{profile_text}"
 
             keyboard = kb.view_profile_menu()

@@ -473,6 +473,7 @@ class Database:
                 # Инвалидация кэша
                 await self._clear_user_cache(telegram_id)
                 await self._clear_pattern_cache(f"search:*:{game}:*")
+                await self._clear_pattern_cache(f"profile:*:{game}")
 
                 logger.info(f"Профиль обновлён: {telegram_id} в {game}, роль: {role}")
                 return True

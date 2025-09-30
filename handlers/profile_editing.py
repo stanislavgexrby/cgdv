@@ -66,7 +66,7 @@ async def edit_profile(callback: CallbackQuery, db):
 
     game_name = settings.GAMES.get(game, game)
     current_info = f"Редактирование анкеты в {game_name}:\n\n"
-    current_info += texts.format_profile(profile, show_contact=True)
+    current_info += texts.format_profile(profile)
     current_info += "\n\nЧто хотите изменить?"
 
     role = profile.get('role', 'player')  # ← ДОБАВИТЬ
