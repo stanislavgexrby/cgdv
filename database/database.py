@@ -652,7 +652,7 @@ class Database:
                 WHERE p.telegram_id != $1
                     AND p.game = $2
                     AND p.telegram_id NOT IN (SELECT excluded_id FROM excluded_users)
-                    AND p.role = $7
+                    AND (p.role = $7 OR p.role IS NULL)
             ),
             filtered_profiles AS (
                 SELECT *,
@@ -690,7 +690,7 @@ class Database:
             position_filter if position_filter and position_filter != 'any' else None,
             country_filter if country_filter and country_filter != 'any' else None,
             goals_filter if goals_filter and goals_filter != 'any' else None,
-            role_filter if role_filter else None,
+            role_filter if role_filter and role_filter != 'player' else 'player',
             limit, offset
         ]
 
