@@ -714,25 +714,18 @@ async def process_message_with_like(message: Message, state: FSMContext, db):
         await message.answer("Сообщение слишком длинное. Максимум 500 символов.")
         return
     
-    # ДОБАВИТЬ: Удаляем сообщение с анкетой, на которой была нажата кнопка
-    last_message_id = data.get('last_search_message_id')
-    if last_message_id:
-        try:
-            await message.bot.delete_message(chat_id=message.chat.id, message_id=last_message_id)
-        except Exception:
-            pass
+    # Просто удаляем 2 последних сообщения (текст пользователя и анкету)
+    try:
+        await message.bot.delete_message(message.chat.id, message.message_id)  # Текст пользователя
+        await message.bot.delete_message(message.chat.id, message.message_id - 1)  # Анкета
+    except Exception:
+        pass  # Если не удалось - не страшно
     
     # Добавляем лайк с сообщением
     is_match = await db.add_like(user_id, target_user_id, game, message=user_message)
     
-    # Отправляем обычное уведомление о лайке
+    # Отправляем уведомление о лайке
     await notify_about_like(message.bot, target_user_id, game, db)
-    
-    # Удаляем сообщение пользователя
-    try:
-        await message.delete()
-    except Exception:
-        pass
     
     if is_match:
         # Обработка мэтча
@@ -755,25 +748,20 @@ async def process_message_with_like(message: Message, state: FSMContext, db):
         ])
         
         await message.answer(text, reply_markup=keyboard, parse_mode='HTML')
-        logger.info(f"Мэтч с сообщением: {user_id}  {target_user_id}")
+        logger.info(f"Мэтч с сообщением: {user_id} <-> {target_user_id}")
     else:
         logger.info(f"Лайк с сообщением: {user_id} -> {target_user_id}")
-        # Показываем успех и переходим к следующей анкете
         await state.set_state(SearchForm.browsing)
         
-        # Обновляем current_index для перехода к следующему профилю
         current_index = data.get('current_index', 0)
         await state.update_data(current_index=current_index + 1)
         
-        # Показываем следующий профиль
         profiles = data.get('profiles', [])
         next_index = current_index + 1
         
         if next_index >= len(profiles):
-            # Нужно загрузить больше профилей или показать конец
             await show_search_end(message, state, game)
         else:
-            # Показываем следующую анкету
             await show_next_search_profile(message, state, db)
 
 async def show_next_search_profile(message: Message, state: FSMContext, db):
