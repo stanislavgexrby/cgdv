@@ -134,7 +134,9 @@ WELCOME = """<b>ДОБРО ПОЖАЛОВАТЬ В Cardigans Gaming Team Finder<
 
 COMMUNITY_RULES_SIMPLE = """<b>Важная информация</b>
 
-Создавая анкету или используя бота, Вы соглашаетесь с <b><a href='https://docs.google.com/document/d/1omGgDsIxHStXpY_i21LZwQgN-qtcLAScF7OJpwYGqcA/edit?usp=sharing'>правилами сообщества</a></b>"""
+Создавая анкету или используя бота, Вы соглашаетесь с <b><a href='https://docs.google.com/document/d/1omGgDsIxHStXpY_i21LZwQgN-qtcLAScF7OJpwYGqcA/edit?usp=sharing'>правилами сообщества</a></b>
+
+Также Вы можете воспользоваться <b><a href='https://t.me/feedbackcgteamfinder'>Feedback CG Team Finder</a></b>, если у вас есть жалобы или предложения"""
 
 PROFILE_CREATED = "Анкета создана! Теперь можете искать сокомандников"
 
