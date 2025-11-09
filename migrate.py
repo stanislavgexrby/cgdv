@@ -1,3 +1,7 @@
+#!/usr/bin/env python3
+"""
+Безопасная миграция: добавление таблицы ad_posts для рекламных постов
+"""
 import asyncio
 import asyncpg
 import os
@@ -6,112 +10,126 @@ from dotenv import load_dotenv
 load_dotenv()
 
 async def migrate():
-    """Добавление поля role в таблицу profiles"""
+    """Безопасная миграция: добавление таблицы ad_posts"""
     
-    db_host = os.getenv('DB_HOST', 'localhost')
-    db_port = os.getenv('DB_PORT', '5432')
-    db_name = os.getenv('DB_NAME', 'teammates')
-    db_user = os.getenv('DB_USER', 'teammates_user')
-    db_password = os.getenv('DB_PASSWORD', '')
+    connection_url = (
+        f"postgresql://"
+        f"{os.getenv('DB_USER')}:"
+        f"{os.getenv('DB_PASSWORD')}@"
+        f"{os.getenv('DB_HOST')}:"
+        f"{os.getenv('DB_PORT')}/"
+        f"{os.getenv('DB_NAME')}"
+    )
     
-    connection_url = f"postgresql://{db_user}:{db_password}@{db_host}:{db_port}/{db_name}"
-    
+    print("🔌 Подключение к базе данных...")
     conn = await asyncpg.connect(connection_url)
     
     try:
-        print("\n" + "="*70)
-        print("🔧 МИГРАЦИЯ: Добавление поля 'role' в таблицу 'profiles'")
-        print("="*70)
-        
-        # 1. Проверяем текущую структуру
-        print("\n🔍 Проверка текущей структуры таблицы 'profiles'...")
-        columns = await conn.fetch("""
-            SELECT column_name, data_type 
-            FROM information_schema.columns
-            WHERE table_name = 'profiles'
-            ORDER BY ordinal_position
+        # 1. Проверяем существует ли уже таблица
+        print("\n🔍 Проверка существования таблицы 'ad_posts'...")
+        exists = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 
+                FROM information_schema.tables 
+                WHERE table_name = 'ad_posts'
+            )
         """)
         
-        print("\n📋 Текущие колонки:")
-        has_role = False
-        for col in columns:
-            print(f"  - {col['column_name']}: {col['data_type']}")
-            if col['column_name'] == 'role':
-                has_role = True
-        
-        if has_role:
-            print("\n⚠️  Колонка 'role' уже существует!")
+        if exists:
+            print("✅ Таблица 'ad_posts' уже существует. Миграция не требуется.")
             return
         
-        # 2. Считаем записи
-        count = await conn.fetchval("SELECT COUNT(*) FROM profiles")
-        print(f"\n📊 Найдено записей в таблице: {count}")
+        # 2. Показываем текущие таблицы
+        print("\n📊 Текущие таблицы в БД:")
+        tables = await conn.fetch("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public'
+            ORDER BY table_name
+        """)
+        for table in tables:
+            print(f"  - {table['table_name']}")
         
         # 3. Подтверждение
-        print("\n⚠️  ВНИМАНИЕ!")
-        print("Будет добавлена колонка 'role' с типом TEXT")
-        print("Всем существующим анкетам будет присвоена роль 'player'")
-        confirm = input("\nПродолжить миграцию? (yes/no): ").strip().lower()
+        print("\n⚠️  Будет создана новая таблица 'ad_posts':")
+        print("""
+    CREATE TABLE ad_posts (
+        id SERIAL PRIMARY KEY,
+        message_id BIGINT NOT NULL,
+        chat_id BIGINT NOT NULL,
+        caption TEXT,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_by BIGINT,
+        show_interval INTEGER DEFAULT 3
+    )
+        """)
+        print("\n   Это безопасная операция, которая:")
+        print("   - Создаст новую таблицу без изменения существующих")
+        print("   - Не затронет данные пользователей")
+        print("   - Займет менее 1 секунды")
+        
+        confirm = input("\n❓ Продолжить? (yes/no): ").strip().lower()
         
         if confirm != 'yes':
-            print("❌ Миграция отменена")
+            print("❌ Миграция отменена пользователем")
             return
         
         # 4. Выполняем миграцию
-        print("\n⏳ Выполнение миграции...")
+        print("\n⏳ Создание таблицы ad_posts...")
+        await conn.execute('''
+            CREATE TABLE ad_posts (
+                id SERIAL PRIMARY KEY,
+                message_id BIGINT NOT NULL,
+                chat_id BIGINT NOT NULL,
+                caption TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_by BIGINT,
+                show_interval INTEGER DEFAULT 3
+            )
+        ''')
+        print("✅ Таблица 'ad_posts' успешно создана!")
         
-        # Добавляем колонку
-        await conn.execute("""
-            ALTER TABLE profiles 
-            ADD COLUMN role TEXT DEFAULT 'player' NOT NULL
-        """)
-        print("✅ Колонка 'role' добавлена")
-        
-        # Проставляем всем существующим анкетам роль 'player'
-        updated = await conn.execute("""
-            UPDATE profiles 
-            SET role = 'player' 
-            WHERE role IS NULL OR role = ''
-        """)
-        print(f"✅ Обновлено записей: {updated}")
-        
-        # 5. Создаём индекс для оптимизации поиска
-        await conn.execute("""
-            CREATE INDEX IF NOT EXISTS idx_profiles_game_role 
-            ON profiles(game, role)
-        """)
-        print("✅ Индекс idx_profiles_game_role создан")
+        # 5. Создаем индексы для производительности
+        print("\n⏳ Создание индексов...")
+        await conn.execute('''
+            CREATE INDEX IF NOT EXISTS idx_ad_posts_active 
+            ON ad_posts(is_active) 
+            WHERE is_active = TRUE
+        ''')
+        print("✅ Индексы созданы!")
         
         # 6. Проверяем результат
         print("\n🔍 Проверка результата...")
-        new_structure = await conn.fetch("""
-            SELECT column_name, data_type, is_nullable, column_default
-            FROM information_schema.columns
-            WHERE table_name = 'profiles'
-            ORDER BY ordinal_position
+        new_table_exists = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 
+                FROM information_schema.tables 
+                WHERE table_name = 'ad_posts'
+            )
         """)
         
-        print("\n📊 Обновлённая структура таблицы 'profiles':")
-        for col in new_structure:
-            marker = "✨ NEW" if col['column_name'] == 'role' else ""
-            print(f"  - {col['column_name']}: {col['data_type']} "
-                  f"(nullable: {col['is_nullable']}, default: {col['column_default']}) {marker}")
-        
-        # 7. Проверяем данные
-        role_stats = await conn.fetch("""
-            SELECT role, COUNT(*) as count 
-            FROM profiles 
-            GROUP BY role
-        """)
-        
-        print("\n📈 Статистика по ролям:")
-        for stat in role_stats:
-            print(f"   {stat['role']}: {stat['count']}")
+        if new_table_exists:
+            print("✅ Таблица успешно создана и доступна!")
+            
+            # Показываем структуру
+            columns = await conn.fetch("""
+                SELECT column_name, data_type, is_nullable
+                FROM information_schema.columns
+                WHERE table_name = 'ad_posts'
+                ORDER BY ordinal_position
+            """)
+            print("\n📊 Структура таблицы 'ad_posts':")
+            for col in columns:
+                print(f"  - {col['column_name']}: {col['data_type']} (nullable: {col['is_nullable']})")
         
         print("\n✅ Миграция успешно завершена!")
+        print("📝 Теперь можно перезапустить бота")
         
     except Exception as e:
         print(f"\n❌ ОШИБКА при выполнении миграции: {e}")
+        print("💡 База данных не была изменена")
         raise
     
     finally:
@@ -119,6 +137,10 @@ async def migrate():
         print("\n🔌 Соединение с БД закрыто")
 
 if __name__ == "__main__":
+    print("=" * 70)
+    print("🔧 МИГРАЦИЯ: Добавление таблицы ad_posts для рекламных постов")
+    print("=" * 70)
+    
     try:
         asyncio.run(migrate())
     except KeyboardInterrupt:

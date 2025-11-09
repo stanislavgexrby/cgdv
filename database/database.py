@@ -190,6 +190,19 @@ class Database:
                 )
             ''')
 
+            await conn.execute('''
+                CREATE TABLE IF NOT EXISTS ad_posts (
+                    id SERIAL PRIMARY KEY,
+                    message_id BIGINT NOT NULL,
+                    chat_id BIGINT NOT NULL,
+                    caption TEXT,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_by BIGINT,
+                    show_interval INTEGER DEFAULT 3
+                )
+            ''')
+
             optimized_indexes = [
                 # === ОСНОВНЫЕ ИНДЕКСЫ ===
                 "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_profiles_game ON profiles(game)",
@@ -1041,6 +1054,76 @@ class Database:
                 "UPDATE reports SET status=$1, reviewed_at=CURRENT_TIMESTAMP, admin_id=$2 WHERE id=$3",
                 status, admin_id, report_id
             )
+            return True
+
+    # === РЕКЛАМНЫЕ ПОСТЫ ===
+
+    async def add_ad_post(self, message_id: int, chat_id: int, caption: str, admin_id: int, show_interval: int = 3) -> int:
+        """Добавление рекламного поста"""
+        async with self._pg_pool.acquire() as conn:
+            post_id = await conn.fetchval(
+                """INSERT INTO ad_posts (message_id, chat_id, caption, created_by, show_interval)
+                   VALUES ($1, $2, $3, $4, $5)
+                   RETURNING id""",
+                message_id, chat_id, caption, admin_id, show_interval
+            )
+            await self._redis.delete("active_ads")
+            logger.info(f"Добавлен рекламный пост #{post_id}")
+            return post_id
+
+    async def get_active_ads(self) -> List[Dict]:
+        """Получение всех активных рекламных постов с кэшированием"""
+        cache_key = "active_ads"
+        cached = await self._get_cache(cache_key)
+        if cached:
+            return cached
+
+        async with self._pg_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM ad_posts WHERE is_active = TRUE ORDER BY created_at DESC"
+            )
+            result = [dict(row) for row in rows]
+            await self._set_cache(cache_key, result, 600)
+            return result
+
+    async def get_all_ads(self) -> List[Dict]:
+        """Получение всех рекламных постов для админ панели"""
+        async with self._pg_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM ad_posts ORDER BY created_at DESC"
+            )
+            return [dict(row) for row in rows]
+
+    async def toggle_ad_status(self, ad_id: int) -> bool:
+        """Переключение статуса рекламы (вкл/выкл)"""
+        async with self._pg_pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE ad_posts SET is_active = NOT is_active WHERE id = $1",
+                ad_id
+            )
+            await self._redis.delete("active_ads")
+            return True
+
+    async def update_ad_interval(self, ad_id: int, interval: int) -> bool:
+        """Обновление интервала показа рекламы"""
+        try:
+            async with self._pg_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE ad_posts SET show_interval = $1 WHERE id = $2",
+                    interval, ad_id
+                )
+                await self._redis.delete("active_ads")
+                logger.info(f"Обновлён интервал рекламы #{ad_id}: {interval}")
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка обновления интервала рекламы #{ad_id}: {e}")
+            return False
+
+    async def delete_ad_post(self, ad_id: int) -> bool:
+        """Удаление рекламного поста"""
+        async with self._pg_pool.acquire() as conn:
+            await conn.execute("DELETE FROM ad_posts WHERE id = $1", ad_id)
+            await self._redis.delete("active_ads")
             return True
 
     # === СЛУЖЕБНЫЕ МЕТОДЫ ===

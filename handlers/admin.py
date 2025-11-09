@@ -2,13 +2,23 @@ import logging
 import contextlib
 from datetime import datetime, timedelta
 from aiogram import Router, F
-from aiogram.types import CallbackQuery, InputMediaPhoto
+from aiogram.types import CallbackQuery, Message, InputMediaPhoto
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 import keyboards.keyboards as kb
 import utils.texts as texts
 import config.settings as settings
 from handlers.basic import admin_only, safe_edit_message
 from handlers.notifications import notify_user_banned, notify_user_unbanned, notify_profile_deleted
+
+# ==================== FSM СОСТОЯНИЯ ====================
+
+class AdminAdForm(StatesGroup):
+    waiting_ad_message = State()
+    waiting_ad_caption = State()
+    waiting_interval_choice = State()
+    editing_interval = State()
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -65,7 +75,7 @@ async def show_admin_stats(callback: CallbackQuery, db):
     """Показ статистики бота"""
     lines = ["Статистика бота", "", "База данных: PostgreSQL"]
 
-    # Redis статус
+    # Redis
     try:
         if hasattr(db, '_redis'):
             pong = await db._redis.ping()
@@ -75,7 +85,7 @@ async def show_admin_stats(callback: CallbackQuery, db):
     except Exception:
         lines.append("Redis: ❌ Ошибка")
 
-    # Проверка подключения к PostgreSQL
+    # PostgreSQL
     if not hasattr(db, '_pg_pool') or db._pg_pool is None:
         lines.append("⚠️ Нет подключения к PostgreSQL.")
         await safe_edit_message(callback, "\n".join(lines), kb.admin_back_menu())
@@ -214,7 +224,7 @@ async def navigate_reports(callback: CallbackQuery, db):
     if len(parts) < 3:
         return
         
-    direction = parts[2]  # prev или next
+    direction = parts[2]
     current_index = int(parts[3]) if len(parts) > 3 else 0
     
     reports = await db.get_pending_reports()
@@ -385,3 +395,282 @@ async def navigate_bans(callback: CallbackQuery, db):
     else:
         message = "Это последний бан" if direction == "next" else "Это первый бан"
         await callback.answer(message, show_alert=True)
+
+# ==================== УПРАВЛЕНИЕ РЕКЛАМОЙ ====================
+
+@router.callback_query(F.data == "admin_ads")
+@admin_only
+async def admin_ads_menu(callback: CallbackQuery, db):
+    """Меню управления рекламой - список всех постов"""
+    ads = await db.get_all_ads()
+    
+    if not ads:
+        text = "📢 Рекламные посты\n\nНет рекламных постов.\n\nДобавьте первый пост, переслав боту сообщение с рекламой."
+        await safe_edit_message(callback, text, kb.admin_ads_menu_empty())
+    else:
+        text = "📢 Управление рекламными постами:\n\n"
+        for ad in ads:
+            status = "✅" if ad['is_active'] else "❌"
+            text += f"{status} <b>#{ad['id']}</b> - {ad['caption']}\n"
+            text += f"   📊 Показ: каждые <b>{ad['show_interval']}</b> анкет\n\n"
+        
+        text += "\n💡 Нажмите на пост для управления"
+        
+        await safe_edit_message(callback, text, kb.admin_ads_menu_list(ads))
+    
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("ad_view_"))
+@admin_only
+async def view_ad_details(callback: CallbackQuery, db):
+    """Просмотр деталей конкретной рекламы"""
+    try:
+        ad_id = int(callback.data.split("_")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+    
+    ads = await db.get_all_ads()
+    ad = next((a for a in ads if a['id'] == ad_id), None)
+    
+    if not ad:
+        await callback.answer("Реклама не найдена", show_alert=True)
+        await admin_ads_menu(callback, db)
+        return
+    
+    status = "✅ Активна" if ad['is_active'] else "❌ Выключена"
+    created = ad['created_at'].strftime("%d.%m.%Y %H:%M") if hasattr(ad['created_at'], 'strftime') else str(ad['created_at'])[:16]
+    
+    text = (f"📢 Рекламный пост <b>#{ad['id']}</b>\n\n"
+            f"<b>Название:</b> {ad['caption']}\n"
+            f"<b>Статус:</b> {status}\n"
+            f"<b>Интервал показа:</b> каждые {ad['show_interval']} анкет\n"
+            f"<b>Создан:</b> {created}\n\n"
+            f"<b>Управление:</b>")
+    
+    await safe_edit_message(callback, text, kb.admin_ad_actions(ad))
+    await callback.answer()
+
+@router.callback_query(F.data == "admin_add_ad")
+@admin_only
+async def start_add_ad(callback: CallbackQuery, state: FSMContext):
+    """Начало добавления рекламы"""
+    await state.set_state(AdminAdForm.waiting_ad_message)
+    text = ("📢 Добавление рекламного поста\n\n"
+            "<b>Шаг 1/3: Перешлите боту сообщение с рекламой</b>\n\n"
+            "Сообщение может содержать:\n"
+            "• Текст с форматированием\n"
+            "• Фото или видео\n"
+            "• Ссылки и кнопки\n\n"
+            "Оно будет показываться пользователям во время поиска анкет.")
+    
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+        [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_ads")]
+    ])
+    await safe_edit_message(callback, text, keyboard)
+    await callback.answer()
+
+@router.message(AdminAdForm.waiting_ad_message)
+async def receive_ad_message(message: Message, state: FSMContext, db):
+    """Получение рекламного сообщения"""
+    await state.update_data(
+        message_id=message.message_id,
+        chat_id=message.chat.id
+    )
+    
+    await state.set_state(AdminAdForm.waiting_ad_caption)
+    await message.answer(
+        "✅ Сообщение получено!\n\n<b>Шаг 2/3: Отправьте краткое название</b>\n\nЭто название будет видно только в админ панели для удобства управления.",
+        reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_ads")]
+        ]),
+        parse_mode='HTML'
+    )
+
+@router.message(AdminAdForm.waiting_ad_caption)
+async def receive_ad_caption(message: Message, state: FSMContext, db):
+    """Получение названия рекламы и переход к выбору интервала"""
+    caption = message.text[:100] if message.text else "Без названия"
+    
+    await state.update_data(caption=caption)
+    await state.set_state(AdminAdForm.waiting_interval_choice)
+    
+    text = (f"✅ Название сохранено: <b>{caption}</b>\n\n"
+            f"<b>Шаг 3/3: Выберите интервал показа</b>\n\n"
+            f"Через сколько анкет показывать эту рекламу?")
+    
+    await message.answer(
+        text,
+        reply_markup=kb.interval_choice_keyboard(),
+        parse_mode='HTML'
+    )
+
+@router.callback_query(F.data.startswith("interval_"), AdminAdForm.waiting_interval_choice)
+async def select_interval_for_new_ad(callback: CallbackQuery, state: FSMContext, db):
+    """Выбор интервала при создании новой рекламы"""
+    try:
+        interval = int(callback.data.split("_")[1])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка", show_alert=True)
+        return
+    
+    data = await state.get_data()
+    
+    ad_id = await db.add_ad_post(
+        message_id=data['message_id'],
+        chat_id=data['chat_id'],
+        caption=data['caption'],
+        admin_id=callback.from_user.id,
+        show_interval=interval
+    )
+    
+    await state.clear()
+    
+    text = (f"✅ Рекламный пост <b>#{ad_id}</b> создан!\n\n"
+            f"<b>Название:</b> {data['caption']}\n"
+            f"<b>Интервал:</b> каждые {interval} анкет\n\n"
+            f"Пост автоматически активен и будет показываться пользователям.")
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=kb.admin_back_menu(),
+        parse_mode='HTML'
+    )
+    await callback.answer("✅ Реклама добавлена!")
+
+@router.callback_query(F.data.startswith("ad_toggle_"))
+@admin_only
+async def toggle_ad_status(callback: CallbackQuery, db):
+    """Включение/выключение рекламы"""
+    try:
+        ad_id = int(callback.data.split("_")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+    
+    await db.toggle_ad_status(ad_id)
+    await callback.answer("✅ Статус изменён")
+    await view_ad_details(callback, db)
+
+@router.callback_query(F.data.startswith("ad_interval_"))
+@admin_only
+async def start_edit_interval(callback: CallbackQuery, state: FSMContext, db):
+    """Начало редактирования интервала"""
+    try:
+        ad_id = int(callback.data.split("_")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+    
+    ads = await db.get_all_ads()
+    ad = next((a for a in ads if a['id'] == ad_id), None)
+    
+    if not ad:
+        await callback.answer("Реклама не найдена", show_alert=True)
+        return
+    
+    await state.update_data(editing_ad_id=ad_id)
+    await state.set_state(AdminAdForm.editing_interval)
+    
+    text = (f"📢 Пост <b>#{ad_id}</b>: {ad['caption']}\n\n"
+            f"<b>Текущий интервал:</b> каждые {ad['show_interval']} анкет\n\n"
+            f"<b>Выберите новый интервал показа:</b>")
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=kb.interval_choice_keyboard(ad_id, current_interval=ad['show_interval']),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("setint_"), AdminAdForm.editing_interval)
+async def apply_new_interval(callback: CallbackQuery, state: FSMContext, db):
+    """Применение нового интервала"""
+    try:
+        parts = callback.data.split("_")
+        ad_id = int(parts[1])
+        interval = int(parts[2])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка данных", show_alert=True)
+        return
+    
+    data = await state.get_data()
+    if data.get('editing_ad_id') != ad_id:
+        await callback.answer("Ошибка: несовпадение ID", show_alert=True)
+        return
+    
+    success = await db.update_ad_interval(ad_id, interval)
+    await state.clear()
+    
+    if success:
+        ads = await db.get_all_ads()
+        ad = next((a for a in ads if a['id'] == ad_id), None)
+        
+        if not ad:
+            await callback.answer("Ошибка: реклама не найдена", show_alert=True)
+            return
+        
+        status = "✅ Активна" if ad['is_active'] else "❌ Выключена"
+        created = ad['created_at'].strftime("%d.%m.%Y %H:%M") if hasattr(ad['created_at'], 'strftime') else str(ad['created_at'])[:16]
+        
+        text = (f"📢 Рекламный пост <b>#{ad['id']}</b>\n\n"
+                f"<b>Название:</b> {ad['caption']}\n"
+                f"<b>Статус:</b> {status}\n"
+                f"<b>Интервал показа:</b> каждые {ad['show_interval']} анкет\n"
+                f"<b>Создан:</b> {created}\n\n"
+                f"<b>Управление:</b>")
+        
+        await callback.message.edit_text(
+            text,
+            reply_markup=kb.admin_ad_actions(ad),
+            parse_mode='HTML'
+        )
+        await callback.answer(f"✅ Интервал изменён на {interval}")
+    else:
+        await callback.answer("❌ Ошибка обновления", show_alert=True)
+
+@router.callback_query(F.data.startswith("ad_delete_"))
+@admin_only
+async def confirm_delete_ad(callback: CallbackQuery):
+    """Подтверждение удаления рекламы"""
+    try:
+        ad_id = int(callback.data.split("_")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+    
+    text = "⚠️ Вы уверены?\n\nЭто действие нельзя отменить."
+    
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+        [
+            kb.InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"ad_del_confirm_{ad_id}"),
+            kb.InlineKeyboardButton(text="❌ Отмена", callback_data=f"ad_view_{ad_id}")
+        ]
+    ])
+    
+    await callback.message.edit_text(text, reply_markup=keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("ad_del_confirm_"))
+@admin_only
+async def delete_ad_confirmed(callback: CallbackQuery, db):
+    """Подтверждённое удаление рекламы"""
+    try:
+        ad_id = int(callback.data.split("_")[3])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+    
+    success = await db.delete_ad_post(ad_id)
+    
+    if success:
+        await callback.answer("✅ Реклама удалена", show_alert=True)
+        await admin_ads_menu(callback, db)
+    else:
+        await callback.answer("❌ Ошибка удаления", show_alert=True)
+
+@router.callback_query(F.data == "ad_back_to_list")
+async def back_to_ads_list(callback: CallbackQuery, state: FSMContext, db):
+    """Возврат к списку реклам"""
+    await state.clear()
+    await admin_ads_menu(callback, db)

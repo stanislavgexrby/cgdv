@@ -640,6 +640,7 @@ def admin_main_menu() -> InlineKeyboardMarkup:
     """Главное меню админ-панели"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="Реклама", callback_data="admin_ads")],
         [InlineKeyboardButton(text="Жалобы", callback_data="admin_reports")],
         [InlineKeyboardButton(text="Баны", callback_data="admin_bans")],
         [InlineKeyboardButton(text="Главное меню", callback_data="back_to_games")]
@@ -700,4 +701,82 @@ def admin_ban_actions_with_nav(user_id: int, current_index: int, total_count: in
 
     buttons.append([InlineKeyboardButton(text="Админ меню", callback_data="admin_back")])
 
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+# ==================== РЕКЛАМА ====================
+
+def admin_ads_menu_empty() -> InlineKeyboardMarkup:
+    """Меню рекламы когда нет постов"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Добавить пост", callback_data="admin_add_ad")],
+        [InlineKeyboardButton(text="◀️ Админ меню", callback_data="admin_back")]
+    ])
+
+def admin_ads_menu_list(ads: list) -> InlineKeyboardMarkup:
+    """Меню со списком реклам (кликабельные)"""
+    buttons = []
+    
+    for ad in ads:
+        status_emoji = "✅" if ad['is_active'] else "❌"
+        button_text = f"{status_emoji} #{ad['id']} {ad['caption'][:30]}"
+        buttons.append([
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"ad_view_{ad['id']}"
+            )
+        ])
+    
+    buttons.append([InlineKeyboardButton(text="➕ Добавить пост", callback_data="admin_add_ad")])
+    buttons.append([InlineKeyboardButton(text="◀️ Админ меню", callback_data="admin_back")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def admin_ad_actions(ad: dict) -> InlineKeyboardMarkup:
+    """Действия с конкретной рекламой"""
+    ad_id = ad['id']
+    is_active = ad['is_active']
+    
+    toggle_text = "⏸️ Выключить" if is_active else "▶️ Включить"
+    
+    buttons = [
+        [InlineKeyboardButton(text=toggle_text, callback_data=f"ad_toggle_{ad_id}")],
+        [InlineKeyboardButton(text="📊 Изменить интервал", callback_data=f"ad_interval_{ad_id}")],
+        [InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"ad_delete_{ad_id}")],
+        [InlineKeyboardButton(text="◀️ К списку", callback_data="ad_back_to_list")]
+    ]
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def interval_choice_keyboard(ad_id: int = None, current_interval: int = None) -> InlineKeyboardMarkup:
+    """Клавиатура выбора интервала показа рекламы"""
+    intervals = [1, 2, 3, 5, 7, 10, 15, 20]
+    
+    buttons = []
+    row = []
+    
+    for interval in intervals:
+        if current_interval and interval == current_interval:
+            button_text = f"• {interval} •"
+        else:
+            button_text = str(interval)
+        
+        if ad_id is not None:
+            callback = f"setint_{ad_id}_{interval}"
+        else:
+            callback = f"interval_{interval}"
+        
+        row.append(InlineKeyboardButton(text=button_text, callback_data=callback))
+        
+        if len(row) == 4:
+            buttons.append(row)
+            row = []
+    
+    if row:
+        buttons.append(row)
+    
+    if ad_id is not None:
+        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"ad_view_{ad_id}")])
+    else:
+        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="admin_ads")])
+    
     return InlineKeyboardMarkup(inline_keyboard=buttons)
