@@ -1,4 +1,7 @@
-# migration_add_message.py
+#!/usr/bin/env python3
+"""
+Безопасная миграция: добавление таблицы ad_posts для рекламных постов
+"""
 import asyncio
 import asyncpg
 import os
@@ -7,9 +10,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 async def migrate():
-    """Безопасная миграция: добавление колонки message в таблицу likes"""
+    """Безопасная миграция: добавление таблицы ad_posts"""
     
-    # Подключение к БД
     connection_url = (
         f"postgresql://"
         f"{os.getenv('DB_USER')}:"
@@ -23,43 +25,48 @@ async def migrate():
     conn = await asyncpg.connect(connection_url)
     
     try:
-        # 1. Проверяем существует ли уже колонка
-        print("\n🔍 Проверка существования колонки 'message'...")
+        # 1. Проверяем существует ли уже таблица
+        print("\n🔍 Проверка существования таблицы 'ad_posts'...")
         exists = await conn.fetchval("""
             SELECT EXISTS (
                 SELECT 1 
-                FROM information_schema.columns 
-                WHERE table_name = 'likes' 
-                AND column_name = 'message'
+                FROM information_schema.tables 
+                WHERE table_name = 'ad_posts'
             )
         """)
         
         if exists:
-            print("✅ Колонка 'message' уже существует. Миграция не требуется.")
+            print("✅ Таблица 'ad_posts' уже существует. Миграция не требуется.")
             return
         
-        # 2. Показываем текущее состояние
-        print("\n📊 Текущая структура таблицы 'likes':")
-        columns = await conn.fetch("""
-            SELECT column_name, data_type, is_nullable
-            FROM information_schema.columns
-            WHERE table_name = 'likes'
-            ORDER BY ordinal_position
+        # 2. Показываем текущие таблицы
+        print("\n📊 Текущие таблицы в БД:")
+        tables = await conn.fetch("""
+            SELECT table_name 
+            FROM information_schema.tables 
+            WHERE table_schema = 'public'
+            ORDER BY table_name
         """)
-        for col in columns:
-            print(f"  - {col['column_name']}: {col['data_type']} (nullable: {col['is_nullable']})")
+        for table in tables:
+            print(f"  - {table['table_name']}")
         
-        # 3. Показываем количество записей
-        count = await conn.fetchval("SELECT COUNT(*) FROM likes")
-        print(f"\n📈 Количество записей в 'likes': {count}")
-        
-        # 4. Подтверждение
-        print("\n⚠️  Будет выполнена миграция:")
-        print("   ALTER TABLE likes ADD COLUMN message TEXT;")
+        # 3. Подтверждение
+        print("\n⚠️  Будет создана новая таблица 'ad_posts':")
+        print("""
+    CREATE TABLE ad_posts (
+        id SERIAL PRIMARY KEY,
+        message_id BIGINT NOT NULL,
+        chat_id BIGINT NOT NULL,
+        caption TEXT,
+        is_active BOOLEAN DEFAULT TRUE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_by BIGINT,
+        show_interval INTEGER DEFAULT 3
+    )
+        """)
         print("\n   Это безопасная операция, которая:")
-        print("   - Добавит новую колонку 'message' типа TEXT")
-        print("   - Значение по умолчанию: NULL")
-        print("   - Не изменит существующие данные")
+        print("   - Создаст новую таблицу без изменения существующих")
+        print("   - Не затронет данные пользователей")
         print("   - Займет менее 1 секунды")
         
         confirm = input("\n❓ Продолжить? (yes/no): ").strip().lower()
@@ -68,33 +75,54 @@ async def migrate():
             print("❌ Миграция отменена пользователем")
             return
         
-        # 5. Выполняем миграцию
-        print("\n⏳ Выполнение миграции...")
-        await conn.execute("ALTER TABLE likes ADD COLUMN message TEXT")
-        print("✅ Колонка 'message' успешно добавлена!")
+        # 4. Выполняем миграцию
+        print("\n⏳ Создание таблицы ad_posts...")
+        await conn.execute('''
+            CREATE TABLE ad_posts (
+                id SERIAL PRIMARY KEY,
+                message_id BIGINT NOT NULL,
+                chat_id BIGINT NOT NULL,
+                caption TEXT,
+                is_active BOOLEAN DEFAULT TRUE,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                created_by BIGINT,
+                show_interval INTEGER DEFAULT 3
+            )
+        ''')
+        print("✅ Таблица 'ad_posts' успешно создана!")
+        
+        # 5. Создаем индексы для производительности
+        print("\n⏳ Создание индексов...")
+        await conn.execute('''
+            CREATE INDEX IF NOT EXISTS idx_ad_posts_active 
+            ON ad_posts(is_active) 
+            WHERE is_active = TRUE
+        ''')
+        print("✅ Индексы созданы!")
         
         # 6. Проверяем результат
         print("\n🔍 Проверка результата...")
-        new_structure = await conn.fetch("""
-            SELECT column_name, data_type, is_nullable
-            FROM information_schema.columns
-            WHERE table_name = 'likes'
-            ORDER BY ordinal_position
+        new_table_exists = await conn.fetchval("""
+            SELECT EXISTS (
+                SELECT 1 
+                FROM information_schema.tables 
+                WHERE table_name = 'ad_posts'
+            )
         """)
         
-        print("\n📊 Новая структура таблицы 'likes':")
-        for col in new_structure:
-            marker = "✨ NEW" if col['column_name'] == 'message' else ""
-            print(f"  - {col['column_name']}: {col['data_type']} (nullable: {col['is_nullable']}) {marker}")
-        
-        # 7. Проверяем что данные не повреждены
-        count_after = await conn.fetchval("SELECT COUNT(*) FROM likes")
-        print(f"\n📈 Количество записей после миграции: {count_after}")
-        
-        if count == count_after:
-            print("✅ Все записи сохранены!")
-        else:
-            print("⚠️  ВНИМАНИЕ: Количество записей изменилось!")
+        if new_table_exists:
+            print("✅ Таблица успешно создана и доступна!")
+            
+            # Показываем структуру
+            columns = await conn.fetch("""
+                SELECT column_name, data_type, is_nullable
+                FROM information_schema.columns
+                WHERE table_name = 'ad_posts'
+                ORDER BY ordinal_position
+            """)
+            print("\n📊 Структура таблицы 'ad_posts':")
+            for col in columns:
+                print(f"  - {col['column_name']}: {col['data_type']} (nullable: {col['is_nullable']})")
         
         print("\n✅ Миграция успешно завершена!")
         print("📝 Теперь можно перезапустить бота")
@@ -110,7 +138,7 @@ async def migrate():
 
 if __name__ == "__main__":
     print("=" * 70)
-    print("🔧 МИГРАЦИЯ: Добавление колонки 'message' в таблицу 'likes'")
+    print("🔧 МИГРАЦИЯ: Добавление таблицы ad_posts для рекламных постов")
     print("=" * 70)
     
     try:

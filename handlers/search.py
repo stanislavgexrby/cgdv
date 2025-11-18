@@ -1,4 +1,5 @@
 import logging
+import random
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -18,26 +19,38 @@ router = Router()
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
 async def update_filters_display(callback: CallbackQuery, state: FSMContext, message: str = None):
-    """Отображение текущих фильтров"""
+    """Отображение текущих фильтров с учётом роли"""
     data = await state.get_data()
     game = data.get('game', 'dota')
     game_name = settings.GAMES.get(game, game)
+    role_filter = data.get('role_filter', 'player')
 
     filters_text = []
 
-    rating_filter = data.get('rating_filter')
-    if rating_filter:
-        rating_name = settings.RATINGS[game].get(rating_filter, rating_filter)
-        filters_text.append(f"<b>Рейтинг:</b> {rating_name}")
-    else:
-        filters_text.append("<b>Рейтинг:</b> не указан")
+    role_name = settings.ROLES.get(role_filter, 'Игрок')
+    filters_text.append(f"<b>Роль:</b> {role_name}")
 
-    position_filter = data.get('position_filter')
-    if position_filter:
-        position_name = settings.POSITIONS[game].get(position_filter, position_filter)
-        filters_text.append(f"<b>Позиция:</b> {position_name}")
-    else:
-        filters_text.append("<b>Позиция:</b> не указана")
+    if role_filter == 'player':
+        rating_filter = data.get('rating_filter')
+        if rating_filter:
+            rating_name = settings.RATINGS[game].get(rating_filter, rating_filter)
+            filters_text.append(f"<b>Рейтинг:</b> {rating_name}")
+        else:
+            filters_text.append("<b>Рейтинг:</b> не указан")
+
+        position_filter = data.get('position_filter')
+        if position_filter:
+            position_name = settings.POSITIONS[game].get(position_filter, position_filter)
+            filters_text.append(f"<b>Позиция:</b> {position_name}")
+        else:
+            filters_text.append("<b>Позиция:</b> не указана")
+
+        goals_filter = data.get('goals_filter')
+        if goals_filter:
+            goals_name = settings.GOALS.get(goals_filter, goals_filter)
+            filters_text.append(f"<b>Цель:</b> {goals_name}")
+        else:
+            filters_text.append("<b>Цель:</b> не указана")
 
     country_filter = data.get('country_filter')
     if country_filter:
@@ -45,43 +58,48 @@ async def update_filters_display(callback: CallbackQuery, state: FSMContext, mes
         filters_text.append(f"<b>Страна:</b> {country_name}")
     else:
         filters_text.append("<b>Страна:</b> не указана")
-
-    goals_filter = data.get('goals_filter')
-    if goals_filter:
-        goals_name = settings.GOALS.get(goals_filter, goals_filter)
-        filters_text.append(f"<b>Цель:</b> {goals_name}")
-    else:
-        filters_text.append("<b>Цель:</b> не указана")
 
     text = f"Настройка фильтров для {game_name}\n\n"
     text += "\n".join(filters_text)
     text += "\n\nВыберите что настроить:"
 
-    await safe_edit_message(callback, text, kb.filters_setup_menu())
+    await safe_edit_message(callback, text, kb.filters_setup_menu(role_filter))
 
     if message:
         await callback.answer(message)
 
 async def get_full_filters_display(data: dict) -> str:
-    """Полное отображение всех фильтров как в меню настройки"""
+    """Полное отображение всех фильтров с учётом роли"""
     game = data.get('game', 'dota')
     game_name = settings.GAMES.get(game, game)
+    role_filter = data.get('role_filter', 'player')
 
     filters_text = []
 
-    rating_filter = data.get('rating_filter')
-    if rating_filter:
-        rating_name = settings.RATINGS[game].get(rating_filter, rating_filter)
-        filters_text.append(f"<b>Рейтинг:</b> {rating_name}")
-    else:
-        filters_text.append("<b>Рейтинг:</b> не указан")
+    role_name = settings.ROLES.get(role_filter, 'Игрок')
+    filters_text.append(f"<b>Роль:</b> {role_name}")
 
-    position_filter = data.get('position_filter')
-    if position_filter:
-        position_name = settings.POSITIONS[game].get(position_filter, position_filter)
-        filters_text.append(f"<b>Позиция:</b> {position_name}")
-    else:
-        filters_text.append("<b>Позиция:</b> не указана")
+    if role_filter == 'player':
+        rating_filter = data.get('rating_filter')
+        if rating_filter:
+            rating_name = settings.RATINGS[game].get(rating_filter, rating_filter)
+            filters_text.append(f"<b>Рейтинг:</b> {rating_name}")
+        else:
+            filters_text.append("<b>Рейтинг:</b> не указан")
+
+        position_filter = data.get('position_filter')
+        if position_filter:
+            position_name = settings.POSITIONS[game].get(position_filter, position_filter)
+            filters_text.append(f"<b>Позиция:</b> {position_name}")
+        else:
+            filters_text.append("<b>Позиция:</b> не указана")
+
+        goals_filter = data.get('goals_filter')
+        if goals_filter:
+            goals_name = settings.GOALS.get(goals_filter, goals_filter)
+            filters_text.append(f"<b>Цель:</b> {goals_name}")
+        else:
+            filters_text.append("<b>Цель:</b> не указана")
 
     country_filter = data.get('country_filter')
     if country_filter:
@@ -89,13 +107,6 @@ async def get_full_filters_display(data: dict) -> str:
         filters_text.append(f"<b>Страна:</b> {country_name}")
     else:
         filters_text.append("<b>Страна:</b> не указана")
-
-    goals_filter = data.get('goals_filter')
-    if goals_filter:
-        goals_name = settings.GOALS.get(goals_filter, goals_filter)
-        filters_text.append(f"<b>Цель:</b> {goals_name}")
-    else:
-        filters_text.append("<b>Цель:</b> не указана")
 
     text = f"Поиск в {game_name}\n\n"
     text += "\n".join(filters_text)
@@ -108,10 +119,24 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
     user_id = callback.from_user.id
     data = await state.get_data()
     
+    current_index = data.get('current_index', 0)
+    profiles_shown = data.get('profiles_shown', 0)
+    profiles = data.get('profiles', [])
+    
+    logger.info(f"🔶 handle_search_action: action={action}, current_index={current_index}, profiles_shown={profiles_shown}")
+    
     if 'game' not in data:
         user = await db.get_user(user_id)
         game = user['current_game']
-        await state.update_data(game=game)
+        
+        await state.update_data(
+            game=game,
+            current_index=current_index,
+            profiles_shown=profiles_shown,
+            profiles=profiles,
+            user_id=user_id
+        )
+        logger.warning(f"⚠️ Восстановлена game в handle_search_action, сохранены: current_index={current_index}, profiles_shown={profiles_shown}")
     else:
         game = data['game']
     
@@ -170,8 +195,8 @@ async def show_current_profile(callback: CallbackQuery, state: FSMContext):
     index = data.get('current_index', 0)
     
     if not data or 'game' not in data:
-        await callback.answer("Сессия поиска истекла\n Начните новый поиск", show_alert=True)
-        await state.clear()
+        logger.warning(f"⚠️ show_current_profile: Нет данных! data={data}")
+        await callback.answer("Сессия поиска истекла", show_alert=True)
         keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
             [kb.InlineKeyboardButton(text="Новый поиск", callback_data="search")],
             [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
@@ -180,7 +205,6 @@ async def show_current_profile(callback: CallbackQuery, state: FSMContext):
         return
     
     if index >= len(profiles):
-        await state.clear()
         game_name = settings.GAMES.get(data.get('game', 'dota'), data.get('game', 'dota'))
         text = f"Больше анкет в {game_name} не найдено!\n\nПопробуйте изменить фильтры или зайти позже"
         
@@ -203,10 +227,13 @@ async def show_current_profile(callback: CallbackQuery, state: FSMContext):
     )
 
 async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
-    """Показ следующего профиля с автоподгрузкой"""
+    """Показ следующего профиля с автоподгрузкой и рекламой"""
     data = await state.get_data()
     current_index = data.get('current_index', 0)
     profiles = data.get('profiles', [])
+    profiles_shown = data.get('profiles_shown', 0)
+    
+    logger.info(f"🔵 show_next_profile СТАРТ: current_index={current_index}, profiles_shown={profiles_shown}")
     
     if not data or 'user_id' not in data:
         user_id = callback.from_user.id
@@ -214,11 +241,20 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
         game = user['current_game']
         await state.update_data(
             user_id=user_id,
-            game=game
+            game=game,
+            profiles_shown=0
         )
+        logger.info(f"🟡 Инициализация user_id, установлен profiles_shown=0")
         data = await state.get_data()
     
-    if profiles and current_index >= len(profiles) - 5:
+    # ============ УВЕЛИЧИВАЕМ СЧЁТЧИКИ СРАЗУ ============
+    next_index = current_index + 1
+    next_profiles_shown = profiles_shown + 1
+    
+    logger.info(f"🟢 Увеличены счётчики: next_index={next_index}, next_profiles_shown={next_profiles_shown}")
+    
+    # ============ АВТОПОДГРУЗКА АНКЕТ ============
+    if profiles and next_index >= len(profiles) - 5:
         last_offset = data.get('last_loaded_offset', 0)
         new_offset = last_offset + 20
         
@@ -240,10 +276,71 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
                     profiles=profiles,
                     last_loaded_offset=new_offset
                 )
+                logger.info(f"🔄 Подгружено {len(new_batch)} новых анкет, всего: {len(profiles)}")
         except Exception as e:
             logger.error(f"Ошибка при подгрузке анкет: {e}")
     
-    await state.update_data(current_index=current_index + 1)
+    # ============ ПРОВЕРКА ПОКАЗА РЕКЛАМЫ ============
+    ads = await db.get_active_ads()
+    
+    if ads and next_profiles_shown > 0:
+        min_interval = min(ad.get('show_interval', 3) for ad in ads)
+        
+        logger.info(f"🟣 Проверка рекламы: ads={len(ads)}, next_profiles_shown={next_profiles_shown}, min_interval={min_interval}")
+        
+        if next_profiles_shown % min_interval == 0:
+            suitable_ads = [ad for ad in ads if next_profiles_shown % ad.get('show_interval', 3) == 0]
+            
+            if not suitable_ads:
+                suitable_ads = ads
+            
+            ad = random.choice(suitable_ads)
+            show_interval = ad.get('show_interval', 3)
+            
+            logger.info(f"🔷 Выбрана реклама #{ad['id']}, интервал={show_interval}, подходящих реклам: {len(suitable_ads)}")
+            logger.info(f"🟠 ПОКАЗЫВАЕМ РЕКЛАМУ! next_profiles_shown={next_profiles_shown}, interval={show_interval}")
+            
+            try:
+                # Удаляем предыдущую анкету
+                try:
+                    await callback.message.delete()
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить сообщение: {e}")
+                
+                sent_msg = await callback.bot.copy_message(
+                    chat_id=callback.message.chat.id,
+                    from_chat_id=ad['chat_id'],
+                    message_id=ad['message_id'],
+                    reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+                        [kb.InlineKeyboardButton(text="Понятно", callback_data="ad_continue")]
+                    ])
+                )
+                
+                await state.update_data(
+                    current_index=next_index,
+                    ad_message_id=sent_msg.message_id,
+                    profiles_shown=0
+                )
+                
+                logger.info(f"✅ Реклама показана! Сохранено: current_index={next_index}, profiles_shown=0")
+                return
+                
+            except Exception as e:
+                logger.error(f"❌ Ошибка показа рекламы #{ad.get('id')}: {e}")
+        else:
+            logger.info(f"⏭️ Реклама НЕ показывается: {next_profiles_shown} % {min_interval} = {next_profiles_shown % min_interval}")
+    else:
+        if not ads:
+            logger.info(f"⏭️ Реклама пропущена: нет активных реклам")
+        else:
+            logger.info(f"⏭️ Реклама пропущена: next_profiles_shown={next_profiles_shown}")
+    
+    # ============ ПОКАЗЫВАЕМ СЛЕДУЮЩУЮ АНКЕТУ ============
+    logger.info(f"🔵 Показ анкеты: сохраняем current_index={next_index}, profiles_shown={next_profiles_shown}")
+    await state.update_data(
+        current_index=next_index,
+        profiles_shown=next_profiles_shown
+    )
     await show_current_profile(callback, state)
 
 # ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ ====================
@@ -269,8 +366,10 @@ async def start_search_menu(callback: CallbackQuery, state: FSMContext, db):
             position_filter=None,
             region_filter=None,
             goals_filter=None,
+            role_filter='player',
             profiles=[],
-            current_index=0
+            current_index=0,
+            profiles_shown=0
         )
         data = await state.get_data()
     
@@ -297,7 +396,51 @@ async def back_to_search_menu(callback: CallbackQuery, state: FSMContext):
     await safe_edit_message(callback, text, kb.search_filters())
     await callback.answer()
 
+@router.callback_query(F.data == "ad_continue")
+async def ad_continue_after_ad(callback: CallbackQuery, state: FSMContext, db):
+    """Продолжение поиска после просмотра рекламы"""
+    data = await state.get_data()
+    
+    current_profiles_shown = data.get('profiles_shown', 0)
+    logger.info(f"🟢 ad_continue: current_index={data.get('current_index')}, profiles_shown={current_profiles_shown}")
+    
+    current_state = await state.get_state()
+    if current_state != SearchForm.browsing:
+        await callback.answer("Сессия поиска истекла", show_alert=True)
+        return
+    
+    ad_message_id = data.get('ad_message_id')
+    if ad_message_id:
+        try:
+            await callback.bot.delete_message(
+                chat_id=callback.message.chat.id,
+                message_id=ad_message_id
+            )
+        except Exception as e:
+            logger.warning(f"Не удалось удалить рекламу: {e}")
+    
+    new_profiles_shown = current_profiles_shown + 1
+    await state.update_data(
+        profiles_shown=new_profiles_shown,
+        ad_message_id=None
+    )
+    
+    import asyncio
+    await asyncio.sleep(0.05)
+    
+    fresh_data = await state.get_data()
+    logger.info(f"✅ После записи: current_index={fresh_data.get('current_index')}, profiles_shown={fresh_data.get('profiles_shown')}")
+    
+    await show_current_profile(callback, state)
+    await callback.answer()
+
 # ==================== НАСТРОЙКА ФИЛЬТРОВ ====================
+
+@router.callback_query(F.data == "filter_role", SearchForm.filters)
+async def set_role_filter(callback: CallbackQuery, state: FSMContext):
+    """Показать меню выбора роли"""
+    await safe_edit_message(callback, "Выберите роль:", kb.role_filter())
+    await callback.answer()
 
 @router.callback_query(F.data == "filter_rating", SearchForm.filters)
 async def set_rating_filter(callback: CallbackQuery, state: FSMContext):
@@ -337,11 +480,43 @@ async def reset_all_filters(callback: CallbackQuery, state: FSMContext):
         rating_filter=None,
         position_filter=None,
         country_filter=None,
-        goals_filter=None
+        goals_filter=None,
+        role_filter='player'
     )
     await update_filters_display(callback, state, "Все фильтры сброшены")
 
 # ==================== СОХРАНЕНИЕ ФИЛЬТРОВ ====================
+
+@router.callback_query(F.data.startswith("role_filter_"), SearchForm.filters)
+async def save_role_filter(callback: CallbackQuery, state: FSMContext):
+    """Сохранение выбранной роли"""
+    parts = callback.data.split("_")
+    if len(parts) < 3:
+        return
+
+    role = parts[2]
+
+    if role not in settings.ROLES:
+        return
+
+    data = await state.get_data()
+    current_role = data.get('role_filter', 'player')
+    
+    if current_role == role:
+        await callback.answer("Эта роль уже выбрана")
+        return
+
+    await state.update_data(role_filter=role)
+    
+    if role != 'player':
+        await state.update_data(
+            rating_filter=None,
+            position_filter=None,
+            goals_filter=None
+        )
+    
+    role_name = settings.ROLES.get(role, role)
+    await update_filters_display(callback, state, f"Фильтр по роли: {role_name}")
 
 @router.callback_query(F.data.startswith("rating_"), SearchForm.filters)
 async def save_rating_filter(callback: CallbackQuery, state: FSMContext):
@@ -518,6 +693,12 @@ async def save_goals_filter(callback: CallbackQuery, state: FSMContext):
 
 # ==================== СБРОС ФИЛЬТРОВ ====================
 
+@router.callback_query(F.data == "role_reset", SearchForm.filters)
+async def reset_role_filter(callback: CallbackQuery, state: FSMContext):
+    """Сброс фильтра по роли"""
+    await state.update_data(role_filter='player')
+    await update_filters_display(callback, state, "Фильтр по роли сброшен на 'Игрок'")
+
 @router.callback_query(F.data == "rating_reset", SearchForm.filters)
 async def reset_rating_filter(callback: CallbackQuery, state: FSMContext):
     await state.update_data(rating_filter=None)
@@ -565,6 +746,7 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
             position_filter=data.get('position_filter'),
             country_filter=data.get('country_filter'),
             goals_filter=data.get('goals_filter'),
+            role_filter=data.get('role_filter'),
             limit=20,
             offset=batch_offset
         )
@@ -588,9 +770,10 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
     
     await state.set_state(SearchForm.browsing)
     await state.update_data(
-        profiles=all_profiles,  # Используем profiles для совместимости
+        profiles=all_profiles,
         current_index=0,
-        last_loaded_offset=40  # Запоминаем последний загруженный offset
+        last_loaded_offset=40,
+        profiles_shown=0
     )
     await show_current_profile(callback, state)
 
@@ -598,6 +781,9 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
 
 @router.callback_query(F.data.startswith("skip_"))
 async def skip_profile(callback: CallbackQuery, state: FSMContext, db):
+    data_before = await state.get_data()
+    logger.info(f"🟤 skip_profile ВЫЗВАН: current_index={data_before.get('current_index')}, profiles_shown={data_before.get('profiles_shown')}")
+    
     try:
         target_user_id = int(callback.data.split("_")[1])
     except Exception:
@@ -608,7 +794,6 @@ async def skip_profile(callback: CallbackQuery, state: FSMContext, db):
 
 @router.callback_query(F.data.regexp(r"^like_\d+$"))
 async def like_profile(callback: CallbackQuery, state: FSMContext, db):
-    # Игнорируем like_msg_ - он обрабатывается отдельно
     if callback.data.startswith("like_msg_"):
         return
     
@@ -631,11 +816,16 @@ async def report_profile(callback: CallbackQuery, state: FSMContext, db):
 
 @router.callback_query(F.data == "continue_search", SearchForm.browsing)
 async def continue_search(callback: CallbackQuery, state: FSMContext, db):
-    """Продолжить поиск после лайка"""
+    """Продолжить поиск после мэтча"""
     data = await state.get_data()
+    
+    logger.info(f"🔄 continue_search вызвана: profiles_shown={data.get('profiles_shown')}")
+    
     if not data or 'profiles' not in data:
+        logger.info(f"⚠️ Нет данных, начинаем новый поиск (profiles_shown будет сброшен)")
         await begin_search(callback, state, db)
     else:
+        logger.info(f"✅ Продолжаем текущий поиск")
         await show_next_profile(callback, state, db)
 
 @router.callback_query(F.data.startswith("like_msg_"))
@@ -658,15 +848,13 @@ async def like_with_message(callback: CallbackQuery, state: FSMContext, db):
     
     profile = profiles[current_index]
     
-    # Сохраняем информацию о целевом пользователе И ID сообщения
     await state.update_data(
         message_target_user_id=target_user_id,
         message_target_index=current_index,
-        last_search_message_id=callback.message.message_id  # ДОБАВИТЬ ЭТУ СТРОКУ
+        last_search_message_id=callback.message.message_id
     )
     await state.set_state(SearchForm.waiting_message)
     
-    # Редактируем сообщение
     profile_text = texts.format_profile(profile)
     text = f"{profile_text}\n\n<b>💌 Напишите сообщение этому пользователю:</b>"
     
@@ -682,7 +870,6 @@ async def cancel_message(callback: CallbackQuery, state: FSMContext):
     """Отмена отправки сообщения - возврат к текущей анкете"""
     await state.set_state(SearchForm.browsing)
     
-    # Удаляем временные данные о сообщении
     data = await state.get_data()
     if 'message_target_user_id' in data:
         del data['message_target_user_id']
@@ -690,7 +877,6 @@ async def cancel_message(callback: CallbackQuery, state: FSMContext):
         del data['message_target_index']
     await state.set_data(data)
     
-    # Показываем текущий профиль заново
     await show_current_profile(callback, state)
     await callback.answer()
 
@@ -709,26 +895,21 @@ async def process_message_with_like(message: Message, state: FSMContext, db):
         await state.clear()
         return
     
-    # Валидация сообщения
     if len(user_message) > 500:
         await message.answer("Сообщение слишком длинное. Максимум 500 символов.")
         return
     
-    # Просто удаляем 2 последних сообщения (текст пользователя и анкету)
     try:
-        await message.bot.delete_message(message.chat.id, message.message_id)  # Текст пользователя
-        await message.bot.delete_message(message.chat.id, message.message_id - 1)  # Анкета
+        await message.bot.delete_message(message.chat.id, message.message_id)
+        await message.bot.delete_message(message.chat.id, message.message_id - 1)
     except Exception:
-        pass  # Если не удалось - не страшно
+        pass
     
-    # Добавляем лайк с сообщением
     is_match = await db.add_like(user_id, target_user_id, game, message=user_message)
     
-    # Отправляем уведомление о лайке
     await notify_about_like(message.bot, target_user_id, game, db)
     
     if is_match:
-        # Обработка мэтча
         target_profile = await db.get_user_profile(target_user_id, game)
         await notify_about_match(message.bot, target_user_id, user_id, game, db)
         
@@ -781,7 +962,6 @@ async def show_next_search_profile(message: Message, state: FSMContext, db):
     
     keyboard = kb.profile_actions(profile['telegram_id'])
     
-    # ДОБАВИТЬ: Удаляем предыдущее сообщение с анкетой
     last_message_id = data.get('last_search_message_id')
     if last_message_id:
         try:
@@ -789,7 +969,6 @@ async def show_next_search_profile(message: Message, state: FSMContext, db):
         except Exception:
             pass
     
-    # Отправляем новое сообщение с анкетой
     if profile.get('photo_id'):
         try:
             sent_msg = await message.answer_photo(
@@ -803,7 +982,6 @@ async def show_next_search_profile(message: Message, state: FSMContext, db):
     else:
         sent_msg = await message.answer(text, reply_markup=keyboard, parse_mode='HTML')
     
-    # ДОБАВИТЬ: Сохраняем ID нового сообщения
     await state.update_data(last_search_message_id=sent_msg.message_id)
 
 async def show_search_end(message: Message, state: FSMContext, game: str):

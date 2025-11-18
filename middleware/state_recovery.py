@@ -21,7 +21,16 @@ class StateRecoveryMiddleware(BaseMiddleware):
             user_id = event.from_user.id
             state_data = await state.get_data()
             
-            if not state_data or 'game' not in state_data:
+            should_recover = (
+                not state_data or 
+                (
+                    'game' not in state_data and 
+                    'profiles_shown' not in state_data and 
+                    'current_index' not in state_data
+                )
+            )
+            
+            if should_recover:
                 try:
                     user = await db.get_user(user_id)
                     if user:

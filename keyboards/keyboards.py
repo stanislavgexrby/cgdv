@@ -112,6 +112,40 @@ def profile_creation_navigation(step: str, has_prev_data: bool = False) -> Inlin
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def roles(selected_role: str = None, with_navigation: bool = False, with_cancel: bool = False, for_profile: bool = True) -> InlineKeyboardMarkup:
+    """Выбор роли пользователя"""
+    buttons = []
+    
+    for key, name in settings.ROLES.items():
+        if key == selected_role:
+            text = f"✅ {name}"
+            callback = f"role_remove_{key}"
+        else:
+            text = name
+            callback = f"role_select_{key}"
+        
+        buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
+    
+    if with_navigation:
+        bottom_row = []
+        if selected_role:
+            bottom_row.append(InlineKeyboardButton(text="Готово", callback_data="role_done"))
+        else:
+            bottom_row.append(InlineKeyboardButton(text="Выберите роль", callback_data="role_need"))
+        
+        if bottom_row:
+            buttons.append(bottom_row)
+        
+        nav_buttons = [
+            InlineKeyboardButton(text="Назад", callback_data="profile_back"),
+            InlineKeyboardButton(text="Отмена", callback_data="cancel")
+        ]
+        buttons.append(nav_buttons)
+    elif with_cancel:  # ← ДОБАВИТЬ этот блок
+        buttons.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 def ratings(game: str, selected_rating: str = None, with_navigation: bool = False, 
            for_profile: bool = True, with_cancel: bool = False) -> InlineKeyboardMarkup:
     """Интерактивный выбор рейтинга"""
@@ -326,6 +360,20 @@ def goals_filter() -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def role_filter() -> InlineKeyboardMarkup:
+    """Фильтр по роли"""
+    buttons = []
+
+    for key, name in settings.ROLES.items():
+        buttons.append([InlineKeyboardButton(text=name, callback_data=f"role_filter_{key}")])
+
+    buttons.extend([
+        [InlineKeyboardButton(text="Сбросить фильтр", callback_data="role_reset")],
+        [InlineKeyboardButton(text="Отмена", callback_data="cancel_filter")]
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 def skip_profile_url() -> InlineKeyboardMarkup:
     """Пропуск ссылки профиля с навигацией"""
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -366,24 +414,6 @@ def confirm_cancel_profile() -> InlineKeyboardMarkup:
     ])
 
 # ==================== РЕДАКТИРОВАНИЕ ПРОФИЛЕЙ ====================
-
-def edit_profile_menu(game: str = 'dota') -> InlineKeyboardMarkup:
-    """Меню редактирования профиля с учетом игры"""
-    profile_button_text = "Изменить Dotabuff" if game == 'dota' else "Изменить FACEIT"
-    
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Изменить имя", callback_data="edit_name")],
-        [InlineKeyboardButton(text="Изменить никнейм", callback_data="edit_nickname")],
-        [InlineKeyboardButton(text="Изменить возраст", callback_data="edit_age")],
-        [InlineKeyboardButton(text="Изменить рейтинг", callback_data="edit_rating")],
-        [InlineKeyboardButton(text="Изменить страну", callback_data="edit_country")],
-        [InlineKeyboardButton(text="Изменить позиции", callback_data="edit_positions")],
-        [InlineKeyboardButton(text="Изменить цели", callback_data="edit_goals")],
-        [InlineKeyboardButton(text=profile_button_text, callback_data="edit_profile_url")],
-        [InlineKeyboardButton(text="Изменить описание", callback_data="edit_info")],
-        [InlineKeyboardButton(text="Изменить фото", callback_data="edit_photo")],
-        [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
-    ])
 
 def cancel_edit() -> InlineKeyboardMarkup:
     """Отмена редактирования"""
@@ -430,16 +460,81 @@ def search_filters() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
     ])
 
-def filters_setup_menu() -> InlineKeyboardMarkup:
-    """Меню настройки фильтров"""
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Рейтинг", callback_data="filter_rating")],
-        [InlineKeyboardButton(text="Позиция", callback_data="filter_position")],
-        [InlineKeyboardButton(text="Страна", callback_data="filter_country")],  # Изменено с "filter_region"
-        [InlineKeyboardButton(text="Цель", callback_data="filter_goals")],
+def filters_setup_menu(role_filter: str = 'player') -> InlineKeyboardMarkup:
+    """Меню выбора какой фильтр настроить (с учетом роли)"""
+    buttons = []
+    
+    # Роль показываем всегда
+    buttons.append([InlineKeyboardButton(text="Роль", callback_data="filter_role")])
+    
+    # Для игроков показываем игровые фильтры
+    if role_filter == 'player':
+        buttons.extend([
+            [InlineKeyboardButton(text="Рейтинг", callback_data="filter_rating")],
+            [InlineKeyboardButton(text="Позиция", callback_data="filter_position")],
+            [InlineKeyboardButton(text="Цели", callback_data="filter_goals")]
+        ])
+    
+    # Страна для всех
+    buttons.append([InlineKeyboardButton(text="Страна", callback_data="filter_country")])
+    
+    # Нижние кнопки
+    buttons.extend([
         [InlineKeyboardButton(text="Сбросить все", callback_data="reset_all_filters")],
-        [InlineKeyboardButton(text="Назад к поиску", callback_data="back_to_search")]
+        [InlineKeyboardButton(text="Назад", callback_data="back_to_search")]
     ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def edit_profile_menu(game: str = 'dota', role: str = 'player') -> InlineKeyboardMarkup:
+    """Меню редактирования профиля с учетом роли"""
+    buttons = []
+    
+    # Общие поля для всех ролей
+    buttons.extend([
+        [InlineKeyboardButton(text="Изменить имя", callback_data="edit_name")],
+        [InlineKeyboardButton(text="Изменить никнейм", callback_data="edit_nickname")],
+        [InlineKeyboardButton(text="Изменить возраст", callback_data="edit_age")],
+        [InlineKeyboardButton(text="Изменить роль", callback_data="edit_role")],
+        [InlineKeyboardButton(text="Изменить страну", callback_data="edit_country")]
+    ])
+    
+    # Поля только для игроков
+    if role == 'player':
+        profile_button_text = "Изменить Dotabuff" if game == 'dota' else "Изменить FACEIT"
+        buttons.extend([
+            [InlineKeyboardButton(text="Изменить рейтинг", callback_data="edit_rating")],
+            [InlineKeyboardButton(text="Изменить позиции", callback_data="edit_positions")],
+            [InlineKeyboardButton(text="Изменить цели", callback_data="edit_goals")],
+            [InlineKeyboardButton(text=profile_button_text, callback_data="edit_profile_url")]
+        ])
+    
+    # Общие поля для всех
+    buttons.extend([
+        [InlineKeyboardButton(text="Изменить описание", callback_data="edit_info")],
+        [InlineKeyboardButton(text="Изменить фото", callback_data="edit_photo")],
+        [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+    ])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def roles_for_edit(selected_role: str = None) -> InlineKeyboardMarkup:
+    """Выбор роли при редактировании"""
+    buttons = []
+    
+    for key, name in settings.ROLES.items():
+        if key == selected_role:
+            text = f"✅ {name}"
+            callback = f"role_select_{key}"  # Убрать edit_
+        else:
+            text = name
+            callback = f"role_select_{key}"  # Убрать edit_
+        
+        buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
+    
+    buttons.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def ratings_filter(game: str) -> InlineKeyboardMarkup:
     """Фильтр по рейтингу"""
@@ -545,6 +640,7 @@ def admin_main_menu() -> InlineKeyboardMarkup:
     """Главное меню админ-панели"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Статистика", callback_data="admin_stats")],
+        [InlineKeyboardButton(text="Реклама", callback_data="admin_ads")],
         [InlineKeyboardButton(text="Жалобы", callback_data="admin_reports")],
         [InlineKeyboardButton(text="Баны", callback_data="admin_bans")],
         [InlineKeyboardButton(text="Главное меню", callback_data="back_to_games")]
@@ -605,4 +701,82 @@ def admin_ban_actions_with_nav(user_id: int, current_index: int, total_count: in
 
     buttons.append([InlineKeyboardButton(text="Админ меню", callback_data="admin_back")])
 
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+# ==================== РЕКЛАМА ====================
+
+def admin_ads_menu_empty() -> InlineKeyboardMarkup:
+    """Меню рекламы когда нет постов"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Добавить пост", callback_data="admin_add_ad")],
+        [InlineKeyboardButton(text="◀️ Админ меню", callback_data="admin_back")]
+    ])
+
+def admin_ads_menu_list(ads: list) -> InlineKeyboardMarkup:
+    """Меню со списком реклам (кликабельные)"""
+    buttons = []
+    
+    for ad in ads:
+        status_emoji = "✅" if ad['is_active'] else "❌"
+        button_text = f"{status_emoji} #{ad['id']} {ad['caption'][:30]}"
+        buttons.append([
+            InlineKeyboardButton(
+                text=button_text,
+                callback_data=f"ad_view_{ad['id']}"
+            )
+        ])
+    
+    buttons.append([InlineKeyboardButton(text="➕ Добавить пост", callback_data="admin_add_ad")])
+    buttons.append([InlineKeyboardButton(text="◀️ Админ меню", callback_data="admin_back")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def admin_ad_actions(ad: dict) -> InlineKeyboardMarkup:
+    """Действия с конкретной рекламой"""
+    ad_id = ad['id']
+    is_active = ad['is_active']
+    
+    toggle_text = "⏸️ Выключить" if is_active else "▶️ Включить"
+    
+    buttons = [
+        [InlineKeyboardButton(text=toggle_text, callback_data=f"ad_toggle_{ad_id}")],
+        [InlineKeyboardButton(text="📊 Изменить интервал", callback_data=f"ad_interval_{ad_id}")],
+        [InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"ad_delete_{ad_id}")],
+        [InlineKeyboardButton(text="◀️ К списку", callback_data="ad_back_to_list")]
+    ]
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def interval_choice_keyboard(ad_id: int = None, current_interval: int = None) -> InlineKeyboardMarkup:
+    """Клавиатура выбора интервала показа рекламы"""
+    intervals = [1, 2, 3, 5, 7, 10, 15, 20]
+    
+    buttons = []
+    row = []
+    
+    for interval in intervals:
+        if current_interval and interval == current_interval:
+            button_text = f"• {interval} •"
+        else:
+            button_text = str(interval)
+        
+        if ad_id is not None:
+            callback = f"setint_{ad_id}_{interval}"
+        else:
+            callback = f"interval_{interval}"
+        
+        row.append(InlineKeyboardButton(text=button_text, callback_data=callback))
+        
+        if len(row) == 4:
+            buttons.append(row)
+            row = []
+    
+    if row:
+        buttons.append(row)
+    
+    if ad_id is not None:
+        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"ad_view_{ad_id}")])
+    else:
+        buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="admin_ads")])
+    
     return InlineKeyboardMarkup(inline_keyboard=buttons)
