@@ -51,6 +51,71 @@ async def update_profile_field(user_id: int, field: str, value, db) -> bool:
 
     return success
 
+async def show_edit_menu_after_update(user_id: int, db, message: Message = None, callback: CallbackQuery = None, last_bot_message_id: int = None):
+    """Показать меню редактирования после обновления поля"""
+    user = await db.get_user(user_id)
+    if not user:
+        return
+
+    game = user['current_game']
+    profile = await db.get_user_profile(user_id, game)
+    if not profile:
+        return
+
+    game_name = settings.GAMES.get(game, game)
+    current_info = f"Редактирование анкеты в {game_name}:\n\n"
+    current_info += texts.format_profile(profile)
+    current_info += "\n\nЧто хотите изменить?"
+
+    role = profile.get('role', 'player')
+    keyboard = kb.edit_profile_menu(game, role)
+
+    # Обработка через callback (для callback handlers)
+    if callback:
+        try:
+            if profile.get('photo_id'):
+                await callback.message.delete()
+                await callback.message.answer_photo(
+                    photo=profile['photo_id'],
+                    caption=current_info,
+                    reply_markup=keyboard,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+            else:
+                await callback.message.edit_text(current_info, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
+        except Exception as e:
+            logger.error(f"Ошибка показа меню редактирования через callback: {e}")
+            try:
+                await callback.message.delete()
+            except:
+                pass
+            await callback.message.answer(current_info, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
+
+    # Обработка через message (для message handlers)
+    elif message and last_bot_message_id:
+        try:
+            # Удаляем старое сообщение бота
+            try:
+                await message.bot.delete_message(chat_id=message.chat.id, message_id=last_bot_message_id)
+            except Exception as e:
+                logger.warning(f"Не удалось удалить сообщение бота: {e}")
+
+            # Отправляем новое сообщение с меню редактирования
+            if profile.get('photo_id'):
+                await message.answer_photo(
+                    photo=profile['photo_id'],
+                    caption=current_info,
+                    reply_markup=keyboard,
+                    parse_mode='HTML',
+                    disable_web_page_preview=True
+                )
+            else:
+                await message.answer(current_info, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
+        except Exception as e:
+            logger.error(f"Ошибка показа меню редактирования через message: {e}")
+            await message.answer(current_info, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
+
 # ==================== ОСНОВНЫЕ ОБРАБОТЧИКИ ====================
 
 @router.callback_query(F.data == "edit_profile")
@@ -146,7 +211,14 @@ async def edit_name(callback: CallbackQuery, state: FSMContext, db):
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_name)
 
-    await safe_edit_message(callback, "Введите новое имя:", kb.cancel_edit())
+    # Удаляем текущее сообщение и отправляем новое, чтобы сохранить правильный ID
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    sent_message = await callback.message.answer("Введите новое имя:", reply_markup=kb.cancel_edit(), parse_mode='HTML')
+    await state.update_data(last_bot_message_id=sent_message.message_id)
     await callback.answer()
 
 @router.callback_query(F.data == "edit_nickname")
@@ -158,7 +230,13 @@ async def edit_nickname(callback: CallbackQuery, state: FSMContext, db):
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_nickname)
 
-    await safe_edit_message(callback, "Введите новый игровой никнейм:", kb.cancel_edit())
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    sent_message = await callback.message.answer("Введите новый игровой никнейм:", reply_markup=kb.cancel_edit(), parse_mode='HTML')
+    await state.update_data(last_bot_message_id=sent_message.message_id)
     await callback.answer()
 
 @router.callback_query(F.data == "edit_age")
@@ -170,7 +248,13 @@ async def edit_age(callback: CallbackQuery, state: FSMContext, db):
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_age)
 
-    await safe_edit_message(callback, "Введите новый возраст:", kb.cancel_edit())
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+
+    sent_message = await callback.message.answer("Введите новый возраст:", reply_markup=kb.cancel_edit(), parse_mode='HTML')
+    await state.update_data(last_bot_message_id=sent_message.message_id)
     await callback.answer()
 
 @router.callback_query(F.data == "edit_role")
@@ -218,20 +302,20 @@ async def edit_rating(callback: CallbackQuery, state: FSMContext, db):
 async def edit_profile_url(callback: CallbackQuery, state: FSMContext, db):
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
-    await state.update_data(user_id=user_id, game=user['current_game'])
+    await state.update_data(user_id=user_id, game=user['current_game'], last_bot_message_id=callback.message.message_id)
     await state.set_state(EditProfileForm.edit_profile_url)
-    
+
     game = user['current_game']
     if game == 'dota':
         text = "Введите новую ссылку на Dotabuff профиль:\n\nПример: https://www.dotabuff.com/players/123456789"
     else:
         text = "Введите новую ссылку на FACEIT профиль:\n\nПример: https://www.faceit.com/en/players/nickname"
-    
+
     keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
         [kb.InlineKeyboardButton(text="Удалить ссылку", callback_data="delete_profile_url")],
         [kb.InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")]
     ])
-    
+
     await safe_edit_message(callback, text, keyboard)
     await callback.answer()
 
@@ -327,7 +411,7 @@ async def edit_goals(callback: CallbackQuery, state: FSMContext, db):
 async def edit_info(callback: CallbackQuery, state: FSMContext, db):
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
-    await state.update_data(user_id=user_id, game=user['current_game'])
+    await state.update_data(user_id=user_id, game=user['current_game'], last_bot_message_id=callback.message.message_id)
     await state.set_state(EditProfileForm.edit_info)
     await safe_edit_message(callback, "Введите новое описание или выберите действие:", kb.edit_info_menu())
     await callback.answer()
@@ -338,7 +422,7 @@ async def edit_photo(callback: CallbackQuery, state: FSMContext, db):
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
 
-    await state.update_data(user_id=user_id, game=user['current_game'])
+    await state.update_data(user_id=user_id, game=user['current_game'], last_bot_message_id=callback.message.message_id)
     await state.set_state(EditProfileForm.edit_photo)
 
     await safe_edit_message(
@@ -362,13 +446,22 @@ async def process_edit_name(message: Message, state: FSMContext, db):
         await message.answer(error_msg, parse_mode='HTML')
         return
 
+    data = await state.get_data()
+    last_bot_message_id = data.get('last_bot_message_id')
+
+    # Удаляем сообщение пользователя
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     success = await update_profile_field(message.from_user.id, 'name', name, db)
     await state.clear()
 
     await update_user_activity(message.from_user.id, 'available', db)
 
     if success:
-        await message.answer("Имя обновлено!", reply_markup=kb.back_to_editing(), parse_mode='HTML')
+        await show_edit_menu_after_update(message.from_user.id, db, message=message, last_bot_message_id=last_bot_message_id)
     else:
         await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML')
 
@@ -384,13 +477,22 @@ async def process_edit_nickname(message: Message, state: FSMContext, db):
         await message.answer(error_msg, parse_mode='HTML')
         return
 
+    data = await state.get_data()
+    last_bot_message_id = data.get('last_bot_message_id')
+
+    # Удаляем сообщение пользователя
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     success = await update_profile_field(message.from_user.id, 'nickname', nickname, db)
     await state.clear()
 
     await update_user_activity(message.from_user.id, 'available', db)
 
     if success:
-        await message.answer("Никнейм обновлён!", reply_markup=kb.back_to_editing(), parse_mode='HTML')
+        await show_edit_menu_after_update(message.from_user.id, db, message=message, last_bot_message_id=last_bot_message_id)
     else:
         await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML')
 
@@ -405,6 +507,15 @@ async def process_edit_age(message: Message, state: FSMContext, db):
         await message.answer(error_msg, parse_mode='HTML')
         return
 
+    data = await state.get_data()
+    last_bot_message_id = data.get('last_bot_message_id')
+
+    # Удаляем сообщение пользователя
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     age = int(message.text.strip())
     success = await update_profile_field(message.from_user.id, 'age', age, db)
     await state.clear()
@@ -412,7 +523,7 @@ async def process_edit_age(message: Message, state: FSMContext, db):
     await update_user_activity(message.from_user.id, 'available', db)
 
     if success:
-        await message.answer("Возраст обновлён!", reply_markup=kb.back_to_editing(), parse_mode='HTML')
+        await show_edit_menu_after_update(message.from_user.id, db, message=message, last_bot_message_id=last_bot_message_id)
     else:
         await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML')
 
@@ -426,7 +537,7 @@ async def process_edit_profile_url(message: Message, state: FSMContext, db):
             [InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")]
         ])
         await message.answer(
-            "Отправьте ссылку на профиль или используйте кнопки", 
+            "Отправьте ссылку на профиль или используйте кнопки",
             reply_markup=keyboard,
             parse_mode='HTML',
             disable_web_page_preview=True
@@ -435,6 +546,7 @@ async def process_edit_profile_url(message: Message, state: FSMContext, db):
 
     data = await state.get_data()
     game = data['game']
+    last_bot_message_id = data.get('last_bot_message_id')
 
     profile_url = message.text.strip()
     is_valid, error_msg = validate_profile_input('profile_url', profile_url, game)
@@ -445,12 +557,18 @@ async def process_edit_profile_url(message: Message, state: FSMContext, db):
             [InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")]
         ])
         await message.answer(
-            error_msg, 
+            error_msg,
             reply_markup=keyboard,
             parse_mode='HTML',
             disable_web_page_preview=True
         )
         return
+
+    # Удаляем сообщение пользователя
+    try:
+        await message.delete()
+    except Exception:
+        pass
 
     success = await update_profile_field(message.from_user.id, 'profile_url', profile_url, db)
     await state.clear()
@@ -458,8 +576,7 @@ async def process_edit_profile_url(message: Message, state: FSMContext, db):
     await update_user_activity(message.from_user.id, 'available', db)
 
     if success:
-        game_name = "Dotabuff" if game == 'dota' else "FACEIT"
-        await message.answer(f"Ссылка на {game_name} обновлена!", reply_markup=kb.back_to_editing(), parse_mode='HTML', disable_web_page_preview=True)
+        await show_edit_menu_after_update(message.from_user.id, db, message=message, last_bot_message_id=last_bot_message_id)
     else:
         await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML', disable_web_page_preview=True)
 
@@ -475,26 +592,45 @@ async def process_edit_info(message: Message, state: FSMContext, db):
         await message.answer(error_msg, parse_mode='HTML')
         return
 
+    data = await state.get_data()
+    last_bot_message_id = data.get('last_bot_message_id')
+
+    # Удаляем сообщение пользователя
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     success = await update_profile_field(message.from_user.id, 'additional_info', info, db)
     await state.clear()
 
     await update_user_activity(message.from_user.id, 'available', db)
 
     if success:
-        await message.answer("Описание обновлено!", reply_markup=kb.back_to_editing(), parse_mode='HTML')
+        await show_edit_menu_after_update(message.from_user.id, db, message=message, last_bot_message_id=last_bot_message_id)
     else:
         await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML')
 
 @router.message(EditProfileForm.edit_photo, F.photo)
 async def process_edit_photo(message: Message, state: FSMContext, db):
     photo_id = message.photo[-1].file_id
+
+    data = await state.get_data()
+    last_bot_message_id = data.get('last_bot_message_id')
+
+    # Удаляем сообщение пользователя (фото)
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
     success = await update_profile_field(message.from_user.id, 'photo_id', photo_id, db)
     await state.clear()
 
     await update_user_activity(message.from_user.id, 'available', db)
 
     if success:
-        await message.answer("Фото обновлено!", reply_markup=kb.back_to_editing(), parse_mode='HTML')
+        await show_edit_menu_after_update(message.from_user.id, db, message=message, last_bot_message_id=last_bot_message_id)
     else:
         await message.answer("Ошибка обновления фото", reply_markup=kb.back_to_editing(), parse_mode='HTML')
 
@@ -596,21 +732,20 @@ async def process_edit_role_select(callback: CallbackQuery, state: FSMContext, d
     if success:
         role_name = settings.ROLES.get(role, role)
         if role != 'player' and old_role == 'player':
-            text = f"Роль обновлена на {role_name}!\n\nИгровые поля (рейтинг, позиции, цели, ссылка) были сброшены, так как они не актуальны для этой роли"
+            await callback.answer(f"Роль: {role_name}. Игровые поля сброшены")
         elif role == 'player' and old_role != 'player':
-            text = f"Роль обновлена на {role_name}!\n\nИгровые поля установлены как 'Не указано'. Вы можете заполнить их в меню редактирования"
+            await callback.answer(f"Роль: {role_name}. Заполните игровые поля")
         else:
-            text = f"Роль обновлена на {role_name}!"
-        await safe_edit_message(callback, text, kb.back_to_editing())
+            await callback.answer(f"Роль обновлена на {role_name}")
+        await show_edit_menu_after_update(user_id, db, callback=callback)
     else:
-        await safe_edit_message(callback, "Ошибка обновления роли", kb.back_to_editing())
-
-    await callback.answer()
+        await callback.answer("Ошибка обновления роли", show_alert=True)
+        await show_edit_menu_after_update(user_id, db, callback=callback)
 
 @router.callback_query(F.data.startswith("rating_"), EditProfileForm.edit_rating)
 async def process_edit_rating(callback: CallbackQuery, state: FSMContext, db):
     parts = callback.data.split("_")
-    
+
     if len(parts) >= 3 and parts[1] == "select":
         # rating_select_herald -> выбираем herald
         rating = parts[2]
@@ -624,7 +759,7 @@ async def process_edit_rating(callback: CallbackQuery, state: FSMContext, db):
     else:
         await callback.answer("Ошибка данных", show_alert=True)
         return
-        
+
     success = await update_profile_field(callback.from_user.id, 'rating', rating, db)
     await state.clear()
 
@@ -632,13 +767,13 @@ async def process_edit_rating(callback: CallbackQuery, state: FSMContext, db):
 
     if success:
         if rating == 'any':
-            await safe_edit_message(callback, "Рейтинг обновлён на 'Не указан'!", kb.back_to_editing())
+            await callback.answer("Рейтинг: Не указан")
         else:
-            await safe_edit_message(callback, "Рейтинг обновлён!", kb.back_to_editing())
+            await callback.answer("Рейтинг обновлён")
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
     else:
-        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
-
-    await callback.answer()
+        await callback.answer("Ошибка обновления", show_alert=True)
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
 
 @router.callback_query(F.data == "delete_profile_url", EditProfileForm.edit_profile_url)
 async def delete_profile_url(callback: CallbackQuery, state: FSMContext, db):
@@ -648,11 +783,11 @@ async def delete_profile_url(callback: CallbackQuery, state: FSMContext, db):
     await update_user_activity(callback.from_user.id, 'available', db)
 
     if success:
-        await safe_edit_message(callback, "Ссылка на профиль удалена!", kb.back_to_editing())
+        await callback.answer("Ссылка на профиль удалена")
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
     else:
-        await safe_edit_message(callback, "Ошибка удаления", kb.back_to_editing())
-
-    await callback.answer()
+        await callback.answer("Ошибка удаления", show_alert=True)
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
 
 @router.callback_query(F.data == "edit_country")
 @check_ban_and_profile()
@@ -660,45 +795,45 @@ async def edit_country(callback: CallbackQuery, state: FSMContext, db):
     """Редактирование страны"""
     user_id = callback.from_user.id
     await update_user_activity(user_id, 'editing_profile', db)
-    
+
     user = await db.get_user(user_id)
     if not user:
         await callback.answer("Пользователь не найден", show_alert=True)
         return
-    
+
     profile = await db.get_user_profile(user_id, user['current_game'])
     if not profile:
         await callback.answer("Профиль не найден", show_alert=True)
         return
-    
+
     current_country = profile.get('region')
-    await state.update_data(user_id=user_id, current_game=user['current_game'])
+    await state.update_data(user_id=user_id, current_game=user['current_game'], last_bot_message_id=callback.message.message_id)
     await state.set_state(EditProfileForm.edit_country)
-    
+
     text = "Выберите новую страну:"
     keyboard = kb.countries(selected_country=current_country, with_cancel=True, for_profile=False)
-    
+
     await safe_edit_message(callback, text, keyboard)
 
 @router.callback_query(F.data.startswith("country_select_"), EditProfileForm.edit_country)
 async def process_edit_country_select(callback: CallbackQuery, state: FSMContext, db):
     """Выбор страны при редактировании"""
     country = callback.data.split("_", 2)[2]
-    
+
     success = await update_profile_field(callback.from_user.id, 'region', country, db)
     await state.clear()
     await update_user_activity(callback.from_user.id, 'available', db)
 
     if success:
         if country == 'any':
-            await safe_edit_message(callback, "Страна обновлена на 'Не указана'!", kb.back_to_editing())
+            await callback.answer("Страна: Не указана")
         else:
             country_name = settings.COUNTRIES_DICT.get(country, settings.MAIN_COUNTRIES.get(country, country))
-            await safe_edit_message(callback, f"Страна обновлена на {country_name}!", kb.back_to_editing())
+            await callback.answer(f"Страна: {country_name}")
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
     else:
-        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
-
-    await callback.answer()
+        await callback.answer("Ошибка обновления", show_alert=True)
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
 
 @router.callback_query(F.data == "country_other", EditProfileForm.edit_country)
 async def edit_country_other(callback: CallbackQuery, state: FSMContext):
@@ -719,29 +854,31 @@ async def process_edit_country_input(message: Message, state: FSMContext, db):
     """Обработка ввода названия страны при редактировании"""
     search_name = message.text.strip()
     country_key = settings.find_country_by_name(search_name)
-    
+
+    data = await state.get_data()
+    last_bot_message_id = data.get('last_bot_message_id')
+
     if country_key:
         try:
             await message.delete()
         except:
             pass
-            
+
         success = await update_profile_field(message.from_user.id, 'region', country_key, db)
         await state.clear()
         await update_user_activity(message.from_user.id, 'available', db)
 
         if success:
-            country_name = settings.COUNTRIES_DICT[country_key]
-            await message.answer(f"Страна обновлена на {country_name}!", reply_markup=kb.back_to_editing(), parse_mode='HTML')
+            await show_edit_menu_after_update(message.from_user.id, db, message=message, last_bot_message_id=last_bot_message_id)
         else:
             await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML')
-            
+
     else:
         try:
             await message.delete()
         except:
             pass
-            
+
         await message.answer(f"Страна '{search_name}' не найдена в словаре.\n\nПопробуйте ввести другое название.", reply_markup=kb.cancel_edit(), parse_mode='HTML')
 
 @router.callback_query(F.data == "retry_edit_country_input", EditProfileForm.edit_country_input)
@@ -772,18 +909,18 @@ async def retry_edit_country_input(callback: CallbackQuery, state: FSMContext):
 async def confirm_edit_country(callback: CallbackQuery, state: FSMContext, db):
     """Подтверждение выбранной страны при редактировании"""
     country_key = callback.data.split("_", 3)[3]
-    
+
     success = await update_profile_field(callback.from_user.id, 'region', country_key, db)
     await state.clear()
     await update_user_activity(callback.from_user.id, 'available', db)
 
     if success:
         country_name = settings.COUNTRIES_DICT[country_key]
-        await safe_edit_message(callback, f"Страна обновлена на {country_name}!", kb.back_to_editing())
+        await callback.answer(f"Страна: {country_name}")
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
     else:
-        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
-
-    await callback.answer()
+        await callback.answer("Ошибка обновления", show_alert=True)
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
 
 @router.callback_query(F.data.startswith("pos_add_"), EditProfileForm.edit_positions)
 async def edit_add_position(callback: CallbackQuery, state: FSMContext):
@@ -833,7 +970,7 @@ async def save_edit_positions(callback: CallbackQuery, state: FSMContext, db):
     if set(selected) == set(original):
         await callback.answer("Позиции не изменились")
         await state.clear()
-        await safe_edit_message(callback, "Позиции остались прежними", kb.back_to_editing())
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
         return
 
     success = await update_profile_field(callback.from_user.id, 'positions', selected, db)
@@ -842,11 +979,11 @@ async def save_edit_positions(callback: CallbackQuery, state: FSMContext, db):
     await update_user_activity(callback.from_user.id, 'available', db)
 
     if success:
-        await safe_edit_message(callback, "Позиции обновлены!", kb.back_to_editing())
+        await callback.answer("Позиции обновлены")
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
     else:
-        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
-
-    await callback.answer()
+        await callback.answer("Ошибка обновления", show_alert=True)
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
 
 @router.callback_query(F.data == "pos_done", EditProfileForm.edit_positions)
 async def edit_positions_done(callback: CallbackQuery, state: FSMContext, db):
@@ -861,7 +998,7 @@ async def edit_positions_done(callback: CallbackQuery, state: FSMContext, db):
     if set(selected) == set(original):
         await callback.answer("Позиции не изменились")
         await state.clear()
-        await safe_edit_message(callback, "Позиции остались прежними", kb.back_to_editing())
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
         return
 
     success = await update_profile_field(callback.from_user.id, 'positions', selected, db)
@@ -870,11 +1007,11 @@ async def edit_positions_done(callback: CallbackQuery, state: FSMContext, db):
     await update_user_activity(callback.from_user.id, 'available', db)
 
     if success:
-        await safe_edit_message(callback, "Позиции обновлены!", kb.back_to_editing())
+        await callback.answer("Позиции обновлены")
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
     else:
-        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
-
-    await callback.answer()
+        await callback.answer("Ошибка обновления", show_alert=True)
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
 
 @router.callback_query(F.data == "pos_need", EditProfileForm.edit_positions)
 async def edit_positions_need(callback: CallbackQuery):
@@ -952,7 +1089,7 @@ async def save_edit_goals(callback: CallbackQuery, state: FSMContext, db):
     if set(selected) == set(original):
         await callback.answer("Цели не изменились")
         await state.clear()
-        await safe_edit_message(callback, "Цели остались прежними", kb.back_to_editing())
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
         return
 
     success = await update_profile_field(callback.from_user.id, 'goals', selected, db)
@@ -961,11 +1098,11 @@ async def save_edit_goals(callback: CallbackQuery, state: FSMContext, db):
     await update_user_activity(callback.from_user.id, 'available', db)
 
     if success:
-        await safe_edit_message(callback, "Цели обновлены!", kb.back_to_editing())
+        await callback.answer("Цели обновлены")
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
     else:
-        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
-
-    await callback.answer()
+        await callback.answer("Ошибка обновления", show_alert=True)
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
 
 @router.callback_query(F.data == "goals_done", EditProfileForm.edit_goals)
 async def edit_goals_done(callback: CallbackQuery, state: FSMContext, db):
@@ -981,7 +1118,7 @@ async def edit_goals_done(callback: CallbackQuery, state: FSMContext, db):
     if set(selected) == set(original):
         await callback.answer("Цели не изменились")
         await state.clear()
-        await safe_edit_message(callback, "Цели остались прежними", kb.back_to_editing())
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
         return
 
     success = await update_profile_field(callback.from_user.id, 'goals', selected, db)
@@ -990,11 +1127,11 @@ async def edit_goals_done(callback: CallbackQuery, state: FSMContext, db):
     await update_user_activity(callback.from_user.id, 'available', db)
 
     if success:
-        await safe_edit_message(callback, "Цели обновлены!", kb.back_to_editing())
+        await callback.answer("Цели обновлены")
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
     else:
-        await safe_edit_message(callback, "Ошибка обновления", kb.back_to_editing())
-
-    await callback.answer()
+        await callback.answer("Ошибка обновления", show_alert=True)
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
 
 @router.callback_query(F.data == "goals_need", EditProfileForm.edit_goals)
 async def edit_goals_need(callback: CallbackQuery):
@@ -1009,11 +1146,11 @@ async def delete_info(callback: CallbackQuery, state: FSMContext, db):
     await update_user_activity(callback.from_user.id, 'available', db)
 
     if success:
-        await safe_edit_message(callback, "Описание удалено!", kb.back_to_editing())
+        await callback.answer("Описание удалено")
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
     else:
-        await safe_edit_message(callback, "Ошибка удаления", kb.back_to_editing())
-
-    await callback.answer()
+        await callback.answer("Ошибка удаления", show_alert=True)
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
 
 @router.callback_query(F.data == "delete_photo", EditProfileForm.edit_photo)
 async def delete_photo(callback: CallbackQuery, state: FSMContext, db):
@@ -1023,11 +1160,11 @@ async def delete_photo(callback: CallbackQuery, state: FSMContext, db):
     await update_user_activity(callback.from_user.id, 'available', db)
 
     if success:
-        await safe_edit_message(callback, "Фото удалено!", kb.back_to_editing())
+        await callback.answer("Фото удалено")
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
     else:
-        await safe_edit_message(callback, "Ошибка удаления", kb.back_to_editing())
-
-    await callback.answer()
+        await callback.answer("Ошибка удаления", show_alert=True)
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
 
 @router.callback_query(F.data == "cancel_edit")
 async def cancel_edit(callback: CallbackQuery, state: FSMContext, db):
@@ -1035,8 +1172,8 @@ async def cancel_edit(callback: CallbackQuery, state: FSMContext, db):
 
     await update_user_activity(callback.from_user.id, 'available', db)
 
-    await safe_edit_message(callback, "Редактирование отменено", kb.back_to_editing())
-    await callback.answer()
+    await callback.answer("Редактирование отменено")
+    await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
 
 # ==================== УДАЛЕНИЕ ПРОФИЛЯ ====================
 

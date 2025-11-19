@@ -279,58 +279,59 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
             logger.error(f"Ошибка при подгрузке анкет: {e}")
     
     ads = await db.get_active_ads_for_game(data['game'])
-    
+
     if ads and next_profiles_shown > 0:
-        min_interval = min(ad.get('show_interval', 3) for ad in ads)
-        
-        logger.info(f"🟣 Проверка рекламы: ads={len(ads)}, next_profiles_shown={next_profiles_shown}, min_interval={min_interval}")
-        
-        if next_profiles_shown % min_interval == 0:
-            suitable_ads = [ad for ad in ads if next_profiles_shown % ad.get('show_interval', 3) == 0]
-            
-            if not suitable_ads:
-                suitable_ads = ads
-            
+        suitable_ads = []
+
+        for ad in ads:
+            ad_interval = ad.get('show_interval', 3)
+            if next_profiles_shown % ad_interval == 0:
+                suitable_ads.append(ad)
+                logger.info(f"🎯 Реклама #{ad['id']} подходит: {next_profiles_shown} % {ad_interval} = 0")
+            else:
+                logger.debug(f"⏭️ Реклама #{ad['id']} не подходит: {next_profiles_shown} % {ad_interval} = {next_profiles_shown % ad_interval}")
+
+        if suitable_ads:
             ad = random.choice(suitable_ads)
             show_interval = ad.get('show_interval', 3)
-            
-            logger.info(f"🔷 Выбрана реклама #{ad['id']}, интервал={show_interval}, подходящих реклам: {len(suitable_ads)}")
-            logger.info(f"🟠 ПОКАЗЫВАЕМ РЕКЛАМУ! next_profiles_shown={next_profiles_shown}, interval={show_interval}")
-            
+
+            logger.info(f"🔷 Выбрана реклама #{ad['id']} (интервал: {show_interval}), подходящих реклам: {len(suitable_ads)}")
+            logger.info(f"🟠 ПОКАЗЫВАЕМ РЕКЛАМУ! profiles_shown={next_profiles_shown}")
+
             try:
                 try:
                     await callback.message.delete()
                 except Exception as e:
                     logger.warning(f"Не удалось удалить сообщение: {e}")
-                
+
                 sent_msg = await callback.bot.copy_message(
                     chat_id=callback.message.chat.id,
                     from_chat_id=ad['chat_id'],
                     message_id=ad['message_id'],
                     reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
-                        [kb.InlineKeyboardButton(text="Понятно", callback_data="ad_continue")]
+                        [kb.InlineKeyboardButton(text="Продолжить", callback_data="ad_continue")]
                     ])
                 )
-                
+
                 await state.update_data(
                     current_index=next_index,
                     ad_message_id=sent_msg.message_id,
                     profiles_shown=0
                 )
-                
+
                 logger.info(f"✅ Реклама показана! Сохранено: current_index={next_index}, profiles_shown=0")
                 return
-                
+
             except Exception as e:
                 logger.error(f"❌ Ошибка показа рекламы #{ad.get('id')}: {e}")
         else:
-            logger.info(f"⏭️ Реклама НЕ показывается: {next_profiles_shown} % {min_interval} = {next_profiles_shown % min_interval}")
+            logger.info(f"⏭️ Нет подходящих реклам на шаге {next_profiles_shown} (всего реклам: {len(ads)})")
     else:
         if not ads:
-            logger.info(f"⏭️ Реклама пропущена: нет активных реклам")
+            logger.debug(f"⏭️ Реклама пропущена: нет активных реклам для игры {data['game']}")
         else:
-            logger.info(f"⏭️ Реклама пропущена: next_profiles_shown={next_profiles_shown}")
-    
+            logger.debug(f"⏭️ Реклама пропущена: profiles_shown={next_profiles_shown} (ещё не начали показ)")
+
     logger.info(f"🔵 Показ анкеты: сохраняем current_index={next_index}, profiles_shown={next_profiles_shown}")
     await state.update_data(
         current_index=next_index,

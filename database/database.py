@@ -199,7 +199,8 @@ class Database:
                     is_active BOOLEAN DEFAULT TRUE,
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                     created_by BIGINT,
-                    show_interval INTEGER DEFAULT 3
+                    show_interval INTEGER DEFAULT 3,
+                    games TEXT[] DEFAULT ARRAY['dota', 'cs']::TEXT[]
                 )
             ''')
 
@@ -268,7 +269,26 @@ class Database:
                 await conn.execute("UPDATE profiles SET updated_at = created_at WHERE updated_at IS NULL")
                 logger.info("✅ Миграция: добавлена колонка updated_at в profiles")
             except Exception as e:
-                logger.warning(f"Миграция поля updated_at: {e}")      
+                logger.warning(f"Миграция поля updated_at: {e}")
+
+            try:
+                await conn.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS role TEXT DEFAULT 'player'")
+                await conn.execute("UPDATE profiles SET role = 'player' WHERE role IS NULL")
+                logger.info("✅ Миграция: добавлена колонка role в profiles")
+            except Exception as e:
+                logger.warning(f"Миграция поля role: {e}")
+
+            try:
+                await conn.execute("ALTER TABLE likes ADD COLUMN IF NOT EXISTS message TEXT")
+                logger.info("✅ Миграция: добавлена колонка message в likes")
+            except Exception as e:
+                logger.warning(f"Миграция поля message: {e}")
+
+            try:
+                await conn.execute("ALTER TABLE ad_posts ADD COLUMN IF NOT EXISTS games TEXT[] DEFAULT ARRAY['dota', 'cs']::TEXT[]")
+                logger.info("✅ Миграция: добавлена колонка games в ad_posts")
+            except Exception as e:
+                logger.warning(f"Миграция поля games: {e}")
 
             for index_sql in optimized_indexes:
                 try:
