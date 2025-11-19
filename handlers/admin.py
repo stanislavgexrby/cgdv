@@ -17,6 +17,7 @@ from handlers.notifications import notify_user_banned, notify_user_unbanned, not
 class AdminAdForm(StatesGroup):
     waiting_ad_message = State()
     waiting_ad_caption = State()
+    waiting_game_choice = State()
     waiting_interval_choice = State()
     editing_interval = State()
 
@@ -423,7 +424,6 @@ async def admin_ads_menu(callback: CallbackQuery, db):
 @router.callback_query(F.data.startswith("ad_view_"))
 @admin_only
 async def view_ad_details(callback: CallbackQuery, db):
-    """Просмотр деталей конкретной рекламы"""
     try:
         ad_id = int(callback.data.split("_")[2])
     except (IndexError, ValueError):
@@ -441,8 +441,17 @@ async def view_ad_details(callback: CallbackQuery, db):
     status = "✅ Активна" if ad['is_active'] else "❌ Выключена"
     created = ad['created_at'].strftime("%d.%m.%Y %H:%M") if hasattr(ad['created_at'], 'strftime') else str(ad['created_at'])[:16]
     
+    games = ad.get('games', ['dota', 'cs'])
+    if len(games) == 2:
+        games_text = "Обе игры"
+    elif 'dota' in games:
+        games_text = "Dota 2"
+    else:
+        games_text = "CS2"
+    
     text = (f"📢 Рекламный пост <b>#{ad['id']}</b>\n\n"
             f"<b>Название:</b> {ad['caption']}\n"
+            f"<b>Игры:</b> {games_text}\n"
             f"<b>Статус:</b> {status}\n"
             f"<b>Интервал показа:</b> каждые {ad['show_interval']} анкет\n"
             f"<b>Создан:</b> {created}\n\n"
@@ -489,25 +498,51 @@ async def receive_ad_message(message: Message, state: FSMContext, db):
 
 @router.message(AdminAdForm.waiting_ad_caption)
 async def receive_ad_caption(message: Message, state: FSMContext, db):
-    """Получение названия рекламы и переход к выбору интервала"""
+    """Получение названия рекламы и переход к выбору игр"""
     caption = message.text[:100] if message.text else "Без названия"
-    
+
     await state.update_data(caption=caption)
-    await state.set_state(AdminAdForm.waiting_interval_choice)
+    await state.set_state(AdminAdForm.waiting_game_choice)
     
     text = (f"✅ Название сохранено: <b>{caption}</b>\n\n"
-            f"<b>Шаг 3/3: Выберите интервал показа</b>\n\n"
-            f"Через сколько анкет показывать эту рекламу?")
+            f"<b>Шаг 3/4: В каких играх показывать рекламу?</b>")
     
     await message.answer(
+        text,
+        reply_markup=kb.game_choice_for_ad_keyboard(),
+        parse_mode='HTML'
+    )
+
+@router.callback_query(F.data.startswith("adgame_"), AdminAdForm.waiting_game_choice)
+async def select_games_for_ad(callback: CallbackQuery, state: FSMContext):
+    """Выбор игр для показа рекламы"""
+    choice = callback.data.split("_")[1]
+    
+    if choice == "dota":
+        games = ['dota']
+    elif choice == "cs":
+        games = ['cs']
+    else:  # both
+        games = ['dota', 'cs']
+    
+    await state.update_data(games=games)
+    await state.set_state(AdminAdForm.waiting_interval_choice)
+    
+    games_text = "обеих играх" if len(games) == 2 else ("Dota 2" if games[0] == "dota" else "CS2")
+    
+    text = (f"✅ Реклама будет показываться в <b>{games_text}</b>\n\n"
+            f"<b>Шаг 4/4: Выберите интервал показа</b>\n\n"
+            f"Через сколько анкет показывать эту рекламу?")
+    
+    await callback.message.edit_text(
         text,
         reply_markup=kb.interval_choice_keyboard(),
         parse_mode='HTML'
     )
+    await callback.answer()
 
 @router.callback_query(F.data.startswith("interval_"), AdminAdForm.waiting_interval_choice)
 async def select_interval_for_new_ad(callback: CallbackQuery, state: FSMContext, db):
-    """Выбор интервала при создании новой рекламы"""
     try:
         interval = int(callback.data.split("_")[1])
     except (IndexError, ValueError):
@@ -521,13 +556,18 @@ async def select_interval_for_new_ad(callback: CallbackQuery, state: FSMContext,
         chat_id=data['chat_id'],
         caption=data['caption'],
         admin_id=callback.from_user.id,
-        show_interval=interval
+        show_interval=interval,
+        games=data.get('games', ['dota', 'cs'])
     )
     
     await state.clear()
     
+    games = data.get('games', ['dota', 'cs'])
+    games_text = "обеих играх" if len(games) == 2 else ("Dota 2" if games[0] == "dota" else "CS2")
+    
     text = (f"✅ Рекламный пост <b>#{ad_id}</b> создан!\n\n"
             f"<b>Название:</b> {data['caption']}\n"
+            f"<b>Игры:</b> {games_text}\n"
             f"<b>Интервал:</b> каждые {interval} анкет\n\n"
             f"Пост автоматически активен и будет показываться пользователям.")
     
@@ -582,6 +622,62 @@ async def start_edit_interval(callback: CallbackQuery, state: FSMContext, db):
         parse_mode='HTML'
     )
     await callback.answer()
+
+@router.callback_query(F.data.startswith("ad_games_"))
+@admin_only
+async def start_edit_games(callback: CallbackQuery, state: FSMContext, db):
+    """Начало редактирования игр для рекламы"""
+    try:
+        ad_id = int(callback.data.split("_")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+    
+    ads = await db.get_all_ads()
+    ad = next((a for a in ads if a['id'] == ad_id), None)
+    
+    if not ad:
+        await callback.answer("Реклама не найдена", show_alert=True)
+        return
+    
+    current_games = ad.get('games', ['dota', 'cs'])
+    
+    text = (f"📢 Пост <b>#{ad_id}</b>: {ad['caption']}\n\n"
+            f"<b>В каких играх показывать рекламу?</b>")
+    
+    await callback.message.edit_text(
+        text,
+        reply_markup=kb.game_choice_for_ad_edit_keyboard(ad_id, current_games),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("setgames_"))
+async def apply_new_games(callback: CallbackQuery, db):
+    """Применение нового списка игр"""
+    try:
+        parts = callback.data.split("_")
+        ad_id = int(parts[1])
+        choice = parts[2]
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка данных", show_alert=True)
+        return
+    
+    if choice == "dota":
+        games = ['dota']
+    elif choice == "cs":
+        games = ['cs']
+    else:  # both
+        games = ['dota', 'cs']
+    
+    success = await db.update_ad_games(ad_id, games)
+    
+    if success:
+        games_text = "обеих играх" if len(games) == 2 else ("Dota 2" if games[0] == "dota" else "CS2")
+        await callback.answer(f"✅ Теперь показывается в {games_text}")
+        await view_ad_details(callback, db)
+    else:
+        await callback.answer("❌ Ошибка обновления", show_alert=True)
 
 @router.callback_query(F.data.startswith("setint_"), AdminAdForm.editing_interval)
 async def apply_new_interval(callback: CallbackQuery, state: FSMContext, db):
