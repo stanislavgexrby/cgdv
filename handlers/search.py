@@ -247,13 +247,11 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
         logger.info(f"🟡 Инициализация user_id, установлен profiles_shown=0")
         data = await state.get_data()
     
-    # ============ УВЕЛИЧИВАЕМ СЧЁТЧИКИ СРАЗУ ============
     next_index = current_index + 1
     next_profiles_shown = profiles_shown + 1
     
     logger.info(f"🟢 Увеличены счётчики: next_index={next_index}, next_profiles_shown={next_profiles_shown}")
     
-    # ============ АВТОПОДГРУЗКА АНКЕТ ============
     if profiles and next_index >= len(profiles) - 5:
         last_offset = data.get('last_loaded_offset', 0)
         new_offset = last_offset + 20
@@ -280,8 +278,7 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
         except Exception as e:
             logger.error(f"Ошибка при подгрузке анкет: {e}")
     
-    # ============ ПРОВЕРКА ПОКАЗА РЕКЛАМЫ ============
-    ads = await db.get_active_ads()
+    ads = await db.get_active_ads_for_game(data['game'])
     
     if ads and next_profiles_shown > 0:
         min_interval = min(ad.get('show_interval', 3) for ad in ads)
@@ -301,7 +298,6 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
             logger.info(f"🟠 ПОКАЗЫВАЕМ РЕКЛАМУ! next_profiles_shown={next_profiles_shown}, interval={show_interval}")
             
             try:
-                # Удаляем предыдущую анкету
                 try:
                     await callback.message.delete()
                 except Exception as e:
@@ -335,7 +331,6 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
         else:
             logger.info(f"⏭️ Реклама пропущена: next_profiles_shown={next_profiles_shown}")
     
-    # ============ ПОКАЗЫВАЕМ СЛЕДУЮЩУЮ АНКЕТУ ============
     logger.info(f"🔵 Показ анкеты: сохраняем current_index={next_index}, profiles_shown={next_profiles_shown}")
     await state.update_data(
         current_index=next_index,

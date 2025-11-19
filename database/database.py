@@ -1058,33 +1058,55 @@ class Database:
 
     # === РЕКЛАМНЫЕ ПОСТЫ ===
 
-    async def add_ad_post(self, message_id: int, chat_id: int, caption: str, admin_id: int, show_interval: int = 3) -> int:
+    async def add_ad_post(self, message_id: int, chat_id: int, caption: str, admin_id: int,
+                          show_interval: int = 3, games: List[str] = None) -> int:
         """Добавление рекламного поста"""
+        if games is None:
+            games = ['dota', 'cs']
+
         async with self._pg_pool.acquire() as conn:
             post_id = await conn.fetchval(
-                """INSERT INTO ad_posts (message_id, chat_id, caption, created_by, show_interval)
-                   VALUES ($1, $2, $3, $4, $5)
+                """INSERT INTO ad_posts (message_id, chat_id, caption, created_by, show_interval, games)
+                   VALUES ($1, $2, $3, $4, $5, $6)
                    RETURNING id""",
-                message_id, chat_id, caption, admin_id, show_interval
+                message_id, chat_id, caption, admin_id, show_interval, games
             )
-            await self._redis.delete("active_ads")
-            logger.info(f"Добавлен рекламный пост #{post_id}")
+            await self._redis.delete("active_ads:dota")
+            await self._redis.delete("active_ads:cs")
+            logger.info(f"Добавлен рекламный пост #{post_id} для игр: {games}")
             return post_id
 
-    async def get_active_ads(self) -> List[Dict]:
-        """Получение всех активных рекламных постов с кэшированием"""
-        cache_key = "active_ads"
+    async def get_active_ads_for_game(self, game: str) -> List[Dict]:
+        """Получение активных рекламных постов для конкретной игры"""
+        cache_key = f"active_ads:{game}"
         cached = await self._get_cache(cache_key)
         if cached:
             return cached
 
         async with self._pg_pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM ad_posts WHERE is_active = TRUE ORDER BY created_at DESC"
+                "SELECT * FROM ad_posts WHERE is_active = TRUE AND $1 = ANY(games) ORDER BY created_at DESC",
+                game
             )
             result = [dict(row) for row in rows]
             await self._set_cache(cache_key, result, 600)
             return result
+
+    async def update_ad_games(self, ad_id: int, games: List[str]) -> bool:
+        """Обновление списка игр для рекламы"""
+        try:
+            async with self._pg_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE ad_posts SET games = $1 WHERE id = $2",
+                    games, ad_id
+                )
+                await self._redis.delete("active_ads:dota")
+                await self._redis.delete("active_ads:cs")
+                logger.info(f"Обновлены игры для рекламы #{ad_id}: {games}")
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка обновления игр рекламы #{ad_id}: {e}")
+            return False
 
     async def get_all_ads(self) -> List[Dict]:
         """Получение всех рекламных постов для админ панели"""

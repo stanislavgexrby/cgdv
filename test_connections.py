@@ -21,7 +21,7 @@ async def test_postgresql():
                          f"{os.getenv('DB_PORT')}/"
                          f"{os.getenv('DB_NAME')}")
         
-        conn = await asyncpg.connect(connection_url)
+        conn = await asyncpg.connect(connection_url, ssl='disable')
         
         # Проверяем подключение
         version = await conn.fetchval('SELECT version()')

@@ -731,6 +731,37 @@ def admin_ads_menu_list(ads: list) -> InlineKeyboardMarkup:
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def game_choice_for_ad_keyboard() -> InlineKeyboardMarkup:
+    """Выбор игр при создании рекламы"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="Dota 2", callback_data="adgame_dota"),
+            InlineKeyboardButton(text="CS2", callback_data="adgame_cs")
+        ],
+        [InlineKeyboardButton(text="🎯 Обе игры", callback_data="adgame_both")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_ads")]
+    ])
+
+def game_choice_for_ad_edit_keyboard(ad_id: int, current_games: List[str]) -> InlineKeyboardMarkup:
+    """Выбор игр при редактировании рекламы"""
+    buttons = []
+    
+    # Dota 2
+    dota_text = "• Dota 2 •" if 'dota' in current_games and len(current_games) == 1 else "Dota 2"
+    # CS2
+    cs_text = "• CS2 •" if 'cs' in current_games and len(current_games) == 1 else "CS2"
+    # Both
+    both_text = "• Обе игры •" if len(current_games) == 2 else "Обе игры"
+    
+    buttons.append([
+        InlineKeyboardButton(text=dota_text, callback_data=f"setgames_{ad_id}_dota"),
+        InlineKeyboardButton(text=cs_text, callback_data=f"setgames_{ad_id}_cs")
+    ])
+    buttons.append([InlineKeyboardButton(text=both_text, callback_data=f"setgames_{ad_id}_both")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"ad_view_{ad_id}")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 def admin_ad_actions(ad: dict) -> InlineKeyboardMarkup:
     """Действия с конкретной рекламой"""
     ad_id = ad['id']
@@ -740,6 +771,7 @@ def admin_ad_actions(ad: dict) -> InlineKeyboardMarkup:
     
     buttons = [
         [InlineKeyboardButton(text=toggle_text, callback_data=f"ad_toggle_{ad_id}")],
+        [InlineKeyboardButton(text="🎮 Изменить игры", callback_data=f"ad_games_{ad_id}")],
         [InlineKeyboardButton(text="📊 Изменить интервал", callback_data=f"ad_interval_{ad_id}")],
         [InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"ad_delete_{ad_id}")],
         [InlineKeyboardButton(text="◀️ К списку", callback_data="ad_back_to_list")]
