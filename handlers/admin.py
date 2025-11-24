@@ -186,7 +186,7 @@ async def _show_report(callback: CallbackQuery, report: dict, current_index: int
     stats_text += f"• Жалоб всего: {mod_stats['reports_total']}\n"
     stats_text += f"• Подтвержденных жалоб: {mod_stats['reports_resolved']}\n"
     stats_text += f"• Банов всего: {mod_stats['bans_total']}\n"
-    
+
     if mod_stats['last_ban']:
         last_ban = mod_stats['last_ban']
         ban_date = _format_datetime(last_ban['created_at'])
@@ -194,6 +194,11 @@ async def _show_report(callback: CallbackQuery, report: dict, current_index: int
         stats_text += f"• Причина: {last_ban['reason']}\n"
     else:
         stats_text += "• Последний бан: не было\n"
+
+    # Добавляем сообщение жалобы от пользователя
+    report_message = report.get('report_message')
+    if report_message:
+        stats_text += f"\n💬 <b>Сообщение от жалобщика:</b>\n<i>«{report_message}»</i>\n"
     
     if profile:
         body = "\n👤 <b>Анкета нарушителя:</b>\n\n" + texts.format_profile(profile, show_contact=True)

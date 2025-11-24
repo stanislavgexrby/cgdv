@@ -32,6 +32,7 @@ class SearchForm(StatesGroup):
     goals_filter = State()
     browsing = State()
     waiting_message = State()
+    waiting_report_message = State()
 
 __all__ = ['safe_edit_message', 'router', 'SearchForm']
 

@@ -176,17 +176,25 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
         await show_next_profile(callback, state, db)
     
     elif action == "report":
-        success = await db.add_report(user_id, target_user_id, game)
-        
-        if success:
-            await db._clear_pattern_cache(f"search:{user_id}:{game}:*")
-            
-            await callback.answer("Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время")
-            await notify_admin_new_report(callback.bot, user_id, target_user_id, game)
-            logger.info(f"Жалоба добавлена: {user_id} пожаловался на {target_user_id}")
-            await show_next_profile(callback, state, db)
-        else:
-            await callback.answer("Вы уже жаловались на эту анкету", show_alert=True)
+        await state.update_data(report_target_user_id=target_user_id)
+        await state.set_state(SearchForm.waiting_report_message)
+
+        text = (
+            "<b>Подача жалобы</b>\n\n"
+            "Напишите причину жалобы (ваше сообщение увидит только администратор):\n\n"
+            "Например:\n"
+            "• Неприемлемое фото\n"
+            "• Оскорбительное описание\n"
+            "• Спам или реклама\n"
+            "• Фейковая анкета"
+        )
+
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="Отмена", callback_data="cancel_report")]
+        ])
+
+        await safe_edit_message(callback, text, keyboard)
+        await callback.answer()
 
 async def show_current_profile(callback: CallbackQuery, state: FSMContext):
     """Показ текущего профиля в поиске"""
@@ -992,6 +1000,80 @@ async def show_search_end(message: Message, state: FSMContext, game: str):
     ])
     
     await message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+
+@router.callback_query(F.data == "cancel_report")
+async def cancel_report(callback: CallbackQuery, state: FSMContext, db):
+    """Отмена жалобы"""
+    data = await state.get_data()
+
+    # Восстанавливаем состояние browsing
+    await state.set_state(SearchForm.browsing)
+
+    # Удаляем сохраненный ID
+    await state.update_data(report_target_user_id=None)
+
+    await callback.answer("Жалоба отменена")
+
+    # Показываем следующую анкету
+    await show_next_profile(callback, state, db)
+
+@router.message(SearchForm.waiting_report_message)
+async def receive_report_message(message: Message, state: FSMContext, db):
+    """Получение сообщения жалобы"""
+    report_message = message.text
+
+    if not report_message or len(report_message.strip()) < 5:
+        await message.answer(
+            "Сообщение слишком короткое. Опишите причину жалобы подробнее (минимум 5 символов):",
+            reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+                [kb.InlineKeyboardButton(text="Отмена", callback_data="cancel_report")]
+            ])
+        )
+        return
+
+    report_message = report_message[:500]
+
+    data = await state.get_data()
+    target_user_id = data.get('report_target_user_id')
+    game = data.get('game')
+    user_id = message.from_user.id
+
+    if not target_user_id or not game:
+        await message.answer(
+            "Ошибка: данные жалобы не найдены. Попробуйте снова.",
+            reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+                [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+            ])
+        )
+        await state.clear()
+        return
+
+    success = await db.add_report(user_id, target_user_id, game, report_message)
+
+    if success:
+        await db._clear_pattern_cache(f"search:{user_id}:{game}:*")
+
+        await message.answer(
+            "Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время.",
+            reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+                [kb.InlineKeyboardButton(text="Продолжить поиск", callback_data="continue_search")]
+            ])
+        )
+
+        await notify_admin_new_report(message.bot, user_id, target_user_id, game)
+        logger.info(f"Жалоба добавлена: {user_id} пожаловался на {target_user_id}, причина: {report_message[:50]}")
+
+        # Восстанавливаем состояние browsing
+        await state.set_state(SearchForm.browsing)
+        await state.update_data(report_target_user_id=None)
+    else:
+        await message.answer(
+            "Вы уже жаловались на эту анкету",
+            reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+                [kb.InlineKeyboardButton(text="Продолжить поиск", callback_data="continue_search")]
+            ])
+        )
+        await state.set_state(SearchForm.browsing)
 
 @router.message(SearchForm.waiting_message)
 async def wrong_message_format(message: Message):

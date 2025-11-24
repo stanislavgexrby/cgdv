@@ -290,6 +290,12 @@ class Database:
             except Exception as e:
                 logger.warning(f"Миграция поля games: {e}")
 
+            try:
+                await conn.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_message TEXT")
+                logger.info("✅ Миграция: добавлена колонка report_message в reports")
+            except Exception as e:
+                logger.warning(f"Миграция поля report_message: {e}")
+
             for index_sql in optimized_indexes:
                 try:
                     await conn.execute(index_sql)
@@ -1034,14 +1040,14 @@ class Database:
 
     # === ЖАЛОБЫ ===
 
-    async def add_report(self, reporter_id: int, reported_user_id: int, game: str) -> bool:
-        """Добавление жалобы"""
+    async def add_report(self, reporter_id: int, reported_user_id: int, game: str, report_message: str = None) -> bool:
+        """Добавление жалобы с опциональным сообщением"""
         async with self._pg_pool.acquire() as conn:
             try:
                 await conn.execute(
-                    '''INSERT INTO reports (reporter_id, reported_user_id, game, report_reason, status)
-                       VALUES ($1, $2, $3, 'inappropriate_content', 'pending')''',
-                    reporter_id, reported_user_id, game
+                    '''INSERT INTO reports (reporter_id, reported_user_id, game, report_reason, status, report_message)
+                       VALUES ($1, $2, $3, 'inappropriate_content', 'pending', $4)''',
+                    reporter_id, reported_user_id, game, report_message
                 )
                 return True
             except:
