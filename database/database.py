@@ -401,6 +401,18 @@ class Database:
 
             return result
 
+    async def get_user_by_username(self, username: str) -> Optional[Dict]:
+        """Получение пользователя по username"""
+        # Убираем @ если есть
+        username = username.lstrip('@')
+
+        async with self._pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM users WHERE LOWER(username) = LOWER($1)",
+                username
+            )
+            return dict(row) if row else None
+
     async def create_user(self, telegram_id: int, username: str, game: str) -> bool:
         """Создание или обновление пользователя"""
         async with self._pg_pool.acquire() as conn:

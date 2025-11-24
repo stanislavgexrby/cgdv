@@ -643,6 +643,7 @@ def admin_main_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Реклама", callback_data="admin_ads")],
         [InlineKeyboardButton(text="Жалобы", callback_data="admin_reports")],
         [InlineKeyboardButton(text="Баны", callback_data="admin_bans")],
+        [InlineKeyboardButton(text="Забанить пользователя", callback_data="admin_ban_user")],
         [InlineKeyboardButton(text="Главное меню", callback_data="back_to_games")]
     ])
 

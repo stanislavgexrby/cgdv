@@ -21,6 +21,11 @@ class AdminAdForm(StatesGroup):
     waiting_interval_choice = State()
     editing_interval = State()
 
+class AdminBanForm(StatesGroup):
+    waiting_user_input = State()
+    waiting_ban_duration = State()
+    waiting_ban_reason = State()
+
 logger = logging.getLogger(__name__)
 router = Router()
 
@@ -770,3 +775,239 @@ async def back_to_ads_list(callback: CallbackQuery, state: FSMContext, db):
     """Возврат к списку реклам"""
     await state.clear()
     await admin_ads_menu(callback, db)
+
+# ==================== БАН ПОЛЬЗОВАТЕЛЯ ПО ID/USERNAME ====================
+
+@router.callback_query(F.data == "admin_ban_user")
+@admin_only
+async def start_ban_user_process(callback: CallbackQuery, state: FSMContext):
+    """Начало процесса бана пользователя"""
+    await state.set_state(AdminBanForm.waiting_user_input)
+
+    text = (
+        "🚫 <b>Бан пользователя</b>\n\n"
+        "<b>Шаг 1/3: Укажите пользователя</b>\n\n"
+        "Введите Telegram ID или username пользователя:\n"
+        "• <code>123456789</code> (Telegram ID)\n"
+        "• <code>@username</code> (username)\n"
+        "• <code>username</code> (без @)"
+    )
+
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+        [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_back")]
+    ])
+
+    await safe_edit_message(callback, text, keyboard)
+    await callback.answer()
+
+@router.message(AdminBanForm.waiting_user_input)
+async def receive_user_input(message: Message, state: FSMContext, db):
+    """Получение ID или username пользователя"""
+    user_input = message.text.strip()
+
+    # Пытаемся найти пользователя
+    user = None
+
+    # Проверяем, это ID или username
+    if user_input.isdigit():
+        # Это Telegram ID
+        user_id = int(user_input)
+        user = await db.get_user(user_id)
+        if not user:
+            await message.answer(
+                "❌ Пользователь с таким ID не найден в базе.\n\n"
+                "Попробуйте другой ID или username:",
+                reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+                    [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_back")]
+                ]),
+                parse_mode='HTML'
+            )
+            return
+    else:
+        # Это username
+        username = user_input.lstrip('@')
+        user = await db.get_user_by_username(username)
+        if not user:
+            await message.answer(
+                f"❌ Пользователь с username @{username} не найден в базе.\n\n"
+                "Попробуйте другой ID или username:",
+                reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+                    [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_back")]
+                ]),
+                parse_mode='HTML'
+            )
+            return
+
+    # Проверяем, не забанен ли уже
+    is_banned = await db.is_user_banned(user['telegram_id'])
+    if is_banned:
+        ban_info = await db.get_user_ban(user['telegram_id'])
+        expires_text = _format_datetime(ban_info.get('expires_at')) if ban_info else 'навсегда'
+
+        await message.answer(
+            f"⚠️ Пользователь уже забанен!\n\n"
+            f"👤 ID: {user['telegram_id']}\n"
+            f"📛 Username: @{user.get('username', 'нет')}\n"
+            f"⏰ Истекает: {expires_text}\n"
+            f"📝 Причина: {ban_info.get('reason', 'не указана')}\n\n"
+            "Введите другого пользователя или отмените:",
+            reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+                [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_back")]
+            ]),
+            parse_mode='HTML'
+        )
+        return
+
+    # Получаем профиль для отображения
+    current_game = user.get('current_game', 'dota')
+    profile = await db.get_user_profile(user['telegram_id'], current_game) if current_game else None
+
+    # Сохраняем данные пользователя
+    await state.update_data(
+        user_id=user['telegram_id'],
+        username=user.get('username'),
+        current_game=current_game,
+        profile=profile
+    )
+
+    await state.set_state(AdminBanForm.waiting_ban_duration)
+
+    # Формируем информацию о пользователе
+    user_info = f"👤 ID: <code>{user['telegram_id']}</code>\n"
+    if user.get('username'):
+        user_info += f"📛 Username: @{user['username']}\n"
+    if profile:
+        user_info += f"🎮 Игра: {settings.GAMES.get(current_game, current_game)}\n"
+        user_info += f"📝 Имя: {profile.get('name', 'нет')}\n"
+        user_info += f"🎯 Никнейм: {profile.get('nickname', 'нет')}\n"
+
+    text = (
+        f"✅ Пользователь найден!\n\n"
+        f"{user_info}\n"
+        f"<b>Шаг 2/3: Выберите длительность бана:</b>"
+    )
+
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+        [
+            kb.InlineKeyboardButton(text="7 дней", callback_data="banuser_days_7"),
+            kb.InlineKeyboardButton(text="30 дней", callback_data="banuser_days_30")
+        ],
+        [
+            kb.InlineKeyboardButton(text="90 дней", callback_data="banuser_days_90"),
+            kb.InlineKeyboardButton(text="365 дней", callback_data="banuser_days_365")
+        ],
+        [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_back")]
+    ])
+
+    await message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+
+@router.callback_query(F.data.startswith("banuser_days_"), AdminBanForm.waiting_ban_duration)
+async def select_ban_duration(callback: CallbackQuery, state: FSMContext):
+    """Выбор длительности бана"""
+    try:
+        days = int(callback.data.split("_")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка", show_alert=True)
+        return
+
+    await state.update_data(ban_days=days)
+    await state.set_state(AdminBanForm.waiting_ban_reason)
+
+    data = await state.get_data()
+    user_id = data['user_id']
+    username = data.get('username')
+
+    user_info = f"👤 ID: <code>{user_id}</code>"
+    if username:
+        user_info += f" (@{username})"
+
+    text = (
+        f"✅ Выбрано: бан на <b>{days} дней</b>\n\n"
+        f"{user_info}\n\n"
+        f"<b>Шаг 3/3: Введите причину бана:</b>\n\n"
+        f"Причина будет показана пользователю."
+    )
+
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+        [kb.InlineKeyboardButton(text="Использовать стандартную", callback_data="banuser_default_reason")],
+        [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_back")]
+    ])
+
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
+    await callback.answer()
+
+@router.callback_query(F.data == "banuser_default_reason", AdminBanForm.waiting_ban_reason)
+async def use_default_ban_reason(callback: CallbackQuery, state: FSMContext, db):
+    """Использование стандартной причины бана"""
+    await _apply_ban(callback, state, db, reason="Нарушение правил сообщества")
+
+@router.message(AdminBanForm.waiting_ban_reason)
+async def receive_ban_reason(message: Message, state: FSMContext, db):
+    """Получение причины бана"""
+    reason = message.text.strip()[:200]  # Ограничиваем длину
+
+    if not reason:
+        await message.answer(
+            "❌ Причина не может быть пустой. Введите причину бана:",
+            reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+                [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_back")]
+            ])
+        )
+        return
+
+    await _apply_ban(message, state, db, reason=reason)
+
+async def _apply_ban(source, state: FSMContext, db, reason: str):
+    """Применение бана"""
+    data = await state.get_data()
+    user_id = data['user_id']
+    username = data.get('username')
+    ban_days = data['ban_days']
+    current_game = data.get('current_game')
+
+    # Вычисляем дату окончания бана
+    expires_at = datetime.utcnow() + timedelta(days=ban_days)
+
+    # Применяем бан
+    success = await db.ban_user(user_id, reason, expires_at)
+
+    if success:
+        # Отправляем уведомление пользователю
+        bot = source.bot if hasattr(source, 'bot') else source.message.bot
+        await notify_user_banned(bot, user_id, expires_at)
+
+        # Очищаем кэш поиска
+        if current_game:
+            await db._clear_pattern_cache(f"search:*:{current_game}:*")
+
+        logger.info(f"Админ забанил пользователя {user_id} на {ban_days} дней. Причина: {reason}")
+
+        user_info = f"👤 ID: {user_id}"
+        if username:
+            user_info += f" (@{username})"
+
+        text = (
+            f"✅ <b>Пользователь успешно забанен!</b>\n\n"
+            f"{user_info}\n"
+            f"⏰ Длительность: {ban_days} дней\n"
+            f"📝 Причина: {reason}\n"
+            f"📅 До: {_format_datetime(expires_at)}\n\n"
+            f"Пользователь получил уведомление о бане."
+        )
+
+        keyboard = kb.admin_back_menu()
+
+        if isinstance(source, CallbackQuery):
+            await source.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
+            await source.answer("✅ Бан применён!")
+        else:
+            await source.answer(text, reply_markup=keyboard, parse_mode='HTML')
+    else:
+        error_text = "❌ Ошибка применения бана. Попробуйте снова."
+
+        if isinstance(source, CallbackQuery):
+            await source.answer(error_text, show_alert=True)
+        else:
+            await source.answer(error_text)
+
+    await state.clear()
