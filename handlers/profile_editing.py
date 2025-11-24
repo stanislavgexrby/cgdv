@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from aiogram import Router, F
 from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -16,6 +17,15 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+
+async def show_success_notification(message: Message, text: str, duration: float = 2.0):
+    """Показать временное уведомление об успехе"""
+    try:
+        notification = await message.answer(f"✅ {text}")
+        await asyncio.sleep(duration)
+        await notification.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось показать/удалить уведомление: {e}")
 
 async def update_profile_field(user_id: int, field: str, value, db) -> bool:
     """Обновить поле профиля в базе данных"""
@@ -70,7 +80,6 @@ async def show_edit_menu_after_update(user_id: int, db, message: Message = None,
     role = profile.get('role', 'player')
     keyboard = kb.edit_profile_menu(game, role)
 
-    # Обработка через callback (для callback handlers)
     if callback:
         try:
             if profile.get('photo_id'):
@@ -92,16 +101,23 @@ async def show_edit_menu_after_update(user_id: int, db, message: Message = None,
                 pass
             await callback.message.answer(current_info, reply_markup=keyboard, parse_mode='HTML', disable_web_page_preview=True)
 
-    # Обработка через message (для message handlers)
-    elif message and last_bot_message_id:
+    elif message:
         try:
-            # Удаляем старое сообщение бота
-            try:
-                await message.bot.delete_message(chat_id=message.chat.id, message_id=last_bot_message_id)
-            except Exception as e:
-                logger.warning(f"Не удалось удалить сообщение бота: {e}")
+            # Удаляем prompt сообщение по сохраненному ID (если есть)
+            if last_bot_message_id:
+                try:
+                    await message.bot.delete_message(chat_id=message.chat.id, message_id=last_bot_message_id)
+                except Exception as e:
+                    logger.warning(f"Не удалось удалить сообщение бота по last_bot_message_id: {e}")
 
-            # Отправляем новое сообщение с меню редактирования
+            # Также пытаемся удалить сообщение непосредственно перед сообщением пользователя
+            # (это должно быть prompt от бота, если last_bot_message_id не сработал)
+            try:
+                prompt_message_id = message.message_id - 1
+                await message.bot.delete_message(chat_id=message.chat.id, message_id=prompt_message_id)
+            except Exception as e:
+                logger.debug(f"Не удалось удалить предыдущее сообщение (возможно, уже удалено): {e}")
+
             if profile.get('photo_id'):
                 await message.answer_photo(
                     photo=profile['photo_id'],
@@ -134,8 +150,8 @@ async def edit_profile(callback: CallbackQuery, db):
     current_info += texts.format_profile(profile)
     current_info += "\n\nЧто хотите изменить?"
 
-    role = profile.get('role', 'player')  # ← ДОБАВИТЬ
-    keyboard = kb.edit_profile_menu(game, role)  # ← ИЗМЕНИТЬ: передаём роль
+    role = profile.get('role', 'player')
+    keyboard = kb.edit_profile_menu(game, role)
 
     try:
         if profile.get('photo_id'):
@@ -184,18 +200,18 @@ async def recreate_profile(callback: CallbackQuery, state: FSMContext, db):
         await callback.message.delete()
     except Exception as e:
         logger.warning(f"Не удалось удалить меню профиля: {e}")
-    
+
     game_name = settings.GAMES.get(game, game)
     text = f"Создание новой анкеты для {game_name}\n\n{texts.QUESTIONS['name']}"
     keyboard = kb.profile_creation_navigation("name", False)
-    
+
     sent_message = await callback.message.answer(
         text=text,
         reply_markup=keyboard,
         parse_mode='HTML',
         disable_web_page_preview=True
     )
-    
+
     await state.update_data(last_bot_message_id=sent_message.message_id)
     await state.set_state(ProfileForm.name)
     await callback.answer()
@@ -211,7 +227,6 @@ async def edit_name(callback: CallbackQuery, state: FSMContext, db):
     await state.update_data(user_id=user_id, game=user['current_game'])
     await state.set_state(EditProfileForm.edit_name)
 
-    # Удаляем текущее сообщение и отправляем новое, чтобы сохранить правильный ID
     try:
         await callback.message.delete()
     except Exception:
@@ -279,7 +294,7 @@ async def edit_role(callback: CallbackQuery, state: FSMContext, db):
     await state.set_state(EditProfileForm.edit_role)
     
     text = "Выберите новую роль:"
-    keyboard = kb.roles_for_edit(selected_role=current_role)  # ← ИСПОЛЬЗУЕМ ПРАВИЛЬНУЮ КЛАВИАТУРУ
+    keyboard = kb.roles_for_edit(selected_role=current_role)
     
     await safe_edit_message(callback, text, keyboard)
     await callback.answer()
@@ -449,7 +464,6 @@ async def process_edit_name(message: Message, state: FSMContext, db):
     data = await state.get_data()
     last_bot_message_id = data.get('last_bot_message_id')
 
-    # Удаляем сообщение пользователя
     try:
         await message.delete()
     except Exception:
@@ -461,6 +475,7 @@ async def process_edit_name(message: Message, state: FSMContext, db):
     await update_user_activity(message.from_user.id, 'available', db)
 
     if success:
+        asyncio.create_task(show_success_notification(message, "Имя обновлено"))
         await show_edit_menu_after_update(message.from_user.id, db, message=message, last_bot_message_id=last_bot_message_id)
     else:
         await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML')
@@ -480,7 +495,6 @@ async def process_edit_nickname(message: Message, state: FSMContext, db):
     data = await state.get_data()
     last_bot_message_id = data.get('last_bot_message_id')
 
-    # Удаляем сообщение пользователя
     try:
         await message.delete()
     except Exception:
@@ -492,6 +506,7 @@ async def process_edit_nickname(message: Message, state: FSMContext, db):
     await update_user_activity(message.from_user.id, 'available', db)
 
     if success:
+        asyncio.create_task(show_success_notification(message, "Никнейм обновлён"))
         await show_edit_menu_after_update(message.from_user.id, db, message=message, last_bot_message_id=last_bot_message_id)
     else:
         await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML')
@@ -510,7 +525,6 @@ async def process_edit_age(message: Message, state: FSMContext, db):
     data = await state.get_data()
     last_bot_message_id = data.get('last_bot_message_id')
 
-    # Удаляем сообщение пользователя
     try:
         await message.delete()
     except Exception:
@@ -523,6 +537,7 @@ async def process_edit_age(message: Message, state: FSMContext, db):
     await update_user_activity(message.from_user.id, 'available', db)
 
     if success:
+        asyncio.create_task(show_success_notification(message, "Возраст обновлён"))
         await show_edit_menu_after_update(message.from_user.id, db, message=message, last_bot_message_id=last_bot_message_id)
     else:
         await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML')
@@ -564,7 +579,6 @@ async def process_edit_profile_url(message: Message, state: FSMContext, db):
         )
         return
 
-    # Удаляем сообщение пользователя
     try:
         await message.delete()
     except Exception:
@@ -576,6 +590,7 @@ async def process_edit_profile_url(message: Message, state: FSMContext, db):
     await update_user_activity(message.from_user.id, 'available', db)
 
     if success:
+        asyncio.create_task(show_success_notification(message, "Ссылка обновлена"))
         await show_edit_menu_after_update(message.from_user.id, db, message=message, last_bot_message_id=last_bot_message_id)
     else:
         await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML', disable_web_page_preview=True)
@@ -595,7 +610,6 @@ async def process_edit_info(message: Message, state: FSMContext, db):
     data = await state.get_data()
     last_bot_message_id = data.get('last_bot_message_id')
 
-    # Удаляем сообщение пользователя
     try:
         await message.delete()
     except Exception:
@@ -607,6 +621,7 @@ async def process_edit_info(message: Message, state: FSMContext, db):
     await update_user_activity(message.from_user.id, 'available', db)
 
     if success:
+        asyncio.create_task(show_success_notification(message, "Описание обновлено"))
         await show_edit_menu_after_update(message.from_user.id, db, message=message, last_bot_message_id=last_bot_message_id)
     else:
         await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML')
@@ -618,7 +633,6 @@ async def process_edit_photo(message: Message, state: FSMContext, db):
     data = await state.get_data()
     last_bot_message_id = data.get('last_bot_message_id')
 
-    # Удаляем сообщение пользователя (фото)
     try:
         await message.delete()
     except Exception:
@@ -630,6 +644,7 @@ async def process_edit_photo(message: Message, state: FSMContext, db):
     await update_user_activity(message.from_user.id, 'available', db)
 
     if success:
+        asyncio.create_task(show_success_notification(message, "Фото обновлено"))
         await show_edit_menu_after_update(message.from_user.id, db, message=message, last_bot_message_id=last_bot_message_id)
     else:
         await message.answer("Ошибка обновления фото", reply_markup=kb.back_to_editing(), parse_mode='HTML')
@@ -655,7 +670,7 @@ async def wrong_edit_profile_url_format(message: Message):
         [InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")]
     ])
     await message.answer(
-        "Отправьте ссылку на профиль или используйте кнопки", 
+        "Отправьте ссылку на профиль или используйте кнопки",
         reply_markup=keyboard,
         parse_mode='HTML',
         disable_web_page_preview=True
@@ -695,18 +710,15 @@ async def process_edit_role_select(callback: CallbackQuery, state: FSMContext, d
     
     old_role = profile.get('role', 'player')
     
-    # Если роль не изменилась
     if old_role == role:
         role_name = settings.ROLES.get(role, role)
         await safe_edit_message(callback, f"Роль уже установлена на {role_name}", kb.back_to_editing())
         await callback.answer()
         return
     
-    # Определяем нужно ли сбрасывать игровые поля
     should_reset_game_fields = (role != 'player' and old_role == 'player') or (role == 'player' and old_role != 'player')
     
     if should_reset_game_fields:
-        # Сбрасываем игровые поля при смене категории роли
         success = await db.update_user_profile(
             telegram_id=user_id,
             game=game,
@@ -723,7 +735,6 @@ async def process_edit_role_select(callback: CallbackQuery, state: FSMContext, d
             role=role
         )
     else:
-        # Просто меняем роль без изменения других полей (например, player -> player или coach -> manager)
         success = await update_profile_field(user_id, 'role', role, db)
     
     await state.clear()
@@ -747,14 +758,11 @@ async def process_edit_rating(callback: CallbackQuery, state: FSMContext, db):
     parts = callback.data.split("_")
 
     if len(parts) >= 3 and parts[1] == "select":
-        # rating_select_herald -> выбираем herald
         rating = parts[2]
     elif len(parts) >= 3 and parts[1] == "remove":
-        # rating_remove_herald -> при редактировании игнорируем (не меняем рейтинг)
         await callback.answer("Этот рейтинг уже выбран")
         return
     elif len(parts) >= 2:
-        # rating_herald -> выбираем herald (старый формат, если есть)
         rating = parts[1]
     else:
         await callback.answer("Ошибка данных", show_alert=True)
@@ -869,6 +877,8 @@ async def process_edit_country_input(message: Message, state: FSMContext, db):
         await update_user_activity(message.from_user.id, 'available', db)
 
         if success:
+            country_name = settings.COUNTRIES_DICT.get(country_key, settings.MAIN_COUNTRIES.get(country_key, country_key))
+            asyncio.create_task(show_success_notification(message, f"Страна обновлена: {country_name}"))
             await show_edit_menu_after_update(message.from_user.id, db, message=message, last_bot_message_id=last_bot_message_id)
         else:
             await message.answer("Ошибка обновления", reply_markup=kb.back_to_editing(), parse_mode='HTML')

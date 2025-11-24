@@ -212,6 +212,8 @@ async def notify_about_like(bot: Bot, user_id: int, game: str, db=None) -> bool:
             else:
                 quick_actions.append(("Посмотреть лайки", "my_likes"))
 
+            quick_actions.append(("Понятно", "dismiss_notification"))
+
             return await smart_notification(bot, user_id, text, quick_actions, None, db)
 
         except Exception as e:

@@ -386,6 +386,28 @@ async def _show_ban(callback: CallbackQuery, ban: dict, current_index: int, tota
     await safe_edit_message(callback, ban_text, keyboard)
     await callback.answer()
 
+@router.callback_query(F.data == "admin_ban_user")
+@admin_only
+async def start_ban_user_process(callback: CallbackQuery, state: FSMContext):
+    """Начало процесса бана пользователя"""
+    await state.set_state(AdminBanForm.waiting_user_input)
+
+    text = (
+        "🚫 <b>Бан пользователя</b>\n\n"
+        "<b>Шаг 1/3: Укажите пользователя</b>\n\n"
+        "Введите Telegram ID или username пользователя:\n"
+        "• <code>123456789</code> (Telegram ID)\n"
+        "• <code>@username</code> (username)\n"
+        "• <code>username</code> (без @)"
+    )
+
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+        [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_back")]
+    ])
+
+    await safe_edit_message(callback, text, keyboard)
+    await callback.answer()
+
 @router.callback_query(F.data.startswith("admin_ban_"))
 @admin_only
 async def navigate_bans(callback: CallbackQuery, db):
@@ -393,12 +415,12 @@ async def navigate_bans(callback: CallbackQuery, db):
     parts = callback.data.split("_")
     if len(parts) < 4:
         return
-    
+
     direction = parts[2]  # prev или next
     current_index = int(parts[3])
-    
+
     bans = await db.get_all_bans()
-    
+
     if direction == "next" and current_index + 1 < len(bans):
         await _show_ban(callback, bans[current_index + 1], current_index + 1, len(bans))
     elif direction == "prev" and current_index > 0:

@@ -163,17 +163,34 @@ async def get_menu_photo(bot, game: str = None):
     
     return None
 
+async def _save_last_menu_message_id(user_id: int, message_id: int, db):
+    """Сохранение ID последнего сообщения меню в Redis"""
+    try:
+        if db and hasattr(db, '_redis'):
+            key = f"last_menu_msg:{user_id}"
+            await db._redis.setex(key, 3600, str(message_id))  # 1 час
+    except Exception as e:
+        logger.warning(f"Не удалось сохранить last_menu_message: {e}")
+
 async def send_main_menu_with_photo(callback_or_message, text: str, keyboard, game: str = None, db=None):
     """Отправка главного меню с фото (с кешированием)"""
     photo = await get_menu_photo(callback_or_message.bot if hasattr(callback_or_message, 'bot') else None, game)
-    
+
+    user_id = None
+    if hasattr(callback_or_message, 'from_user'):
+        user_id = callback_or_message.from_user.id
+    elif hasattr(callback_or_message, 'message') and hasattr(callback_or_message.message, 'chat'):
+        user_id = callback_or_message.message.chat.id
+
     if not photo:
         if hasattr(callback_or_message, 'message'):
             await safe_edit_message(callback_or_message, text, keyboard)
         else:
-            await callback_or_message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+            sent_msg = await callback_or_message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+            if user_id and db:
+                await _save_last_menu_message_id(user_id, sent_msg.message_id, db)
         return
-    
+
     try:
         if hasattr(callback_or_message, 'message'):
             await callback_or_message.message.delete()
@@ -191,6 +208,9 @@ async def send_main_menu_with_photo(callback_or_message, text: str, keyboard, ga
                 parse_mode='HTML'
             )
 
+        if user_id and db and sent_message:
+            await _save_last_menu_message_id(user_id, sent_message.message_id, db)
+
         if isinstance(photo, FSInputFile) and sent_message.photo:
             photo_key = game if game in ['dota', 'cs'] else 'default'
             file_id = sent_message.photo[-1].file_id
@@ -202,7 +222,9 @@ async def send_main_menu_with_photo(callback_or_message, text: str, keyboard, ga
         if hasattr(callback_or_message, 'message'):
             await safe_edit_message(callback_or_message, text, keyboard)
         else:
-            await callback_or_message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+            sent_msg = await callback_or_message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+            if user_id and db and sent_msg:
+                await _save_last_menu_message_id(user_id, sent_msg.message_id, db)
 
 async def check_subscription(user_id: int, game: str, bot: Bot) -> bool:
     """Проверка подписки на канал"""
@@ -281,7 +303,7 @@ async def cmd_start(message: Message, db):
             text = f"Вы заблокированы до {ban_end}\n\nПричина: {ban_info.get('reason', 'нарушение правил')}"
         else:
             text = "Вы заблокированы"
-        
+
         await message.answer(text, parse_mode='HTML')
         return
 
@@ -312,7 +334,7 @@ async def cmd_help(message: Message):
 @router.message(Command("admin"))
 async def cmd_admin(message: Message):
     if not settings.is_admin(message.from_user.id):
-        await message.answer("❌ Нет прав доступа", parse_mode='HTML')
+        await message.answer("Нет прав доступа", parse_mode='HTML')
         return
 
     await message.answer("🔧 Админ панель", reply_markup=kb.admin_main_menu(), parse_mode='HTML')
@@ -383,9 +405,9 @@ async def switch_game(callback: CallbackQuery, db):
 async def show_main_menu(callback: CallbackQuery, db):
     """Показ главного меню без автоматического переключения игр"""
     user_id = callback.from_user.id
-    
+
     await update_user_activity(user_id, 'available', db)
-    
+
     user = await db.get_user(user_id)
 
     if not user or not user.get('current_game'):
@@ -498,13 +520,12 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
     keyboard = kb.edit_profile_menu(game, role)
 
     try:
-        # Если в профиле есть фото - всегда показываем с фото
         if profile.get('photo_id'):
             try:
                 await callback.message.delete()
             except Exception:
-                pass  # Игнорируем если сообщение уже удалено
-            
+                pass
+
             await callback.message.answer_photo(
                 photo=profile['photo_id'],
                 caption=current_info,
@@ -513,7 +534,6 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
                 disable_web_page_preview=True
             )
         else:
-            # Если нет фото - редактируем текущее сообщение
             await callback.message.edit_text(
                 current_info, 
                 reply_markup=keyboard, 
@@ -521,7 +541,6 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
                 disable_web_page_preview=True
             )
     except Exception as e:
-        # Если что-то пошло не так - создаём новое сообщение
         logger.error(f"Ошибка отображения меню редактирования: {e}")
         try:
             await callback.message.delete()

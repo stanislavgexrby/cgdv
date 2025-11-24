@@ -69,7 +69,7 @@ async def process_like_action(callback: CallbackQuery, target_user_id: int, acti
     game = user['current_game']
 
     if action == "like":
-        is_match = await db.add_like(user_id, target_user_id, game, message=None)  # ДОБАВЛЕНО message=None
+        is_match = await db.add_like(user_id, target_user_id, game, message=None)
 
         if is_match:
             await handle_match_created(callback, target_user_id, game, db)
@@ -114,6 +114,44 @@ async def show_next_like_or_finish(callback: CallbackQuery, user_id: int, game: 
         text = "Все лайки просмотрены!\n\nЗайдите позже, возможно появятся новые"
         await safe_edit_message(callback, text, kb.back())
 
+async def _send_new_like_profile(message, likes: list, index: int):
+    """Отправка нового сообщения с профилем лайка (для уведомлений)"""
+    if index >= len(likes):
+        text = "Все лайки просмотрены!\n\nЗайдите позже, возможно появятся новые"
+        sent_msg = await message.answer(text, reply_markup=kb.back(), parse_mode='HTML')
+        return sent_msg.message_id
+
+    profile = likes[index]
+    profile_text = texts.format_profile(profile)
+    text = f"Этот игрок лайкнул вас:\n\n{profile_text}"
+
+    like_message = profile.get('message')
+    if like_message:
+        text += f"\n\n💬 <i>Сообщение: «{like_message}»</i>"
+
+    total = len(likes)
+    counter_text = f"Лайк {index + 1} из {total}"
+    text = f"{counter_text}\n\n{text}"
+
+    keyboard = kb.like_actions(profile['telegram_id'], index, total)
+
+    sent_msg = None
+    if profile.get('photo_id'):
+        try:
+            sent_msg = await message.answer_photo(
+                photo=profile['photo_id'],
+                caption=text,
+                reply_markup=keyboard,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Ошибка отправки фото: {e}")
+            sent_msg = await message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+    else:
+        sent_msg = await message.answer(text, reply_markup=keyboard, parse_mode='HTML')
+
+    return sent_msg.message_id if sent_msg else None
+
 async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
     """Показ профиля в лайках"""
     if index >= len(likes):
@@ -126,7 +164,6 @@ async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
     profile_text = texts.format_profile(profile)
     text = f"Этот игрок лайкнул вас:\n\n{profile_text}"
     
-    # Добавляем сообщение, если оно есть
     if profile.get('message'):
         text += f"\n💌 Сообщение:\n\"{profile['message']}\""
 
@@ -141,12 +178,61 @@ async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
 
     await show_profile_with_photo(callback, profile, text, keyboard)
 
-async def _show_likes_internal(callback: CallbackQuery, user_id: int, game: str, state: FSMContext, db):
+async def _save_last_menu_message(user_id: int, message_id: int, db):
+    """Сохранение ID последнего сообщения меню в Redis"""
+    try:
+        key = f"last_menu_msg:{user_id}"
+        await db._redis.setex(key, 3600, str(message_id))
+    except Exception as e:
+        logger.warning(f"Не удалось сохранить last_menu_message: {e}")
+
+async def _get_last_menu_message(user_id: int, db) -> int:
+    """Получение ID последнего сообщения меню из Redis"""
+    try:
+        key = f"last_menu_msg:{user_id}"
+        value = await db._redis.get(key)
+        if value:
+            return int(value)
+    except Exception as e:
+        logger.warning(f"Не удалось получить last_menu_message: {e}")
+    return None
+
+async def _delete_last_menu_message(user_id: int, bot, db):
+    """Удаление последнего сообщения меню"""
+    try:
+        message_id = await _get_last_menu_message(user_id, db)
+        if message_id:
+            try:
+                await bot.delete_message(chat_id=user_id, message_id=message_id)
+                logger.info(f"Удалено предыдущее меню: {message_id}")
+            except Exception as e:
+                logger.warning(f"Не удалось удалить предыдущее меню {message_id}: {e}")
+    except Exception as e:
+        logger.warning(f"Ошибка удаления последнего меню: {e}")
+
+async def _is_notification_message(callback: CallbackQuery) -> bool:
+    """Проверка, является ли сообщение уведомлением"""
+    try:
+        message_text = callback.message.text or callback.message.caption or ""
+        notification_keywords = ["лайкнул вашу анкету", "🔔"]
+        return any(keyword in message_text for keyword in notification_keywords)
+    except:
+        return False
+
+async def _show_likes_internal(callback: CallbackQuery, user_id: int, game: str, state: FSMContext, db, delete_current: bool = False):
     """Внутренняя функция показа лайков"""
     await state.clear()
-    
+
     likes = await db.get_likes_for_user(user_id, game)
-    
+
+    if delete_current:
+        await _delete_last_menu_message(user_id, callback.bot, db)
+
+        try:
+            await callback.message.delete()
+        except Exception as e:
+            logger.warning(f"Не удалось удалить уведомление: {e}")
+
     if not likes:
         game_name = settings.GAMES.get(game, game)
         text = f"Пока никто не лайкнул вашу анкету в {game_name}\n\n"
@@ -155,10 +241,19 @@ async def _show_likes_internal(callback: CallbackQuery, user_id: int, game: str,
         text += "• Добавить фото\n"
         text += "• Быть активнее в поиске"
 
-        await show_empty_state(callback, text)
+        if delete_current:
+            sent_msg = await callback.message.answer(text, reply_markup=kb.back(), parse_mode='HTML')
+            await _save_last_menu_message(user_id, sent_msg.message_id, db)
+        else:
+            await show_empty_state(callback, text)
         return
 
-    await show_like_profile(callback, likes, 0)
+    if delete_current:
+        new_message_id = await _send_new_like_profile(callback.message, likes, 0)
+        if new_message_id:
+            await _save_last_menu_message(user_id, new_message_id, db)
+    else:
+        await show_like_profile(callback, likes, 0)
 
 async def _show_matches_internal(callback: CallbackQuery, user_id: int, game: str, state: FSMContext, db):
     """Внутренняя функция показа матчей"""
@@ -206,9 +301,13 @@ async def show_my_likes(callback: CallbackQuery, state: FSMContext, db):
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
     game = user['current_game']
-    
-    await _show_likes_internal(callback, user_id, game, state, db)
-    await callback.answer()
+
+    is_notification = await _is_notification_message(callback)
+
+    await _show_likes_internal(callback, user_id, game, state, db, delete_current=is_notification)
+
+    if not is_notification:
+        await callback.answer()
 
 @router.callback_query(F.data == "my_matches")
 @check_ban_and_profile()
@@ -253,8 +352,18 @@ async def switch_and_show_likes(callback: CallbackQuery, state: FSMContext, db):
                 ban_end = _format_expire_date(expires_at)
                 text += f" до {ban_end}"
 
-            await safe_edit_message(callback, text, kb.back())
-            await callback.answer()
+            is_notification = await _is_notification_message(callback)
+            if is_notification:
+                await _delete_last_menu_message(user_id, callback.bot, db)
+                try:
+                    await callback.message.delete()
+                except:
+                    pass
+                sent_msg = await callback.message.answer(text, reply_markup=kb.back(), parse_mode='HTML')
+                await _save_last_menu_message(user_id, sent_msg.message_id, db)
+            else:
+                await safe_edit_message(callback, text, kb.back())
+                await callback.answer()
             return
 
         profile = await db.get_user_profile(user_id, game)
@@ -263,9 +372,13 @@ async def switch_and_show_likes(callback: CallbackQuery, state: FSMContext, db):
             await callback.answer(f"Сначала создайте анкету для {game_name}", show_alert=True)
             return
 
+        is_notification = await _is_notification_message(callback)
+
         from handlers.likes import _show_likes_internal
-        await _show_likes_internal(callback, user_id, game, state, db)
-        await callback.answer(f"Переключено на {settings.GAMES.get(game, game)}")
+        await _show_likes_internal(callback, user_id, game, state, db, delete_current=is_notification)
+
+        if not is_notification:
+            await callback.answer(f"Переключено на {settings.GAMES.get(game, game)}")
 
     except (ValueError, IndexError) as e:
         logger.error(f"Некорректный callback: {callback.data}, ошибка: {e}")
@@ -318,6 +431,7 @@ async def switch_and_show_matches(callback: CallbackQuery, state: FSMContext, db
     from handlers.likes import _show_matches_internal
     await _show_matches_internal(callback, user_id, game, state, db)
     await callback.answer(f"Переключено на {settings.GAMES.get(game, game)}")
+
 # ==================== ОБРАБОТЧИКИ ДЕЙСТВИЙ С ЛАЙКАМИ ====================
 
 @router.callback_query(F.data.startswith("loves_back"))
