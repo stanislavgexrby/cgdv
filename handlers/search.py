@@ -289,6 +289,22 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
     # Проверяем, нужно ли показать рекламу
     ads = await db.get_active_ads_for_game(data['game'])
 
+    # Фильтруем рекламу по региону пользователя
+    if ads:
+        user_profile = await db.get_user_profile(data['user_id'], data['game'])
+        user_region = user_profile.get('region', 'any') if user_profile else 'any'
+
+        if user_region != 'any':
+            filtered_ads = []
+            for ad in ads:
+                ad_regions = ad.get('regions', ['all'])
+                # Показываем рекламу если:
+                # 1. В рекламе указаны "все регионы" (all)
+                # 2. Регион пользователя входит в список регионов рекламы
+                if 'all' in ad_regions or user_region in ad_regions:
+                    filtered_ads.append(ad)
+            ads = filtered_ads
+
     if ads and next_profiles_shown > 0:
         # Инициализация очереди реклам при первом запуске или если её нет
         if 'ads_queue_ids' not in data or not data['ads_queue_ids']:
@@ -822,8 +838,26 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
         await callback.answer()
         return
     
+    # Получаем профиль пользователя для фильтрации рекламы по региону
+    user_profile = await db.get_user_profile(data['user_id'], data['game'])
+    user_region = user_profile.get('region', 'any') if user_profile else 'any'
+
     # Инициализируем очередь реклам для нового поиска
     ads = await db.get_active_ads_for_game(data['game'])
+
+    # Фильтруем рекламу по региону пользователя
+    if ads and user_region != 'any':
+        filtered_ads = []
+        for ad in ads:
+            ad_regions = ad.get('regions', ['all'])
+            # Показываем рекламу если:
+            # 1. В рекламе указаны "все регионы" (all)
+            # 2. Регион пользователя входит в список регионов рекламы
+            if 'all' in ad_regions or user_region in ad_regions:
+                filtered_ads.append(ad)
+        ads = filtered_ads
+        logger.info(f"🌍 Отфильтровано реклам по региону {user_region}: {len(ads)} из {len(filtered_ads)}")
+
     ads_queue_ids = []
     current_ad_index = 0
     next_ad_at = 0

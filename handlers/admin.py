@@ -18,6 +18,7 @@ class AdminAdForm(StatesGroup):
     waiting_ad_message = State()
     waiting_ad_caption = State()
     waiting_game_choice = State()
+    waiting_region_choice = State()  # Новое состояние для выбора регионов
     waiting_interval_choice = State()
     editing_interval = State()
     waiting_custom_interval = State()  # Новое состояние для ввода кастомного интервала
@@ -481,10 +482,24 @@ async def view_ad_details(callback: CallbackQuery, db):
         games_text = "Dota 2"
     else:
         games_text = "CS2"
-    
+
+    # Формируем текст с регионами
+    regions = ad.get('regions', ['all'])
+    if 'all' in regions:
+        regions_text = "Все регионы"
+    else:
+        from config import settings
+        region_names = []
+        for region in regions[:3]:
+            region_names.append(settings.COUNTRIES_DICT.get(region, region))
+        regions_text = ", ".join(region_names)
+        if len(regions) > 3:
+            regions_text += f" +{len(regions) - 3}"
+
     text = (f"📢 Рекламный пост <b>#{ad['id']}</b>\n\n"
             f"<b>Название:</b> {ad['caption']}\n"
             f"<b>Игры:</b> {games_text}\n"
+            f"<b>Регионы:</b> {regions_text}\n"
             f"<b>Статус:</b> {status}\n"
             f"<b>Интервал показа:</b> каждые {ad['show_interval']} анкет\n"
             f"<b>Создан:</b> {created}\n\n"
@@ -497,6 +512,8 @@ async def view_ad_details(callback: CallbackQuery, db):
 @admin_only
 async def start_add_ad(callback: CallbackQuery, state: FSMContext):
     """Начало добавления рекламы"""
+    # Очищаем state перед созданием новой рекламы (удаляет editing_ad_id и другие старые данные)
+    await state.clear()
     await state.set_state(AdminAdForm.waiting_ad_message)
     text = ("📢 Добавление рекламного поста\n\n"
             "<b>Шаг 1/3: Перешлите боту сообщение с рекламой</b>\n\n"
@@ -550,29 +567,182 @@ async def receive_ad_caption(message: Message, state: FSMContext, db):
 async def select_games_for_ad(callback: CallbackQuery, state: FSMContext):
     """Выбор игр для показа рекламы"""
     choice = callback.data.split("_")[1]
-    
+
     if choice == "dota":
         games = ['dota']
     elif choice == "cs":
         games = ['cs']
     else:  # both
         games = ['dota', 'cs']
-    
-    await state.update_data(games=games)
-    await state.set_state(AdminAdForm.waiting_interval_choice)
-    
+
+    # Логируем данные до сохранения
+    data_before = await state.get_data()
+    logger.info(f"select_games_for_ad: данные ДО обновления = {list(data_before.keys())}")
+
+    # ВАЖНО: Проверяем, нет ли editing_ad_id от предыдущего редактирования
+    if 'editing_ad_id' in data_before:
+        logger.warning(f"⚠️ Обнаружен editing_ad_id={data_before['editing_ad_id']} при создании новой рекламы! Это ошибка!")
+
+    await state.update_data(games=games, selected_regions=['all'])
+    await state.set_state(AdminAdForm.waiting_region_choice)
+
+    # Проверяем данные после сохранения
+    data_after = await state.get_data()
+    logger.info(f"select_games_for_ad: данные ПОСЛЕ обновления = {list(data_after.keys())}")
+
     games_text = "обеих играх" if len(games) == 2 else ("Dota 2" if games[0] == "dota" else "CS2")
-    
+
     text = (f"✅ Реклама будет показываться в <b>{games_text}</b>\n\n"
-            f"<b>Шаг 4/4: Выберите интервал показа</b>\n\n"
+            f"<b>Шаг 4/5: Выберите регионы для показа</b>\n\n"
+            f"В каких регионах показывать рекламу?\n"
+            f"Можно выбрать несколько или показывать во всех регионах.")
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=kb.ad_regions(selected_regions=['all']),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+# === ОБРАБОТЧИКИ ВЫБОРА РЕГИОНОВ ДЛЯ РЕКЛАМЫ ===
+
+@router.callback_query(F.data.startswith("ad_region_add_"), AdminAdForm.waiting_region_choice)
+async def add_region_to_ad(callback: CallbackQuery, state: FSMContext):
+    """Добавление региона в список для рекламы (универсальный для создания и редактирования)"""
+    region = callback.data.split("_")[3]
+    data = await state.get_data()
+    selected_regions = data.get('selected_regions', [])
+    editing_ad_id = data.get('editing_ad_id')  # Определяем режим
+
+    # Если выбран "Все регионы", очищаем список и добавляем "all"
+    if region == "all":
+        selected_regions = ['all']
+    else:
+        # Убираем "all" если выбран конкретный регион
+        if 'all' in selected_regions:
+            selected_regions.remove('all')
+        # Добавляем новый регион
+        if region not in selected_regions:
+            selected_regions.append(region)
+
+    await state.update_data(selected_regions=selected_regions)
+
+    # Обновляем клавиатуру в зависимости от режима
+    await callback.message.edit_reply_markup(
+        reply_markup=kb.ad_regions(
+            selected_regions=selected_regions,
+            editing=bool(editing_ad_id),
+            ad_id=editing_ad_id
+        )
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("ad_region_remove_"), AdminAdForm.waiting_region_choice)
+async def remove_region_from_ad(callback: CallbackQuery, state: FSMContext):
+    """Удаление региона из списка для рекламы (универсальный для создания и редактирования)"""
+    region = callback.data.split("_")[3]
+    data = await state.get_data()
+    selected_regions = data.get('selected_regions', [])
+    editing_ad_id = data.get('editing_ad_id')  # Определяем режим
+
+    if region in selected_regions:
+        selected_regions.remove(region)
+
+    await state.update_data(selected_regions=selected_regions)
+
+    # Обновляем клавиатуру в зависимости от режима
+    await callback.message.edit_reply_markup(
+        reply_markup=kb.ad_regions(
+            selected_regions=selected_regions,
+            editing=bool(editing_ad_id),
+            ad_id=editing_ad_id
+        )
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "ad_region_other", AdminAdForm.waiting_region_choice)
+async def show_all_regions_for_ad(callback: CallbackQuery, state: FSMContext):
+    """Показать полный список всех регионов (универсальный для создания и редактирования)"""
+    data = await state.get_data()
+    selected_regions = data.get('selected_regions', [])
+    editing_ad_id = data.get('editing_ad_id')  # Определяем режим
+
+    await callback.message.edit_reply_markup(
+        reply_markup=kb.ad_all_regions(
+            selected_regions=selected_regions,
+            editing=bool(editing_ad_id),
+            ad_id=editing_ad_id
+        )
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "ad_region_back_main", AdminAdForm.waiting_region_choice)
+async def back_to_main_regions_for_ad(callback: CallbackQuery, state: FSMContext):
+    """Вернуться к основным регионам (универсальный для создания и редактирования)"""
+    data = await state.get_data()
+    selected_regions = data.get('selected_regions', [])
+    editing_ad_id = data.get('editing_ad_id')  # Определяем режим
+
+    await callback.message.edit_reply_markup(
+        reply_markup=kb.ad_regions(
+            selected_regions=selected_regions,
+            editing=bool(editing_ad_id),
+            ad_id=editing_ad_id
+        )
+    )
+    await callback.answer()
+
+@router.callback_query(F.data == "ad_region_need", AdminAdForm.waiting_region_choice)
+async def region_need_reminder(callback: CallbackQuery):
+    """Напоминание о необходимости выбрать регион"""
+    await callback.answer("Выберите хотя бы один регион или 'Все регионы'", show_alert=True)
+
+@router.callback_query(F.data == "ad_region_done", AdminAdForm.waiting_region_choice)
+async def regions_selected_for_ad(callback: CallbackQuery, state: FSMContext):
+    """Завершение выбора регионов и переход к интервалу (только для создания новой рекламы)"""
+    data = await state.get_data()
+    selected_regions = data.get('selected_regions', [])
+
+    # Логируем состояние для диагностики
+    logger.info(f"ad_region_done: keys in state = {list(data.keys())}")
+
+    if not selected_regions:
+        await callback.answer("Выберите хотя бы один регион!", show_alert=True)
+        return
+
+    # Этот обработчик только для создания новой рекламы (не для редактирования)
+    # При редактировании используется ad_region_save_{id}
+    if 'editing_ad_id' in data:
+        logger.warning("ad_region_done вызван при редактировании, но это обработчик для создания!")
+        await callback.answer("Используйте кнопку 'Сохранить'", show_alert=True)
+        return
+
+    await state.set_state(AdminAdForm.waiting_interval_choice)
+
+    # Формируем текст с выбранными регионами
+    if 'all' in selected_regions:
+        regions_text = "Все регионы"
+    else:
+        from config import settings
+        region_names = []
+        for region in selected_regions[:5]:  # Показываем первые 5
+            region_names.append(settings.COUNTRIES_DICT.get(region, region))
+        regions_text = ", ".join(region_names)
+        if len(selected_regions) > 5:
+            regions_text += f" и ещё {len(selected_regions) - 5}"
+
+    text = (f"✅ Регионы выбраны: <b>{regions_text}</b>\n\n"
+            f"<b>Шаг 5/5: Выберите интервал показа</b>\n\n"
             f"Через сколько анкет показывать эту рекламу?")
-    
+
     await callback.message.edit_text(
         text,
         reply_markup=kb.interval_choice_keyboard(),
         parse_mode='HTML'
     )
     await callback.answer()
+
+# === КОНЕЦ ОБРАБОТЧИКОВ РЕГИОНОВ ===
 
 @router.callback_query(F.data == "custom_interval", AdminAdForm.waiting_interval_choice)
 async def request_custom_interval_new(callback: CallbackQuery, state: FSMContext):
@@ -664,13 +834,21 @@ async def process_custom_interval(message: Message, state: FSMContext, db):
             await message.answer("❌ Ошибка обновления интервала")
     else:
         # Создаём новую рекламу
+        # Проверяем наличие необходимых данных
+        if 'message_id' not in data or 'chat_id' not in data or 'caption' not in data:
+            logger.error(f"Недостаточно данных в state для создания рекламы: {data.keys()}")
+            await message.answer("❌ Ошибка: данные рекламы потеряны. Попробуйте создать рекламу заново.")
+            await state.clear()
+            return
+
         ad_id = await db.add_ad_post(
             message_id=data['message_id'],
             chat_id=data['chat_id'],
             caption=data['caption'],
             admin_id=message.from_user.id,
             show_interval=interval,
-            games=data.get('games', ['dota', 'cs'])
+            games=data.get('games', ['dota', 'cs']),
+            regions=data.get('selected_regions', ['all'])
         )
 
         await state.clear()
@@ -678,9 +856,23 @@ async def process_custom_interval(message: Message, state: FSMContext, db):
         games = data.get('games', ['dota', 'cs'])
         games_text = "обеих играх" if len(games) == 2 else ("Dota 2" if games[0] == "dota" else "CS2")
 
+        # Формируем текст с регионами
+        selected_regions = data.get('selected_regions', ['all'])
+        if 'all' in selected_regions:
+            regions_text = "Все регионы"
+        else:
+            from config import settings
+            region_names = []
+            for region in selected_regions[:3]:
+                region_names.append(settings.COUNTRIES_DICT.get(region, region))
+            regions_text = ", ".join(region_names)
+            if len(selected_regions) > 3:
+                regions_text += f" +{len(selected_regions) - 3}"
+
         text = (f"✅ Рекламный пост <b>#{ad_id}</b> создан!\n\n"
                 f"<b>Название:</b> {data['caption']}\n"
                 f"<b>Игры:</b> {games_text}\n"
+                f"<b>Регионы:</b> {regions_text}\n"
                 f"<b>Интервал:</b> каждые {interval} анкет\n\n"
                 f"Пост автоматически активен и будет показываться пользователям.")
 
@@ -700,13 +892,21 @@ async def select_interval_for_new_ad(callback: CallbackQuery, state: FSMContext,
 
     data = await state.get_data()
 
+    # Проверяем наличие необходимых данных
+    if 'message_id' not in data or 'chat_id' not in data or 'caption' not in data:
+        logger.error(f"Недостаточно данных в state для создания рекламы: {data.keys()}")
+        await callback.answer("❌ Ошибка: данные рекламы потеряны. Попробуйте создать рекламу заново.", show_alert=True)
+        await state.clear()
+        return
+
     ad_id = await db.add_ad_post(
         message_id=data['message_id'],
         chat_id=data['chat_id'],
         caption=data['caption'],
         admin_id=callback.from_user.id,
         show_interval=interval,
-        games=data.get('games', ['dota', 'cs'])
+        games=data.get('games', ['dota', 'cs']),
+        regions=data.get('selected_regions', ['all'])
     )
 
     await state.clear()
@@ -714,9 +914,23 @@ async def select_interval_for_new_ad(callback: CallbackQuery, state: FSMContext,
     games = data.get('games', ['dota', 'cs'])
     games_text = "обеих играх" if len(games) == 2 else ("Dota 2" if games[0] == "dota" else "CS2")
 
+    # Формируем текст с регионами
+    selected_regions = data.get('selected_regions', ['all'])
+    if 'all' in selected_regions:
+        regions_text = "Все регионы"
+    else:
+        from config import settings
+        region_names = []
+        for region in selected_regions[:3]:
+            region_names.append(settings.COUNTRIES_DICT.get(region, region))
+        regions_text = ", ".join(region_names)
+        if len(selected_regions) > 3:
+            regions_text += f" +{len(selected_regions) - 3}"
+
     text = (f"✅ Рекламный пост <b>#{ad_id}</b> создан!\n\n"
             f"<b>Название:</b> {data['caption']}\n"
             f"<b>Игры:</b> {games_text}\n"
+            f"<b>Регионы:</b> {regions_text}\n"
             f"<b>Интервал:</b> каждые {interval} анкет\n\n"
             f"Пост автоматически активен и будет показываться пользователям.")
 
@@ -827,6 +1041,128 @@ async def apply_new_games(callback: CallbackQuery, db):
         await view_ad_details(callback, db)
     else:
         await callback.answer("❌ Ошибка обновления", show_alert=True)
+
+# === ОБРАБОТЧИКИ РЕДАКТИРОВАНИЯ РЕГИОНОВ РЕКЛАМЫ ===
+
+@router.callback_query(F.data.startswith("ad_regions_"))
+@admin_only
+async def start_edit_regions(callback: CallbackQuery, state: FSMContext, db):
+    """Начало редактирования регионов для рекламы"""
+    try:
+        ad_id = int(callback.data.split("_")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+
+    ads = await db.get_all_ads()
+    ad = next((a for a in ads if a['id'] == ad_id), None)
+
+    if not ad:
+        await callback.answer("Реклама не найдена", show_alert=True)
+        return
+
+    current_regions = ad.get('regions', ['all'])
+    if not current_regions:
+        current_regions = ['all']
+
+    await state.update_data(editing_ad_id=ad_id, selected_regions=current_regions)
+    await state.set_state(AdminAdForm.waiting_region_choice)
+
+    # Формируем текст с текущими регионами
+    if 'all' in current_regions:
+        regions_text = "Все регионы"
+    else:
+        from config import settings
+        region_names = []
+        for region in current_regions[:5]:
+            region_names.append(settings.COUNTRIES_DICT.get(region, region))
+        regions_text = ", ".join(region_names)
+        if len(current_regions) > 5:
+            regions_text += f" и ещё {len(current_regions) - 5}"
+
+    text = (f"📢 Пост <b>#{ad_id}</b>: {ad['caption']}\n\n"
+            f"<b>Текущие регионы:</b> {regions_text}\n\n"
+            f"<b>Выберите новые регионы для показа:</b>\n"
+            f"Можно выбрать несколько или 'Все регионы'")
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=kb.ad_regions(selected_regions=current_regions, editing=True, ad_id=ad_id),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("ad_region_save_"))
+async def save_ad_regions(callback: CallbackQuery, state: FSMContext, db):
+    """Сохранение выбранных регионов"""
+    try:
+        ad_id = int(callback.data.split("_")[3])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+
+    data = await state.get_data()
+    selected_regions = data.get('selected_regions', [])
+
+    if not selected_regions:
+        await callback.answer("Выберите хотя бы один регион!", show_alert=True)
+        return
+
+    success = await db.update_ad_regions(ad_id, selected_regions)
+    await state.clear()
+
+    if success:
+        # Формируем текст с регионами для уведомления
+        if 'all' in selected_regions:
+            regions_text = "Все регионы"
+        else:
+            from config import settings
+            region_names = []
+            for region in selected_regions[:3]:
+                region_names.append(settings.COUNTRIES_DICT.get(region, region))
+            regions_text = ", ".join(region_names)
+            if len(selected_regions) > 3:
+                regions_text += f" +{len(selected_regions) - 3}"
+
+        # Получаем обновленную рекламу из БД
+        ads = await db.get_all_ads()
+        ad = next((a for a in ads if a['id'] == ad_id), None)
+
+        if not ad:
+            await callback.answer("❌ Реклама не найдена", show_alert=True)
+            return
+
+        # Формируем информацию о рекламе
+        status = "✅ Активна" if ad['is_active'] else "❌ Выключена"
+        created = ad['created_at'].strftime("%d.%m.%Y %H:%M") if hasattr(ad['created_at'], 'strftime') else str(ad['created_at'])[:16]
+
+        games = ad.get('games', ['dota', 'cs'])
+        if len(games) == 2:
+            games_text = "Обе игры"
+        elif 'dota' in games:
+            games_text = "Dota 2"
+        else:
+            games_text = "CS2"
+
+        text = (f"📢 Рекламный пост <b>#{ad['id']}</b>\n\n"
+                f"<b>Название:</b> {ad['caption']}\n"
+                f"<b>Игры:</b> {games_text}\n"
+                f"<b>Регионы:</b> {regions_text}\n"
+                f"<b>Статус:</b> {status}\n"
+                f"<b>Интервал показа:</b> каждые {ad['show_interval']} анкет\n"
+                f"<b>Создан:</b> {created}\n\n"
+                f"<b>Управление:</b>")
+
+        await callback.message.edit_text(
+            text,
+            reply_markup=kb.admin_ad_actions(ad),
+            parse_mode='HTML'
+        )
+        await callback.answer(f"✅ Регионы обновлены")
+    else:
+        await callback.answer("❌ Ошибка обновления", show_alert=True)
+
+# === КОНЕЦ ОБРАБОТЧИКОВ РЕДАКТИРОВАНИЯ РЕГИОНОВ ===
 
 @router.callback_query(F.data.startswith("setint_"), AdminAdForm.editing_interval)
 async def apply_new_interval(callback: CallbackQuery, state: FSMContext, db):

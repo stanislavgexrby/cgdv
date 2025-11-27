@@ -191,7 +191,7 @@ def ratings(game: str, selected_rating: str = None, with_navigation: bool = Fals
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def countries(selected_country: str = None, with_navigation: bool = False, 
+def countries(selected_country: str = None, with_navigation: bool = False,
               for_profile: bool = True, with_cancel: bool = False) -> InlineKeyboardMarkup:
     """Интерактивный выбор страны"""
     buttons = []
@@ -208,9 +208,9 @@ def countries(selected_country: str = None, with_navigation: bool = False,
 
     buttons.append([InlineKeyboardButton(text="🌍 Другое", callback_data="country_other")])
 
-    # Объединяем кнопки "Не указывать" и "Готово" в одну строку  
+    # Объединяем кнопки "Не указывать" и "Готово" в одну строку
     bottom_row = []
-    
+
     if for_profile:
         if selected_country == "any":
             bottom_row.append(InlineKeyboardButton(text="✅ Не указывать", callback_data="country_remove_any"))
@@ -222,7 +222,7 @@ def countries(selected_country: str = None, with_navigation: bool = False,
             bottom_row.append(InlineKeyboardButton(text="Готово", callback_data="country_done"))
         else:
             bottom_row.append(InlineKeyboardButton(text="Выберите страну", callback_data="country_need"))
-    
+
     if bottom_row:
         buttons.append(bottom_row)
 
@@ -235,6 +235,92 @@ def countries(selected_country: str = None, with_navigation: bool = False,
     elif with_cancel:
         cancel_callback = "cancel_edit" if not for_profile else "cancel"
         buttons.append([InlineKeyboardButton(text="Отмена", callback_data=cancel_callback)])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def ad_regions(selected_regions: List[str] = None, editing: bool = False, ad_id: int = None) -> InlineKeyboardMarkup:
+    """Интерактивный выбор регионов для рекламы (множественный выбор)"""
+    if selected_regions is None:
+        selected_regions = []
+
+    buttons = []
+
+    # Опция "Все регионы"
+    if "all" in selected_regions:
+        buttons.append([InlineKeyboardButton(text="✅ 🌍 Все регионы", callback_data="ad_region_remove_all")])
+    else:
+        buttons.append([InlineKeyboardButton(text="🌍 Все регионы", callback_data="ad_region_add_all")])
+
+    # Основные регионы
+    for key, name in settings.MAIN_COUNTRIES.items():
+        if key in selected_regions:
+            text = f"✅ {name}"
+            callback = f"ad_region_remove_{key}"
+        else:
+            text = name
+            callback = f"ad_region_add_{key}"
+
+        buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
+
+    # Кнопка "Другое" для показа всех регионов
+    buttons.append([InlineKeyboardButton(text="🌍 Другие страны", callback_data="ad_region_other")])
+
+    # Кнопка "Готово"
+    bottom_row = []
+    if selected_regions:
+        if editing and ad_id:
+            bottom_row.append(InlineKeyboardButton(text="Сохранить", callback_data=f"ad_region_save_{ad_id}"))
+        else:
+            bottom_row.append(InlineKeyboardButton(text="Готово", callback_data="ad_region_done"))
+    else:
+        bottom_row.append(InlineKeyboardButton(text="Выберите регионы", callback_data="ad_region_need"))
+
+    if bottom_row:
+        buttons.append(bottom_row)
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def ad_all_regions(selected_regions: List[str] = None, editing: bool = False, ad_id: int = None) -> InlineKeyboardMarkup:
+    """Полный список всех регионов для рекламы"""
+    if selected_regions is None:
+        selected_regions = []
+
+    buttons = []
+
+    # Опция "Все регионы"
+    if "all" in selected_regions:
+        buttons.append([InlineKeyboardButton(text="✅ 🌍 Все регионы", callback_data="ad_region_remove_all")])
+    else:
+        buttons.append([InlineKeyboardButton(text="🌍 Все регионы", callback_data="ad_region_add_all")])
+
+    # Все страны
+    for key, name in settings.COUNTRIES_DICT.items():
+        if key in selected_regions:
+            text = f"✅ {name}"
+            callback = f"ad_region_remove_{key}"
+        else:
+            text = name
+            callback = f"ad_region_add_{key}"
+
+        buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
+
+    # Кнопки навигации
+    buttons.append([InlineKeyboardButton(text="🔙 Назад к основным", callback_data="ad_region_back_main")])
+
+    # Кнопка "Готово"
+    bottom_row = []
+    if selected_regions:
+        if editing and ad_id:
+            bottom_row.append(InlineKeyboardButton(text="Сохранить", callback_data=f"ad_region_save_{ad_id}"))
+        else:
+            bottom_row.append(InlineKeyboardButton(text="Готово", callback_data="ad_region_done"))
+    else:
+        bottom_row.append(InlineKeyboardButton(text="Выберите регионы", callback_data="ad_region_need"))
+
+    if bottom_row:
+        buttons.append(bottom_row)
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
@@ -767,17 +853,18 @@ def admin_ad_actions(ad: dict) -> InlineKeyboardMarkup:
     """Действия с конкретной рекламой"""
     ad_id = ad['id']
     is_active = ad['is_active']
-    
+
     toggle_text = "⏸️ Выключить" if is_active else "▶️ Включить"
-    
+
     buttons = [
         [InlineKeyboardButton(text=toggle_text, callback_data=f"ad_toggle_{ad_id}")],
         [InlineKeyboardButton(text="🎮 Изменить игры", callback_data=f"ad_games_{ad_id}")],
+        [InlineKeyboardButton(text="🌍 Изменить регионы", callback_data=f"ad_regions_{ad_id}")],
         [InlineKeyboardButton(text="📊 Изменить интервал", callback_data=f"ad_interval_{ad_id}")],
         [InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"ad_delete_{ad_id}")],
         [InlineKeyboardButton(text="◀️ К списку", callback_data="ad_back_to_list")]
     ]
-    
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def interval_choice_keyboard(ad_id: int = None, current_interval: int = None) -> InlineKeyboardMarkup:

@@ -291,6 +291,12 @@ class Database:
                 logger.warning(f"Миграция поля games: {e}")
 
             try:
+                await conn.execute("ALTER TABLE ad_posts ADD COLUMN IF NOT EXISTS regions TEXT[] DEFAULT ARRAY['all']::TEXT[]")
+                logger.info("✅ Миграция: добавлена колонка regions в ad_posts")
+            except Exception as e:
+                logger.warning(f"Миграция поля games: {e}")
+
+            try:
                 await conn.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_message TEXT")
                 logger.info("✅ Миграция: добавлена колонка report_message в reports")
             except Exception as e:
@@ -1097,21 +1103,23 @@ class Database:
     # === РЕКЛАМНЫЕ ПОСТЫ ===
 
     async def add_ad_post(self, message_id: int, chat_id: int, caption: str, admin_id: int,
-                          show_interval: int = 3, games: List[str] = None) -> int:
+                          show_interval: int = 3, games: List[str] = None, regions: List[str] = None) -> int:
         """Добавление рекламного поста"""
         if games is None:
             games = ['dota', 'cs']
+        if regions is None:
+            regions = ['all']
 
         async with self._pg_pool.acquire() as conn:
             post_id = await conn.fetchval(
-                """INSERT INTO ad_posts (message_id, chat_id, caption, created_by, show_interval, games)
-                   VALUES ($1, $2, $3, $4, $5, $6)
+                """INSERT INTO ad_posts (message_id, chat_id, caption, created_by, show_interval, games, regions)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7)
                    RETURNING id""",
-                message_id, chat_id, caption, admin_id, show_interval, games
+                message_id, chat_id, caption, admin_id, show_interval, games, regions
             )
             await self._redis.delete("active_ads:dota")
             await self._redis.delete("active_ads:cs")
-            logger.info(f"Добавлен рекламный пост #{post_id} для игр: {games}")
+            logger.info(f"Добавлен рекламный пост #{post_id} для игр: {games}, регионов: {regions}")
             return post_id
 
     async def get_active_ads_for_game(self, game: str) -> List[Dict]:
@@ -1144,6 +1152,22 @@ class Database:
                 return True
         except Exception as e:
             logger.error(f"Ошибка обновления игр рекламы #{ad_id}: {e}")
+            return False
+
+    async def update_ad_regions(self, ad_id: int, regions: List[str]) -> bool:
+        """Обновление списка регионов для рекламы"""
+        try:
+            async with self._pg_pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE ad_posts SET regions = $1 WHERE id = $2",
+                    regions, ad_id
+                )
+                await self._redis.delete("active_ads:dota")
+                await self._redis.delete("active_ads:cs")
+                logger.info(f"Обновлены регионы для рекламы #{ad_id}: {regions}")
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка обновления регионов рекламы #{ad_id}: {e}")
             return False
 
     async def get_all_ads(self) -> List[Dict]:
