@@ -20,6 +20,7 @@ class AdminAdForm(StatesGroup):
     waiting_game_choice = State()
     waiting_interval_choice = State()
     editing_interval = State()
+    waiting_custom_interval = State()  # Новое состояние для ввода кастомного интервала
 
 class AdminBanForm(StatesGroup):
     waiting_user_input = State()
@@ -573,6 +574,122 @@ async def select_games_for_ad(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
+@router.callback_query(F.data == "custom_interval", AdminAdForm.waiting_interval_choice)
+async def request_custom_interval_new(callback: CallbackQuery, state: FSMContext):
+    """Запрос ввода кастомного интервала при создании новой рекламы"""
+    await state.set_state(AdminAdForm.waiting_custom_interval)
+
+    text = (f"<b>Шаг 4/4: Интервал показа</b>\n\n"
+            f"<b>Введите свой интервал показа:</b>\n"
+            f"(число от 1 до 1000)")
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="cancel_custom_interval_new")]
+    ])
+
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
+    await callback.answer()
+
+@router.callback_query(F.data == "cancel_custom_interval_new", AdminAdForm.waiting_custom_interval)
+async def cancel_custom_interval_new(callback: CallbackQuery, state: FSMContext):
+    """Отмена ввода кастомного интервала при создании"""
+    await state.set_state(AdminAdForm.waiting_interval_choice)
+
+    text = (f"<b>Шаг 4/4: Выберите интервал показа</b>\n\n"
+            f"Через сколько анкет показывать этот пост?\n"
+            f"(чем больше - тем реже показывается реклама)")
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=kb.interval_choice_keyboard(),
+        parse_mode='HTML'
+    )
+    await callback.answer("Отменено")
+
+@router.message(AdminAdForm.waiting_custom_interval, F.text)
+async def process_custom_interval(message: Message, state: FSMContext, db):
+    """Обработка кастомного интервала (для создания новой или редактирования существующей рекламы)"""
+    # Валидация ввода
+    try:
+        interval = int(message.text.strip())
+        if interval < 1 or interval > 1000:
+            await message.answer(
+                "❌ Неверное значение!\n\n"
+                "Интервал должен быть от 1 до 1000.\n"
+                "Попробуйте ещё раз или нажмите 'Отмена'."
+            )
+            return
+    except ValueError:
+        await message.answer(
+            "❌ Ошибка!\n\n"
+            "Введите число от 1 до 1000.\n"
+            "Попробуйте ещё раз или нажмите 'Отмена'."
+        )
+        return
+
+    data = await state.get_data()
+    editing_ad_id = data.get('editing_ad_id')
+
+    # Если редактируем существующую рекламу
+    if editing_ad_id:
+        success = await db.update_ad_interval(editing_ad_id, interval)
+        await state.clear()
+
+        if success:
+            ads = await db.get_all_ads()
+            ad = next((a for a in ads if a['id'] == editing_ad_id), None)
+
+            if not ad:
+                await message.answer("❌ Ошибка: реклама не найдена")
+                return
+
+            status = "✅ Активна" if ad['is_active'] else "❌ Выключена"
+            created = ad['created_at'].strftime("%d.%m.%Y %H:%M") if hasattr(ad['created_at'], 'strftime') else str(ad['created_at'])[:16]
+
+            text = (f"📢 Рекламный пост <b>#{ad['id']}</b>\n\n"
+                    f"<b>Название:</b> {ad['caption']}\n"
+                    f"<b>Статус:</b> {status}\n"
+                    f"<b>Интервал показа:</b> каждые {ad['show_interval']} анкет\n"
+                    f"<b>Создан:</b> {created}\n\n"
+                    f"<b>Управление:</b>")
+
+            await message.answer(
+                text,
+                reply_markup=kb.admin_ad_actions(ad),
+                parse_mode='HTML'
+            )
+            await message.answer(f"✅ Интервал изменён на {interval}")
+        else:
+            await message.answer("❌ Ошибка обновления интервала")
+    else:
+        # Создаём новую рекламу
+        ad_id = await db.add_ad_post(
+            message_id=data['message_id'],
+            chat_id=data['chat_id'],
+            caption=data['caption'],
+            admin_id=message.from_user.id,
+            show_interval=interval,
+            games=data.get('games', ['dota', 'cs'])
+        )
+
+        await state.clear()
+
+        games = data.get('games', ['dota', 'cs'])
+        games_text = "обеих играх" if len(games) == 2 else ("Dota 2" if games[0] == "dota" else "CS2")
+
+        text = (f"✅ Рекламный пост <b>#{ad_id}</b> создан!\n\n"
+                f"<b>Название:</b> {data['caption']}\n"
+                f"<b>Игры:</b> {games_text}\n"
+                f"<b>Интервал:</b> каждые {interval} анкет\n\n"
+                f"Пост автоматически активен и будет показываться пользователям.")
+
+        await message.answer(
+            text,
+            reply_markup=kb.admin_back_menu(),
+            parse_mode='HTML'
+        )
+
 @router.callback_query(F.data.startswith("interval_"), AdminAdForm.waiting_interval_choice)
 async def select_interval_for_new_ad(callback: CallbackQuery, state: FSMContext, db):
     try:
@@ -580,9 +697,9 @@ async def select_interval_for_new_ad(callback: CallbackQuery, state: FSMContext,
     except (IndexError, ValueError):
         await callback.answer("Ошибка", show_alert=True)
         return
-    
+
     data = await state.get_data()
-    
+
     ad_id = await db.add_ad_post(
         message_id=data['message_id'],
         chat_id=data['chat_id'],
@@ -591,18 +708,18 @@ async def select_interval_for_new_ad(callback: CallbackQuery, state: FSMContext,
         show_interval=interval,
         games=data.get('games', ['dota', 'cs'])
     )
-    
+
     await state.clear()
-    
+
     games = data.get('games', ['dota', 'cs'])
     games_text = "обеих играх" if len(games) == 2 else ("Dota 2" if games[0] == "dota" else "CS2")
-    
+
     text = (f"✅ Рекламный пост <b>#{ad_id}</b> создан!\n\n"
             f"<b>Название:</b> {data['caption']}\n"
             f"<b>Игры:</b> {games_text}\n"
             f"<b>Интервал:</b> каждые {interval} анкет\n\n"
             f"Пост автоматически активен и будет показываться пользователям.")
-    
+
     await callback.message.edit_text(
         text,
         reply_markup=kb.admin_back_menu(),
@@ -756,6 +873,72 @@ async def apply_new_interval(callback: CallbackQuery, state: FSMContext, db):
         await callback.answer(f"✅ Интервал изменён на {interval}")
     else:
         await callback.answer("❌ Ошибка обновления", show_alert=True)
+
+@router.callback_query(F.data.startswith("custom_interval_"), AdminAdForm.editing_interval)
+async def request_custom_interval_edit(callback: CallbackQuery, state: FSMContext, db):
+    """Запрос ввода кастомного интервала при редактировании"""
+    try:
+        ad_id = int(callback.data.split("_")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+
+    data = await state.get_data()
+    if data.get('editing_ad_id') != ad_id:
+        await callback.answer("Ошибка: несовпадение ID", show_alert=True)
+        return
+
+    ads = await db.get_all_ads()
+    ad = next((a for a in ads if a['id'] == ad_id), None)
+
+    if not ad:
+        await callback.answer("Реклама не найдена", show_alert=True)
+        return
+
+    await state.set_state(AdminAdForm.waiting_custom_interval)
+
+    text = (f"📢 Пост <b>#{ad_id}</b>: {ad['caption']}\n\n"
+            f"<b>Текущий интервал:</b> каждые {ad['show_interval']} анкет\n\n"
+            f"<b>Введите свой интервал показа:</b>\n"
+            f"(число от 1 до 1000)")
+
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"cancel_custom_interval_{ad_id}")]
+    ])
+
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("cancel_custom_interval_"), AdminAdForm.waiting_custom_interval)
+async def cancel_custom_interval_edit(callback: CallbackQuery, state: FSMContext, db):
+    """Отмена ввода кастомного интервала"""
+    try:
+        ad_id = int(callback.data.split("_")[3])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+
+    await state.set_state(AdminAdForm.editing_interval)
+
+    ads = await db.get_all_ads()
+    ad = next((a for a in ads if a['id'] == ad_id), None)
+
+    if not ad:
+        await callback.answer("Реклама не найдена", show_alert=True)
+        await state.clear()
+        return
+
+    text = (f"📢 Пост <b>#{ad_id}</b>: {ad['caption']}\n\n"
+            f"<b>Текущий интервал:</b> каждые {ad['show_interval']} анкет\n\n"
+            f"<b>Выберите новый интервал показа:</b>")
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=kb.interval_choice_keyboard(ad_id, current_interval=ad['show_interval']),
+        parse_mode='HTML'
+    )
+    await callback.answer("Отменено")
 
 @router.callback_query(F.data.startswith("ad_delete_"))
 @admin_only

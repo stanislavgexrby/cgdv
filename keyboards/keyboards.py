@@ -782,34 +782,38 @@ def admin_ad_actions(ad: dict) -> InlineKeyboardMarkup:
 
 def interval_choice_keyboard(ad_id: int = None, current_interval: int = None) -> InlineKeyboardMarkup:
     """Клавиатура выбора интервала показа рекламы"""
-    intervals = [1, 2, 3, 5, 7, 10, 15, 20]
-    
+    intervals = [5, 10, 15, 20, 25, 30, 40, 50]
+
     buttons = []
     row = []
-    
+
     for interval in intervals:
         if current_interval and interval == current_interval:
             button_text = f"• {interval} •"
         else:
             button_text = str(interval)
-        
+
         if ad_id is not None:
             callback = f"setint_{ad_id}_{interval}"
         else:
             callback = f"interval_{interval}"
-        
+
         row.append(InlineKeyboardButton(text=button_text, callback_data=callback))
-        
+
         if len(row) == 4:
             buttons.append(row)
             row = []
-    
+
     if row:
         buttons.append(row)
-    
+
+    # Добавляем кнопку для ввода своего значения
     if ad_id is not None:
+        buttons.append([InlineKeyboardButton(text="✏️ Ввести своё значение", callback_data=f"custom_interval_{ad_id}")])
         buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data=f"ad_view_{ad_id}")])
     else:
+        buttons.append([InlineKeyboardButton(text="✏️ Ввести своё значение", callback_data="custom_interval")])
+
         buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="admin_ads")])
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
