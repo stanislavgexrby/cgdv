@@ -291,74 +291,104 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
 
     if ads and next_profiles_shown > 0:
         # Инициализация очереди реклам при первом запуске или если её нет
-        if 'ads_queue' not in data or not data['ads_queue']:
+        if 'ads_queue_ids' not in data or not data['ads_queue_ids']:
             import random
-            ads_queue = ads.copy()
-            random.shuffle(ads_queue)
+            # Сохраняем только ID реклам, а не полные объекты
+            ads_ids = [ad['id'] for ad in ads]
+            random.shuffle(ads_ids)
             current_ad_index = 0
-            next_ad_at = ads_queue[0].get('show_interval', 3)
+
+            # Находим первую рекламу по ID для получения интервала
+            first_ad = next((ad for ad in ads if ad['id'] == ads_ids[0]), None)
+            next_ad_at = first_ad.get('show_interval', 3) if first_ad else 3
 
             await state.update_data(
-                ads_queue=ads_queue,
+                ads_queue_ids=ads_ids,
                 current_ad_index=current_ad_index,
                 next_ad_at=next_ad_at
             )
-            logger.info(f"🎲 Инициализирована очередь реклам: {len(ads_queue)} реклам, первая через {next_ad_at} анкет")
+            logger.info(f"🎲 Инициализирована очередь реклам: {len(ads_ids)} реклам (ID: {ads_ids}), первая через {next_ad_at} анкет")
             data = await state.get_data()
 
-        ads_queue = data.get('ads_queue', [])
+        ads_queue_ids = data.get('ads_queue_ids', [])
         current_ad_index = data.get('current_ad_index', 0)
         next_ad_at = data.get('next_ad_at', 3)
 
         # Проверяем, пора ли показать рекламу
-        if next_profiles_shown >= next_ad_at:
-            ad = ads_queue[current_ad_index]
-            logger.info(f"🟠 ПОКАЗЫВАЕМ РЕКЛАМУ #{ad['id']} на шаге {next_profiles_shown} (запланировано на {next_ad_at})")
+        if next_profiles_shown >= next_ad_at and current_ad_index < len(ads_queue_ids):
+            # Получаем актуальные данные рекламы из БД по ID
+            current_ad_id = ads_queue_ids[current_ad_index]
+            ad = next((a for a in ads if a['id'] == current_ad_id), None)
 
-            try:
-                try:
-                    await callback.message.delete()
-                except Exception as e:
-                    logger.warning(f"Не удалось удалить сообщение: {e}")
-
-                sent_msg = await callback.bot.copy_message(
-                    chat_id=callback.message.chat.id,
-                    from_chat_id=ad['chat_id'],
-                    message_id=ad['message_id'],
-                    reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
-                        [kb.InlineKeyboardButton(text="Продолжить", callback_data="ad_continue")]
-                    ])
-                )
-
-                # Переходим к следующей рекламе в очереди
+            if not ad:
+                logger.error(f"❌ Реклама #{current_ad_id} не найдена в активных рекламах, пропускаем")
+                # Переходим к следующей рекламе
                 new_ad_index = current_ad_index + 1
-
-                # Если дошли до конца очереди - начинаем заново с перемешиванием
-                if new_ad_index >= len(ads_queue):
+                if new_ad_index >= len(ads_queue_ids):
                     import random
-                    random.shuffle(ads_queue)
+                    ads_ids = [a['id'] for a in ads]
+                    random.shuffle(ads_ids)
                     new_ad_index = 0
-                    logger.info(f"🔄 Очередь реклам пройдена, перемешиваем и начинаем заново")
+                    await state.update_data(ads_queue_ids=ads_ids)
+                    ads_queue_ids = ads_ids
 
-                next_ad = ads_queue[new_ad_index]
-                new_next_ad_at = next_profiles_shown + next_ad.get('show_interval', 3)
+                await state.update_data(current_ad_index=new_ad_index)
+            else:
+                logger.info(f"🟠 ПОКАЗЫВАЕМ РЕКЛАМУ #{ad['id']} на шаге {next_profiles_shown} (запланировано на {next_ad_at}, интервал {ad.get('show_interval', 3)})")
 
-                logger.info(f"📍 Следующая реклама: #{next_ad['id']} (интервал {next_ad.get('show_interval', 3)}), покажем на шаге {new_next_ad_at}")
+                try:
+                    try:
+                        await callback.message.delete()
+                    except Exception as e:
+                        logger.warning(f"Не удалось удалить сообщение: {e}")
 
-                await state.update_data(
-                    current_index=next_index,
-                    profiles_shown=next_profiles_shown,
-                    ad_message_id=sent_msg.message_id,
-                    ads_queue=ads_queue,
-                    current_ad_index=new_ad_index,
-                    next_ad_at=new_next_ad_at
-                )
+                    sent_msg = await callback.bot.copy_message(
+                        chat_id=callback.message.chat.id,
+                        from_chat_id=ad['chat_id'],
+                        message_id=ad['message_id'],
+                        reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+                            [kb.InlineKeyboardButton(text="Продолжить", callback_data="ad_continue")]
+                        ])
+                    )
 
-                logger.info(f"✅ Реклама показана! current_index={next_index}, profiles_shown={next_profiles_shown}")
-                return
+                    # Переходим к следующей рекламе в очереди
+                    new_ad_index = current_ad_index + 1
 
-            except Exception as e:
-                logger.error(f"❌ Ошибка показа рекламы #{ad.get('id')}: {e}")
+                    # Если дошли до конца очереди - начинаем заново с перемешиванием
+                    if new_ad_index >= len(ads_queue_ids):
+                        import random
+                        # Обновляем список ID (могли добавиться/удалиться рекламы)
+                        ads_ids = [a['id'] for a in ads]
+                        random.shuffle(ads_ids)
+                        ads_queue_ids = ads_ids
+                        new_ad_index = 0
+                        logger.info(f"🔄 Очередь реклам пройдена, перемешиваем и начинаем заново (новые ID: {ads_ids})")
+
+                    # Получаем АКТУАЛЬНЫЕ данные следующей рекламы
+                    next_ad_id = ads_queue_ids[new_ad_index]
+                    next_ad = next((a for a in ads if a['id'] == next_ad_id), None)
+
+                    if next_ad:
+                        new_next_ad_at = next_profiles_shown + next_ad.get('show_interval', 3)
+                        logger.info(f"📍 Следующая реклама: #{next_ad['id']} (интервал {next_ad.get('show_interval', 3)}), покажем на шаге {new_next_ad_at}")
+                    else:
+                        new_next_ad_at = next_profiles_shown + 3
+                        logger.warning(f"⚠️ Следующая реклама #{next_ad_id} не найдена, используем интервал по умолчанию (3)")
+
+                    await state.update_data(
+                        current_index=next_index,
+                        profiles_shown=next_profiles_shown,
+                        ad_message_id=sent_msg.message_id,
+                        ads_queue_ids=ads_queue_ids,
+                        current_ad_index=new_ad_index,
+                        next_ad_at=new_next_ad_at
+                    )
+
+                    logger.info(f"✅ Реклама показана! current_index={next_index}, profiles_shown={next_profiles_shown}")
+                    return
+
+                except Exception as e:
+                    logger.error(f"❌ Ошибка показа рекламы #{ad.get('id')}: {e}")
         else:
             logger.debug(f"⏭️ Реклама не показывается: profiles_shown={next_profiles_shown}, next_ad_at={next_ad_at}")
     else:
@@ -794,16 +824,19 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
     
     # Инициализируем очередь реклам для нового поиска
     ads = await db.get_active_ads_for_game(data['game'])
-    ads_queue = []
+    ads_queue_ids = []
     current_ad_index = 0
     next_ad_at = 0
 
     if ads:
         import random
-        ads_queue = ads.copy()
-        random.shuffle(ads_queue)
-        next_ad_at = ads_queue[0].get('show_interval', 3)
-        logger.info(f"🎲 Инициализирована очередь реклам: {len(ads_queue)} реклам, первая через {next_ad_at} анкет")
+        # Сохраняем только ID реклам
+        ads_queue_ids = [ad['id'] for ad in ads]
+        random.shuffle(ads_queue_ids)
+        # Получаем интервал первой рекламы
+        first_ad = next((ad for ad in ads if ad['id'] == ads_queue_ids[0]), None)
+        next_ad_at = first_ad.get('show_interval', 3) if first_ad else 3
+        logger.info(f"🎲 Инициализирована очередь реклам: {len(ads_queue_ids)} реклам (ID: {ads_queue_ids}), первая через {next_ad_at} анкет")
 
     await state.set_state(SearchForm.browsing)
     await state.update_data(
@@ -811,7 +844,7 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
         current_index=0,
         last_loaded_offset=40,
         profiles_shown=0,
-        ads_queue=ads_queue,
+        ads_queue_ids=ads_queue_ids,
         current_ad_index=current_ad_index,
         next_ad_at=next_ad_at
     )

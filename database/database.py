@@ -1172,8 +1172,10 @@ class Database:
                     "UPDATE ad_posts SET show_interval = $1 WHERE id = $2",
                     interval, ad_id
                 )
-                await self._redis.delete("active_ads")
-                logger.info(f"Обновлён интервал рекламы #{ad_id}: {interval}")
+                # Очищаем кэш для обеих игр
+                await self._redis.delete("active_ads:dota")
+                await self._redis.delete("active_ads:cs")
+                logger.info(f"Обновлён интервал рекламы #{ad_id}: {interval}, кэш очищен")
                 return True
         except Exception as e:
             logger.error(f"Ошибка обновления интервала рекламы #{ad_id}: {e}")
