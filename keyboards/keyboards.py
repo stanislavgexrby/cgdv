@@ -876,6 +876,27 @@ def admin_ad_actions(ad: dict) -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def ad_expires_choice_keyboard() -> InlineKeyboardMarkup:
+    """Клавиатура выбора срока действия рекламы"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="1 день", callback_data="ad_expires_1"),
+            InlineKeyboardButton(text="3 дня", callback_data="ad_expires_3")
+        ],
+        [
+            InlineKeyboardButton(text="7 дней", callback_data="ad_expires_7"),
+            InlineKeyboardButton(text="14 дней", callback_data="ad_expires_14")
+        ],
+        [
+            InlineKeyboardButton(text="30 дней", callback_data="ad_expires_30")
+        ],
+        [
+            InlineKeyboardButton(text="📅 Указать дату", callback_data="ad_expires_custom"),
+            InlineKeyboardButton(text="♾️ Бессрочно", callback_data="ad_expires_never")
+        ],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_ads")]
+    ])
+
 def interval_choice_keyboard(ad_id: int = None, current_interval: int = None) -> InlineKeyboardMarkup:
     """Клавиатура выбора интервала показа рекламы"""
     intervals = [5, 10, 15, 20, 25, 30, 40, 50]

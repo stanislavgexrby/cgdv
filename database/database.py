@@ -1104,7 +1104,7 @@ class Database:
 
     async def add_ad_post(self, message_id: int, chat_id: int, caption: str, admin_id: int,
                           show_interval: int = 3, games: List[str] = None, regions: List[str] = None,
-                          ad_type: str = 'forward') -> int:
+                          ad_type: str = 'forward', expires_at = None) -> int:
         """Добавление рекламного поста
 
         Args:
@@ -1116,6 +1116,7 @@ class Database:
             games: Список игр ['dota', 'cs']
             regions: Список регионов ['all'] или конкретные регионы
             ad_type: Тип рекламы 'copy' (копировать) или 'forward' (пересылать)
+            expires_at: Дата/время окончания показа (None = бессрочно)
         """
         if games is None:
             games = ['dota', 'cs']
@@ -1124,18 +1125,20 @@ class Database:
 
         async with self._pg_pool.acquire() as conn:
             post_id = await conn.fetchval(
-                """INSERT INTO ad_posts (message_id, chat_id, caption, created_by, show_interval, games, regions, ad_type)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                """INSERT INTO ad_posts (message_id, chat_id, caption, created_by, show_interval, games, regions, ad_type, expires_at)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
                    RETURNING id""",
-                message_id, chat_id, caption, admin_id, show_interval, games, regions, ad_type
+                message_id, chat_id, caption, admin_id, show_interval, games, regions, ad_type, expires_at
             )
             await self._redis.delete("active_ads:dota")
             await self._redis.delete("active_ads:cs")
-            logger.info(f"Добавлен рекламный пост #{post_id} ({ad_type}) для игр: {games}, регионов: {regions}")
+
+            expires_info = f", истекает: {expires_at}" if expires_at else ", бессрочно"
+            logger.info(f"Добавлен рекламный пост #{post_id} ({ad_type}) для игр: {games}, регионов: {regions}{expires_info}")
             return post_id
 
     async def get_active_ads_for_game(self, game: str) -> List[Dict]:
-        """Получение активных рекламных постов для конкретной игры"""
+        """Получение активных рекламных постов для конкретной игры (не истекших)"""
         cache_key = f"active_ads:{game}"
         cached = await self._get_cache(cache_key)
         if cached:
@@ -1143,7 +1146,11 @@ class Database:
 
         async with self._pg_pool.acquire() as conn:
             rows = await conn.fetch(
-                "SELECT * FROM ad_posts WHERE is_active = TRUE AND $1 = ANY(games) ORDER BY created_at DESC",
+                """SELECT * FROM ad_posts
+                   WHERE is_active = TRUE
+                   AND $1 = ANY(games)
+                   AND (expires_at IS NULL OR expires_at > NOW())
+                   ORDER BY created_at DESC""",
                 game
             )
             result = [dict(row) for row in rows]
@@ -1223,6 +1230,26 @@ class Database:
             await conn.execute("DELETE FROM ad_posts WHERE id = $1", ad_id)
             await self._redis.delete("active_ads")
             return True
+
+    async def cleanup_expired_ads(self) -> int:
+        """Удаление истекших рекламных постов
+
+        Returns:
+            Количество удаленных постов
+        """
+        async with self._pg_pool.acquire() as conn:
+            result = await conn.execute(
+                "DELETE FROM ad_posts WHERE expires_at IS NOT NULL AND expires_at <= NOW()"
+            )
+            # Парсим результат вида "DELETE N"
+            deleted_count = int(result.split()[-1]) if result and result.split() else 0
+
+            if deleted_count > 0:
+                await self._redis.delete("active_ads:dota")
+                await self._redis.delete("active_ads:cs")
+                logger.info(f"🗑️ Удалено {deleted_count} истекших рекламных постов")
+
+            return deleted_count
 
     # === СЛУЖЕБНЫЕ МЕТОДЫ ===
 

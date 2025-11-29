@@ -108,6 +108,24 @@ def setup_logging():
 setup_logging()
 logger = logging.getLogger(__name__)
 
+async def cleanup_expired_ads_task(db):
+    """Фоновая задача для очистки истекших рекламных постов"""
+    logger.info("🗑️ Запуск задачи очистки истекших реклам")
+
+    while True:
+        try:
+            # Выполняем очистку каждый час
+            await asyncio.sleep(3600)  # 1 час
+
+            deleted_count = await db.cleanup_expired_ads()
+
+            if deleted_count > 0:
+                logger.info(f"🗑️ Удалено {deleted_count} истекших рекламных постов")
+
+        except Exception as e:
+            logger.error(f"❌ Ошибка в задаче очистки реклам: {e}")
+            await asyncio.sleep(300)  # При ошибке подождем 5 минут и попробуем снова
+
 async def monthly_reminder_task(bot: Bot, db):
     """Задача для ежемесячных напоминаний"""
     logger.info("📅 Запуск задачи ежемесячных напоминаний")
@@ -243,6 +261,10 @@ async def main():
         reminder_task = asyncio.create_task(schedule_monthly_reminders(bot, db))
         logger.info("⏰ Планировщик напоминаний запущен")
 
+        # Запускаем задачу очистки истекших реклам в фоне
+        cleanup_ads_task = asyncio.create_task(cleanup_expired_ads_task(db))
+        logger.info("🗑️ Задача очистки истекших реклам запущена")
+
         logger.info("🚀 CGDV TeammateBot успешно запущен и готов к работе!")
         logger.info("🔄 Начинаем polling...")
 
@@ -262,6 +284,13 @@ async def main():
             if 'reminder_task' in locals():
                 logger.info("⏰ Отменяем планировщик напоминаний...")
                 reminder_task.cancel()
+        except:
+            pass
+
+        try:
+            if 'cleanup_ads_task' in locals():
+                logger.info("🗑️ Отменяем задачу очистки реклам...")
+                cleanup_ads_task.cancel()
         except:
             pass
 

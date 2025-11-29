@@ -20,6 +20,8 @@ class AdminAdForm(StatesGroup):
     waiting_ad_caption = State()
     waiting_game_choice = State()
     waiting_region_choice = State()  # Новое состояние для выбора регионов
+    waiting_expires_choice = State()  # Новое состояние для выбора срока действия
+    waiting_custom_expires = State()  # Новое состояние для ввода даты вручную
     waiting_interval_choice = State()
     editing_interval = State()
     waiting_custom_interval = State()  # Новое состояние для ввода кастомного интервала
@@ -780,7 +782,7 @@ async def region_need_reminder(callback: CallbackQuery):
 
 @router.callback_query(F.data == "ad_region_done", AdminAdForm.waiting_region_choice)
 async def regions_selected_for_ad(callback: CallbackQuery, state: FSMContext):
-    """Завершение выбора регионов и переход к интервалу (только для создания новой рекламы)"""
+    """Завершение выбора регионов и переход к сроку действия (только для создания новой рекламы)"""
     data = await state.get_data()
     selected_regions = data.get('selected_regions', [])
 
@@ -798,7 +800,7 @@ async def regions_selected_for_ad(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Используйте кнопку 'Сохранить'", show_alert=True)
         return
 
-    await state.set_state(AdminAdForm.waiting_interval_choice)
+    await state.set_state(AdminAdForm.waiting_expires_choice)
 
     # Формируем текст с выбранными регионами
     if 'all' in selected_regions:
@@ -813,7 +815,64 @@ async def regions_selected_for_ad(callback: CallbackQuery, state: FSMContext):
             regions_text += f" и ещё {len(selected_regions) - 5}"
 
     text = (f"✅ Регионы выбраны: <b>{regions_text}</b>\n\n"
-            f"<b>Шаг 5/5: Выберите интервал показа</b>\n\n"
+            f"<b>Шаг 6/7: Выберите срок действия</b>\n\n"
+            f"Через сколько времени реклама автоматически удалится?")
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=kb.ad_expires_choice_keyboard(),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+# === КОНЕЦ ОБРАБОТЧИКОВ РЕГИОНОВ ===
+
+# === ОБРАБОТЧИКИ ВЫБОРА СРОКА ДЕЙСТВИЯ ===
+
+@router.callback_query(F.data.startswith("ad_expires_"), AdminAdForm.waiting_expires_choice)
+async def select_ad_expires(callback: CallbackQuery, state: FSMContext):
+    """Выбор срока действия рекламы"""
+    expires_choice = callback.data.split("_")[2]  # '1', '3', '7', '14', '30', 'never', 'custom'
+
+    # Если выбрано "Указать дату"
+    if expires_choice == 'custom':
+        await state.set_state(AdminAdForm.waiting_custom_expires)
+
+        text = (
+            "📅 <b>Указание даты окончания рекламы</b>\n\n"
+            "Введите дату, когда реклама должна автоматически удалиться.\n\n"
+            "<b>Формат:</b> <code>ДД.ММ.ГГГГ</code> или <code>ДД.ММ.ГГГГ ЧЧ:ММ</code>\n\n"
+            "<b>Примеры:</b>\n"
+            "• <code>21.12.2025</code> - удалится 21 декабря 2025 в 00:00\n"
+            "• <code>31.12.2025 23:59</code> - удалится 31 декабря 2025 в 23:59\n\n"
+            "⚠️ Дата должна быть в будущем"
+        )
+
+        await callback.message.edit_text(
+            text,
+            reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+                [kb.InlineKeyboardButton(text="◀️ Назад", callback_data="ad_expires_back")]
+            ]),
+            parse_mode='HTML'
+        )
+        await callback.answer()
+        return
+
+    # Вычисляем expires_at для быстрых кнопок
+    if expires_choice == 'never':
+        expires_at = None
+        expires_text = "Бессрочно"
+    else:
+        from datetime import datetime, timedelta
+        days = int(expires_choice)
+        expires_at = datetime.utcnow() + timedelta(days=days)
+        expires_text = f"{days} {'день' if days == 1 else 'дня' if days < 5 else 'дней'}"
+
+    await state.update_data(expires_at=expires_at)
+    await state.set_state(AdminAdForm.waiting_interval_choice)
+
+    text = (f"✅ Срок действия: <b>{expires_text}</b>\n\n"
+            f"<b>Шаг 7/7: Выберите интервал показа</b>\n\n"
             f"Через сколько анкет показывать эту рекламу?")
 
     await callback.message.edit_text(
@@ -823,7 +882,116 @@ async def regions_selected_for_ad(callback: CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# === КОНЕЦ ОБРАБОТЧИКОВ РЕГИОНОВ ===
+@router.callback_query(F.data == "ad_expires_back", AdminAdForm.waiting_custom_expires)
+async def back_to_expires_choice(callback: CallbackQuery, state: FSMContext):
+    """Возврат к выбору срока действия"""
+    await state.set_state(AdminAdForm.waiting_expires_choice)
+
+    data = await state.get_data()
+    selected_regions = data.get('selected_regions', [])
+
+    if 'all' in selected_regions:
+        regions_text = "Все регионы"
+    else:
+        from config import settings
+        region_names = []
+        for region in selected_regions[:5]:
+            region_names.append(settings.COUNTRIES_DICT.get(region, region))
+        regions_text = ", ".join(region_names)
+        if len(selected_regions) > 5:
+            regions_text += f" и ещё {len(selected_regions) - 5}"
+
+    text = (f"✅ Регионы выбраны: <b>{regions_text}</b>\n\n"
+            f"<b>Шаг 6/7: Выберите срок действия</b>\n\n"
+            f"Через сколько времени реклама автоматически удалится?")
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=kb.ad_expires_choice_keyboard(),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+@router.message(AdminAdForm.waiting_custom_expires, F.text)
+async def process_custom_expires(message: Message, state: FSMContext):
+    """Обработка ввода даты вручную"""
+    from datetime import datetime
+
+    date_text = message.text.strip()
+
+    # Пробуем распарсить дату
+    expires_at = None
+    formats = [
+        "%d.%m.%Y",           # 21.12.2025
+        "%d.%m.%Y %H:%M",     # 21.12.2025 23:59
+        "%d/%m/%Y",           # 21/12/2025
+        "%d/%m/%Y %H:%M",     # 21/12/2025 23:59
+    ]
+
+    for date_format in formats:
+        try:
+            expires_at = datetime.strptime(date_text, date_format)
+            break
+        except ValueError:
+            continue
+
+    if not expires_at:
+        await message.answer(
+            "❌ <b>Неверный формат даты!</b>\n\n"
+            "Используйте формат: <code>ДД.ММ.ГГГГ</code> или <code>ДД.ММ.ГГГГ ЧЧ:ММ</code>\n\n"
+            "<b>Примеры:</b>\n"
+            "• <code>21.12.2025</code>\n"
+            "• <code>31.12.2025 23:59</code>\n\n"
+            "Попробуйте ещё раз или нажмите 'Назад'",
+            parse_mode='HTML'
+        )
+        return
+
+    # Проверяем, что дата в будущем
+    now = datetime.now()
+    if expires_at <= now:
+        await message.answer(
+            "❌ <b>Дата должна быть в будущем!</b>\n\n"
+            f"Вы указали: <code>{expires_at.strftime('%d.%m.%Y %H:%M')}</code>\n"
+            f"Сейчас: <code>{now.strftime('%d.%m.%Y %H:%M')}</code>\n\n"
+            "Попробуйте ещё раз или нажмите 'Назад'",
+            parse_mode='HTML'
+        )
+        return
+
+    # Проверяем, что дата не слишком далеко в будущем (например, не более 10 лет)
+    from datetime import timedelta
+    max_future = now + timedelta(days=3650)  # 10 лет
+    if expires_at > max_future:
+        await message.answer(
+            "❌ <b>Дата слишком далеко в будущем!</b>\n\n"
+            f"Максимум: <code>{max_future.strftime('%d.%m.%Y')}</code>\n\n"
+            "Попробуйте ещё раз или нажмите 'Назад'",
+            parse_mode='HTML'
+        )
+        return
+
+    # Все проверки пройдены, сохраняем дату
+    await state.update_data(expires_at=expires_at)
+    await state.set_state(AdminAdForm.waiting_interval_choice)
+
+    expires_text = expires_at.strftime('%d.%m.%Y %H:%M')
+    days_until = (expires_at - now).days + 1
+
+    text = (
+        f"✅ Срок действия: <b>до {expires_text}</b>\n"
+        f"   (через {days_until} {'день' if days_until == 1 else 'дня' if days_until < 5 else 'дней'})\n\n"
+        f"<b>Шаг 7/7: Выберите интервал показа</b>\n\n"
+        f"Через сколько анкет показывать эту рекламу?"
+    )
+
+    await message.answer(
+        text,
+        reply_markup=kb.interval_choice_keyboard(),
+        parse_mode='HTML'
+    )
+
+# === КОНЕЦ ОБРАБОТЧИКОВ СРОКА ДЕЙСТВИЯ ===
 
 @router.callback_query(F.data == "custom_interval", AdminAdForm.waiting_interval_choice)
 async def request_custom_interval_new(callback: CallbackQuery, state: FSMContext):
@@ -930,7 +1098,8 @@ async def process_custom_interval(message: Message, state: FSMContext, db):
             show_interval=interval,
             games=data.get('games', ['dota', 'cs']),
             regions=data.get('selected_regions', ['all']),
-            ad_type=data.get('ad_type', 'forward')
+            ad_type=data.get('ad_type', 'forward'),
+            expires_at=data.get('expires_at')
         )
 
         await state.clear()
@@ -989,7 +1158,8 @@ async def select_interval_for_new_ad(callback: CallbackQuery, state: FSMContext,
         show_interval=interval,
         games=data.get('games', ['dota', 'cs']),
         regions=data.get('selected_regions', ['all']),
-        ad_type=data.get('ad_type', 'forward')
+        ad_type=data.get('ad_type', 'forward'),
+        expires_at=data.get('expires_at')
     )
 
     await state.clear()
