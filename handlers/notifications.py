@@ -72,26 +72,26 @@ async def get_user_interaction_state(user_id: int, db) -> str:
         logger.warning(f"Ошибка определения состояния пользователя {user_id}: {e}")
         return 'available'
 
-async def smart_notification(bot: Bot, user_id: int, text: str, 
-                           quick_actions: List[Tuple[str, str]] = None, 
+async def smart_notification(bot: Bot, user_id: int, text: str,
+                           quick_actions: List[Tuple[str, str]] = None,
                            photo_id: Optional[str] = None, db=None):
     """Умное уведомление в зависимости от состояния пользователя"""
     try:
         user_state = await get_user_interaction_state(user_id, db) if db else 'available'
-        
+
         if user_state == 'busy':
             keyboard = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="✅ Понятно", callback_data="dismiss_notification")]
             ])
             notification_text = f"🔔 {text}"
-            return await safe_send_notification(bot, user_id, notification_text, None, keyboard)
+            return await safe_send_notification(bot, user_id, notification_text, photo_id=None, keyboard=keyboard)
         else:
             if quick_actions:
                 keyboard = kb.create_navigation_keyboard(quick_actions)
             else:
                 keyboard = kb.create_navigation_keyboard([("Главное меню", "main_menu")])
-            return await safe_send_notification(bot, user_id, text, photo_id, keyboard)
-            
+            return await safe_send_notification(bot, user_id, text, photo_id=photo_id, keyboard=keyboard)
+
     except Exception as e:
         logger.error(f"Ошибка отправки умного уведомления: {e}")
         return False
@@ -120,25 +120,29 @@ async def safe_send_notification(
     user_id: int,
     text: str,
     photo_id: Optional[str] = None,
+    keyboard: Optional[InlineKeyboardMarkup] = None,
     add_ok_button: bool = True
 ) -> bool:
     """Безопасная отправка уведомления пользователю"""
     try:
-        keyboard = kb.notification_ok() if add_ok_button else None
+        # Если передана кастомная клавиатура, используем её
+        # Иначе создаём стандартную кнопку "Понятно" если add_ok_button=True
+        if keyboard is None:
+            keyboard = kb.notification_ok() if add_ok_button else None
 
         if photo_id:
             await bot.send_photo(
                 chat_id=user_id,
                 photo=photo_id,
                 caption=text,
-                reply_markup=keyboard, 
+                reply_markup=keyboard,
                 parse_mode='HTML'
             )
         else:
             await bot.send_message(
                 chat_id=user_id,
                 text=text,
-                reply_markup=keyboard, 
+                reply_markup=keyboard,
                 parse_mode='HTML'
             )
         return True
@@ -148,13 +152,13 @@ async def safe_send_notification(
 
 async def _send_notification_internal(
     bot: Bot,
-    user_id: int, 
+    user_id: int,
     text: str,
     photo_id: Optional[str] = None,
     keyboard: Optional[InlineKeyboardMarkup] = None
 ):
     """Внутренняя функция для отправки уведомления"""
-    success = await safe_send_notification(bot, user_id, text, photo_id, keyboard)
+    success = await safe_send_notification(bot, user_id, text, photo_id=photo_id, keyboard=keyboard)
     if success:
         logger.info(f"📨 Уведомление отправлено {user_id}")
     return success
@@ -295,7 +299,7 @@ async def notify_admin_new_report(bot: Bot, reporter_id: int, reported_user_id: 
 
         success_count = 0
         for admin_id in settings.ADMIN_IDS:
-            success = await safe_send_notification(bot, admin_id, text, add_ok_button=True)
+            success = await safe_send_notification(bot, admin_id, text, photo_id=None, add_ok_button=True)
             if success:
                 success_count += 1
 

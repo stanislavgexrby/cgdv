@@ -145,7 +145,7 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
         except Exception as e2:
             logger.error(f"Критическая ошибка отправки сообщения: {e2}")
             try:
-                await callback.answer(f"Ошибка: {text[:100]}...", show_alert=True)
+                await callback.answer("Ошибка загрузки. Попробуйте еще раз", show_alert=True)
             except Exception:
                 pass
 
