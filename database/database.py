@@ -1103,8 +1103,20 @@ class Database:
     # === РЕКЛАМНЫЕ ПОСТЫ ===
 
     async def add_ad_post(self, message_id: int, chat_id: int, caption: str, admin_id: int,
-                          show_interval: int = 3, games: List[str] = None, regions: List[str] = None) -> int:
-        """Добавление рекламного поста"""
+                          show_interval: int = 3, games: List[str] = None, regions: List[str] = None,
+                          ad_type: str = 'forward') -> int:
+        """Добавление рекламного поста
+
+        Args:
+            message_id: ID сообщения в Telegram
+            chat_id: ID чата откуда сообщение
+            caption: Название рекламы для админки
+            admin_id: ID админа создавшего рекламу
+            show_interval: Через сколько анкет показывать
+            games: Список игр ['dota', 'cs']
+            regions: Список регионов ['all'] или конкретные регионы
+            ad_type: Тип рекламы 'copy' (копировать) или 'forward' (пересылать)
+        """
         if games is None:
             games = ['dota', 'cs']
         if regions is None:
@@ -1112,14 +1124,14 @@ class Database:
 
         async with self._pg_pool.acquire() as conn:
             post_id = await conn.fetchval(
-                """INSERT INTO ad_posts (message_id, chat_id, caption, created_by, show_interval, games, regions)
-                   VALUES ($1, $2, $3, $4, $5, $6, $7)
+                """INSERT INTO ad_posts (message_id, chat_id, caption, created_by, show_interval, games, regions, ad_type)
+                   VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                    RETURNING id""",
-                message_id, chat_id, caption, admin_id, show_interval, games, regions
+                message_id, chat_id, caption, admin_id, show_interval, games, regions, ad_type
             )
             await self._redis.delete("active_ads:dota")
             await self._redis.delete("active_ads:cs")
-            logger.info(f"Добавлен рекламный пост #{post_id} для игр: {games}, регионов: {regions}")
+            logger.info(f"Добавлен рекламный пост #{post_id} ({ad_type}) для игр: {games}, регионов: {regions}")
             return post_id
 
     async def get_active_ads_for_game(self, game: str) -> List[Dict]:

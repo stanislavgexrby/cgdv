@@ -16,6 +16,7 @@ from handlers.notifications import notify_user_banned, notify_user_unbanned, not
 
 class AdminAdForm(StatesGroup):
     waiting_ad_message = State()
+    waiting_ad_type = State()  # Новое состояние для выбора типа рекламы
     waiting_ad_caption = State()
     waiting_game_choice = State()
     waiting_region_choice = State()  # Новое состояние для выбора регионов
@@ -585,15 +586,46 @@ async def receive_ad_message(message: Message, state: FSMContext, db):
         message_id=message.message_id,
         chat_id=message.chat.id
     )
-    
-    await state.set_state(AdminAdForm.waiting_ad_caption)
+
+    await state.set_state(AdminAdForm.waiting_ad_type)
     await message.answer(
-        "✅ Сообщение получено!\n\n<b>Шаг 2/3: Отправьте краткое название</b>\n\nЭто название будет видно только в админ панели для удобства управления.",
+        "✅ Сообщение получено!\n\n"
+        "<b>Шаг 2/6: Выберите тип рекламы</b>\n\n"
+        "📋 <b>Копировать</b> - текст копируется, кнопка 'Продолжить' снизу поста\n"
+        "  (для красивого отображения текстовых реклам без эмодзи Telegram)\n\n"
+        "↗️ <b>Переслать</b> - сообщение пересылается из источника\n"
+        "  (кнопка отдельно, сохраняется автор сообщения)",
+        reply_markup=kb.ad_type_choice_keyboard(),
+        parse_mode='HTML'
+    )
+
+@router.callback_query(F.data.startswith("adtype_"), AdminAdForm.waiting_ad_type)
+async def select_ad_type(callback: CallbackQuery, state: FSMContext):
+    """Выбор типа рекламы"""
+    ad_type = callback.data.split("_")[1]  # 'copy' или 'forward'
+
+    if ad_type not in ['copy', 'forward']:
+        await callback.answer("❌ Неизвестный тип рекламы", show_alert=True)
+        return
+
+    await state.update_data(ad_type=ad_type)
+    await state.set_state(AdminAdForm.waiting_ad_caption)
+
+    type_name = "Копирование" if ad_type == 'copy' else "Пересылка"
+    text = (
+        f"✅ Выбран тип: <b>{type_name}</b>\n\n"
+        f"<b>Шаг 3/6: Отправьте краткое название</b>\n\n"
+        f"Это название будет видно только в админ панели для удобства управления."
+    )
+
+    await callback.message.edit_text(
+        text,
         reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
             [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_ads")]
         ]),
         parse_mode='HTML'
     )
+    await callback.answer()
 
 @router.message(AdminAdForm.waiting_ad_caption)
 async def receive_ad_caption(message: Message, state: FSMContext, db):
@@ -602,10 +634,10 @@ async def receive_ad_caption(message: Message, state: FSMContext, db):
 
     await state.update_data(caption=caption)
     await state.set_state(AdminAdForm.waiting_game_choice)
-    
+
     text = (f"✅ Название сохранено: <b>{caption}</b>\n\n"
-            f"<b>Шаг 3/4: В каких играх показывать рекламу?</b>")
-    
+            f"<b>Шаг 4/6: В каких играх показывать рекламу?</b>")
+
     await message.answer(
         text,
         reply_markup=kb.game_choice_for_ad_keyboard(),
@@ -897,7 +929,8 @@ async def process_custom_interval(message: Message, state: FSMContext, db):
             admin_id=message.from_user.id,
             show_interval=interval,
             games=data.get('games', ['dota', 'cs']),
-            regions=data.get('selected_regions', ['all'])
+            regions=data.get('selected_regions', ['all']),
+            ad_type=data.get('ad_type', 'forward')
         )
 
         await state.clear()
@@ -955,7 +988,8 @@ async def select_interval_for_new_ad(callback: CallbackQuery, state: FSMContext,
         admin_id=callback.from_user.id,
         show_interval=interval,
         games=data.get('games', ['dota', 'cs']),
-        regions=data.get('selected_regions', ['all'])
+        regions=data.get('selected_regions', ['all']),
+        ad_type=data.get('ad_type', 'forward')
     )
 
     await state.clear()

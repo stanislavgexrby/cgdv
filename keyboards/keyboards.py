@@ -818,6 +818,14 @@ def admin_ads_menu_list(ads: list) -> InlineKeyboardMarkup:
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def ad_type_choice_keyboard() -> InlineKeyboardMarkup:
+    """Выбор типа рекламы при создании"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Копировать", callback_data="adtype_copy")],
+        [InlineKeyboardButton(text="↗️ Переслать", callback_data="adtype_forward")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_ads")]
+    ])
+
 def game_choice_for_ad_keyboard() -> InlineKeyboardMarkup:
     """Выбор игр при создании рекламы"""
     return InlineKeyboardMarkup(inline_keyboard=[
