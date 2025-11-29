@@ -508,6 +508,55 @@ async def view_ad_details(callback: CallbackQuery, db):
     await safe_edit_message(callback, text, kb.admin_ad_actions(ad))
     await callback.answer()
 
+@router.callback_query(F.data.startswith("ad_preview_"))
+@admin_only
+async def preview_ad_post(callback: CallbackQuery, db):
+    """Предпросмотр рекламного поста"""
+    try:
+        ad_id = int(callback.data.split("_")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+
+    ads = await db.get_all_ads()
+    ad = next((a for a in ads if a['id'] == ad_id), None)
+
+    if not ad:
+        await callback.answer("Реклама не найдена", show_alert=True)
+        return
+
+    # Отправляем предпросмотр
+    try:
+        # Копируем рекламное сообщение админу
+        await callback.bot.copy_message(
+            chat_id=callback.message.chat.id,
+            from_chat_id=ad['chat_id'],
+            message_id=ad['message_id']
+        )
+
+        # Отправляем пояснительное сообщение с кнопкой возврата
+        preview_text = f"👆 Так выглядит рекламный пост <b>#{ad_id}</b> для пользователей\n\n"
+        preview_text += f"<b>Название:</b> {ad['caption']}"
+
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="◀️ Назад к посту", callback_data=f"ad_view_{ad_id}")]
+        ])
+
+        await callback.message.answer(
+            preview_text,
+            reply_markup=keyboard,
+            parse_mode='HTML'
+        )
+
+        await callback.answer("Предпросмотр отправлен")
+
+    except Exception as e:
+        logger.error(f"Ошибка предпросмотра рекламы: {e}")
+        await callback.answer(
+            "Ошибка загрузки рекламного поста. Возможно, оригинальное сообщение было удалено.",
+            show_alert=True
+        )
+
 @router.callback_query(F.data == "admin_add_ad")
 @admin_only
 async def start_add_ad(callback: CallbackQuery, state: FSMContext):

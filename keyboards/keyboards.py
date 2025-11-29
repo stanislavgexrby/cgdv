@@ -857,6 +857,7 @@ def admin_ad_actions(ad: dict) -> InlineKeyboardMarkup:
     toggle_text = "⏸️ Выключить" if is_active else "▶️ Включить"
 
     buttons = [
+        [InlineKeyboardButton(text="👁️ Предпросмотр", callback_data=f"ad_preview_{ad_id}")],
         [InlineKeyboardButton(text=toggle_text, callback_data=f"ad_toggle_{ad_id}")],
         [InlineKeyboardButton(text="🎮 Изменить игры", callback_data=f"ad_games_{ad_id}")],
         [InlineKeyboardButton(text="🌍 Изменить регионы", callback_data=f"ad_regions_{ad_id}")],

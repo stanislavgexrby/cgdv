@@ -1,5 +1,6 @@
 import logging
 import random
+import asyncio
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -176,7 +177,11 @@ async def handle_search_action(callback: CallbackQuery, action: str, target_user
         await show_next_profile(callback, state, db)
     
     elif action == "report":
-        await state.update_data(report_target_user_id=target_user_id)
+        # Сохраняем ID сообщения бота для последующего редактирования
+        await state.update_data(
+            report_target_user_id=target_user_id,
+            last_bot_message_id=callback.message.message_id
+        )
         await state.set_state(SearchForm.waiting_report_message)
 
         text = (
@@ -1109,74 +1114,173 @@ async def cancel_report(callback: CallbackQuery, state: FSMContext, db):
     """Отмена жалобы"""
     data = await state.get_data()
 
-    # Восстанавливаем состояние browsing
     await state.set_state(SearchForm.browsing)
 
-    # Удаляем сохраненный ID
     await state.update_data(report_target_user_id=None)
 
     await callback.answer("Жалоба отменена")
 
-    # Показываем следующую анкету
     await show_next_profile(callback, state, db)
 
 @router.message(SearchForm.waiting_report_message)
 async def receive_report_message(message: Message, state: FSMContext, db):
     """Получение сообщения жалобы"""
+    data = await state.get_data()
     report_message = message.text
+    bot = message.bot
+    chat_id = message.chat.id
+    last_bot_message_id = data.get('last_bot_message_id')
+
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение пользователя: {e}")
 
     if not report_message or len(report_message.strip()) < 5:
-        await message.answer(
-            "Сообщение слишком короткое. Опишите причину жалобы подробнее (минимум 5 символов):",
-            reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
-                [kb.InlineKeyboardButton(text="Отмена", callback_data="cancel_report")]
-            ])
-        )
+        text = "Сообщение слишком короткое\n\nОпишите причину жалобы подробнее (минимум 5 символов):"
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="Отмена", callback_data="cancel_report")]
+        ])
+
+        if last_bot_message_id:
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=last_bot_message_id,
+                    text=text,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.error(f"Ошибка редактирования сообщения: {e}")
+                sent = await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode='HTML')
+                await state.update_data(last_bot_message_id=sent.message_id)
+        else:
+            sent = await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode='HTML')
+            await state.update_data(last_bot_message_id=sent.message_id)
         return
 
     report_message = report_message[:500]
-
-    data = await state.get_data()
     target_user_id = data.get('report_target_user_id')
     game = data.get('game')
     user_id = message.from_user.id
 
     if not target_user_id or not game:
-        await message.answer(
-            "Ошибка: данные жалобы не найдены. Попробуйте снова.",
-            reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
-                [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
-            ])
-        )
+        text = "Ошибка: данные жалобы не найдены"
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+        ])
+
+        if last_bot_message_id:
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=last_bot_message_id,
+                    text=text,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+            except Exception:
+                await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode='HTML')
+        else:
+            await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode='HTML')
+
         await state.clear()
         return
 
     success = await db.add_report(user_id, target_user_id, game, report_message)
 
+    await state.set_state(SearchForm.browsing)
+    await state.update_data(report_target_user_id=None)
+
     if success:
         await db._clear_pattern_cache(f"search:{user_id}:{game}:*")
-
-        await message.answer(
-            "Жалоба отправлена модератору!\n\nВаша жалоба будет рассмотрена в ближайшее время.",
-            reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
-                [kb.InlineKeyboardButton(text="Продолжить поиск", callback_data="continue_search")]
-            ])
-        )
-
-        await notify_admin_new_report(message.bot, user_id, target_user_id, game)
+        await notify_admin_new_report(bot, user_id, target_user_id, game)
         logger.info(f"Жалоба добавлена: {user_id} пожаловался на {target_user_id}, причина: {report_message[:50]}")
 
-        # Восстанавливаем состояние browsing
-        await state.set_state(SearchForm.browsing)
-        await state.update_data(report_target_user_id=None)
+    notification_text = "Жалоба отправлена модератору!" if success else "Вы уже жаловались на эту анкету"
+
+    if last_bot_message_id:
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=last_bot_message_id,
+                text=notification_text,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Ошибка редактирования сообщения: {e}")
+            sent = await bot.send_message(chat_id, notification_text, parse_mode='HTML')
+            await state.update_data(last_bot_message_id=sent.message_id)
+            last_bot_message_id = sent.message_id
     else:
-        await message.answer(
-            "Вы уже жаловались на эту анкету",
-            reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
-                [kb.InlineKeyboardButton(text="Продолжить поиск", callback_data="continue_search")]
-            ])
-        )
-        await state.set_state(SearchForm.browsing)
+        sent = await bot.send_message(chat_id, notification_text, parse_mode='HTML')
+        await state.update_data(last_bot_message_id=sent.message_id)
+        last_bot_message_id = sent.message_id
+
+    await asyncio.sleep(0.5)
+
+    class FakeMessage:
+        def __init__(self, msg_id, chat, bot_instance):
+            self.message_id = msg_id
+            self.chat = chat
+            self.bot = bot_instance
+            self._bot = bot_instance
+            self._chat_id = chat.id
+
+        async def delete(self):
+            """Удаляет сообщение бота"""
+            try:
+                await self._bot.delete_message(chat_id=self._chat_id, message_id=self.message_id)
+            except Exception as e:
+                logger.warning(f"Не удалось удалить сообщение {self.message_id}: {e}")
+
+        async def edit_text(self, text, reply_markup=None, parse_mode=None, disable_web_page_preview=None):
+            """Редактирует текст сообщения"""
+            try:
+                await self._bot.edit_message_text(
+                    chat_id=self._chat_id,
+                    message_id=self.message_id,
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                    disable_web_page_preview=disable_web_page_preview
+                )
+            except Exception as e:
+                logger.error(f"Ошибка редактирования сообщения: {e}")
+
+        async def answer_photo(self, photo, caption=None, reply_markup=None, parse_mode=None, **kwargs):
+            """Отправляет новое сообщение с фото"""
+            return await self._bot.send_photo(
+                chat_id=self._chat_id,
+                photo=photo,
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+
+        async def answer(self, text, reply_markup=None, parse_mode=None, **kwargs):
+            """Отправляет новое текстовое сообщение"""
+            return await self._bot.send_message(
+                chat_id=self._chat_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+
+    class FakeCallback:
+        def __init__(self, msg, user, bot_instance):
+            self.message = msg
+            self.from_user = user
+            self.bot = bot_instance
+
+        async def answer(self, text="", show_alert=False):
+            pass
+
+    fake_msg = FakeMessage(last_bot_message_id, message.chat, bot)
+    fake_callback = FakeCallback(fake_msg, message.from_user, bot)
+
+    await show_next_profile(fake_callback, state, db)
 
 @router.message(SearchForm.waiting_message)
 async def wrong_message_format(message: Message):
