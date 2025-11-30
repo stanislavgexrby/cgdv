@@ -404,7 +404,7 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
 
                         button_msg = await callback.bot.send_message(
                             chat_id=callback.message.chat.id,
-                            text="Нажмите кнопку Продолжить, чтобы вернуть к просмотру анкет",
+                            text="Нажмите на кнопку ниже, чтобы продолжить просмотр анкет",
                             reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
                                 [kb.InlineKeyboardButton(text="Продолжить", callback_data="ad_continue")]
                             ])
