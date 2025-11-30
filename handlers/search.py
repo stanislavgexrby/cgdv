@@ -1,6 +1,7 @@
 import logging
 import random
 import asyncio
+from typing import List, Dict
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
@@ -18,6 +19,31 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
+
+def filter_ads_by_region(ads: List[Dict], user_region: str) -> List[Dict]:
+    """Фильтрация реклам по региону пользователя
+
+    Args:
+        ads: Список всех активных реклам
+        user_region: Регион пользователя ('any', 'ru', 'us', etc.)
+
+    Returns:
+        Отфильтрованный список реклам
+    """
+    filtered_ads = []
+
+    for ad in ads:
+        ad_regions = ad.get('regions', ['all'])
+
+        # Реклама для всех регионов - показываем всем
+        if 'all' in ad_regions:
+            filtered_ads.append(ad)
+        # Реклама для конкретного региона - проверяем совпадение
+        # ВАЖНО: Если у пользователя region='any', НЕ показываем рекламу для конкретных регионов
+        elif user_region != 'any' and user_region in ad_regions:
+            filtered_ads.append(ad)
+
+    return filtered_ads
 
 async def update_filters_display(callback: CallbackQuery, state: FSMContext, message: str = None):
     """Отображение текущих фильтров с учётом роли"""
@@ -290,19 +316,17 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
         except Exception as e:
             logger.error(f"Ошибка при подгрузке анкет: {e}")
 
+    # Получаем активные рекламы для игры
     ads = await db.get_active_ads_for_game(data['game'])
 
+    # Фильтруем по региону пользователя (ВАЖНО: всегда получаем свежий профиль!)
     if ads:
         user_profile = await db.get_user_profile(data['user_id'], data['game'])
         user_region = user_profile.get('region', 'any') if user_profile else 'any'
 
-        if user_region != 'any':
-            filtered_ads = []
-            for ad in ads:
-                ad_regions = ad.get('regions', ['all'])
-                if 'all' in ad_regions or user_region in ad_regions:
-                    filtered_ads.append(ad)
-            ads = filtered_ads
+        # Используем универсальную функцию фильтрации
+        ads = filter_ads_by_region(ads, user_region)
+        logger.debug(f"🌍 Отфильтровано реклам по региону '{user_region}': {len(ads)} шт.")
 
     if ads and next_profiles_shown > 0:
         if 'ads_queue_ids' not in data or not data['ads_queue_ids']:
@@ -327,22 +351,45 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
         next_ad_at = data.get('next_ad_at', 3)
 
         if next_profiles_shown >= next_ad_at and current_ad_index < len(ads_queue_ids):
-            current_ad_id = ads_queue_ids[current_ad_index]
-            ad = next((a for a in ads if a['id'] == current_ad_id), None)
+            # КРИТИЧЕСКИ ВАЖНО: Ищем подходящую рекламу из очереди
+            # (может быть отфильтрована по региону после смены профиля пользователя)
+            ad_to_show = None
+            attempts = 0
+            max_attempts = len(ads_queue_ids)  # Максимум проверяем всю очередь
+            search_start_index = current_ad_index
 
-            if not ad:
-                logger.error(f"❌ Реклама #{current_ad_id} не найдена в активных рекламах, пропускаем")
-                new_ad_index = current_ad_index + 1
-                if new_ad_index >= len(ads_queue_ids):
+            while attempts < max_attempts:
+                current_ad_id = ads_queue_ids[current_ad_index]
+                ad = next((a for a in ads if a['id'] == current_ad_id), None)
+
+                if ad:
+                    # Нашли подходящую рекламу!
+                    ad_to_show = ad
+                    logger.debug(f"✅ Найдена подходящая реклама #{ad['id']} (попытка {attempts + 1}/{max_attempts})")
+                    break
+                else:
+                    # Реклама не подходит (отфильтрована по региону), пробуем следующую
+                    logger.debug(f"⏭️ Реклама #{current_ad_id} пропущена (не подходит по региону), ищем следующую...")
+                    current_ad_index = (current_ad_index + 1) % len(ads_queue_ids)
+                    attempts += 1
+
+            if not ad_to_show:
+                # Не нашли ни одной подходящей рекламы в очереди
+                logger.info(f"⚠️ Нет подходящих реклам в очереди из {len(ads_queue_ids)} для региона '{user_region}', показываем профиль")
+                # Пересоздаём очередь из текущих доступных (отфильтрованных) реклам
+                if ads:
                     import random
                     ads_ids = [a['id'] for a in ads]
                     random.shuffle(ads_ids)
-                    new_ad_index = 0
-                    await state.update_data(ads_queue_ids=ads_ids)
-                    ads_queue_ids = ads_ids
-
-                await state.update_data(current_ad_index=new_ad_index)
+                    await state.update_data(
+                        ads_queue_ids=ads_ids,
+                        current_ad_index=0,
+                        next_ad_at=next_profiles_shown + (ads[0].get('show_interval', 3) if ads else 3)
+                    )
+                    logger.info(f"🔄 Очередь пересоздана из {len(ads_ids)} доступных реклам")
             else:
+                # ad_to_show содержит подходящую рекламу
+                ad = ad_to_show  # Используем найденную рекламу
                 logger.info(f"🟠 ПОКАЗЫВАЕМ РЕКЛАМУ #{ad['id']} ({ad.get('ad_type', 'forward')}) на шаге {next_profiles_shown} (запланировано на {next_ad_at}, интервал {ad.get('show_interval', 3)})")
 
                 try:
@@ -911,19 +958,12 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
 
     # Инициализируем очередь реклам для нового поиска
     ads = await db.get_active_ads_for_game(data['game'])
+    total_ads = len(ads) if ads else 0
 
-    # Фильтруем рекламу по региону пользователя
-    if ads and user_region != 'any':
-        filtered_ads = []
-        for ad in ads:
-            ad_regions = ad.get('regions', ['all'])
-            # Показываем рекламу если:
-            # 1. В рекламе указаны "все регионы" (all)
-            # 2. Регион пользователя входит в список регионов рекламы
-            if 'all' in ad_regions or user_region in ad_regions:
-                filtered_ads.append(ad)
-        ads = filtered_ads
-        logger.info(f"🌍 Отфильтровано реклам по региону {user_region}: {len(ads)} из {len(filtered_ads)}")
+    # Фильтруем рекламу по региону пользователя (используем универсальную функцию)
+    if ads:
+        ads = filter_ads_by_region(ads, user_region)
+        logger.info(f"🌍 Отфильтровано реклам по региону '{user_region}': {len(ads)} из {total_ads}")
 
     ads_queue_ids = []
     current_ad_index = 0
