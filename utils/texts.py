@@ -1,3 +1,4 @@
+import html
 import config.settings as settings
 
 
@@ -19,14 +20,19 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
     game = user.get('current_game') or user.get('game', 'dota')
     role = user.get('role', 'player')  # ← ДОБАВИТЬ
 
+    # Экранируем пользовательские данные
+    name = html.escape(user['name'])
+    nickname = html.escape(user['nickname'])
+
     profile_url = user.get('profile_url')
     if profile_url and profile_url.strip():
-        nickname_with_link = f"<a href='{profile_url}'>{user['nickname']}</a>"
+        # URL не экранируем в атрибуте href, но nickname экранируем
+        nickname_with_link = f"<a href='{profile_url}'>{nickname}</a>"
     else:
-        nickname_with_link = user['nickname']
-    
+        nickname_with_link = nickname
+
     # Имя с ссылкой на профиль в игре
-    text = f"{user['name']} <b>{nickname_with_link}</b>, {format_age(user['age'])}\n\n"
+    text = f"{name} <b>{nickname_with_link}</b>, {format_age(user['age'])}\n\n"
 
     if role != 'player':
         # Для тренера/менеджера: только страна, описание
@@ -44,7 +50,8 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
 
         # Описание
         if user.get('additional_info'):
-            text += f"\n{user['additional_info']}\n"
+            additional_info = html.escape(user['additional_info'])
+            text += f"\n{additional_info}\n"
 
         # Контакт
         if show_contact:
@@ -109,12 +116,14 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
 
     # Описание
     if user.get('additional_info'):
-        text += f"\n{user['additional_info']}\n"
+        additional_info = html.escape(user['additional_info'])
+        text += f"\n{additional_info}\n"
 
     # Контакт
     if show_contact:
         username = user.get('username')
         if username:
+            # username используется в URL, но не экранируется в атрибуте href
             text += f"\n💬 <a href='https://t.me/{username}'>Написать</a>"
         else:
             text += f"\n💬 Контакт: нет username"

@@ -1,4 +1,5 @@
 import logging
+import html
 from aiogram import Router, F
 from aiogram.types import CallbackQuery
 from aiogram.fsm.context import FSMContext
@@ -127,7 +128,9 @@ async def _send_new_like_profile(message, likes: list, index: int):
 
     like_message = profile.get('message')
     if like_message:
-        text += f"\n\n💬 <i>Сообщение: «{like_message}»</i>"
+        # Экранируем сообщение пользователя
+        escaped_message = html.escape(like_message)
+        text += f"\n\n💬 <i>Сообщение: «{escaped_message}»</i>"
 
     total = len(likes)
     counter_text = f"Лайк {index + 1} из {total}"
@@ -163,9 +166,11 @@ async def show_like_profile(callback: CallbackQuery, likes: list, index: int):
     profile = likes[index]
     profile_text = texts.format_profile(profile)
     text = f"Этот игрок лайкнул вас:\n\n{profile_text}"
-    
+
     if profile.get('message'):
-        text += f"\n💌 Сообщение:\n\"{profile['message']}\""
+        # Экранируем сообщение пользователя
+        escaped_message = html.escape(profile['message'])
+        text += f"\n💌 Сообщение:\n\"{escaped_message}\""
 
     keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
         [
