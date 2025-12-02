@@ -370,6 +370,10 @@ async def select_game(callback: CallbackQuery, db):
 
 @router.callback_query(F.data.startswith("switch_"))
 async def switch_game(callback: CallbackQuery, db):
+    # Пропускаем callback'и типа switch_and_likes_ и switch_and_matches_
+    if callback.data.startswith("switch_and_"):
+        return
+
     parts = callback.data.split("_")
     if len(parts) < 2:
         await callback.answer("Ошибка", show_alert=True)
