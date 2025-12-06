@@ -1046,14 +1046,27 @@ class Database:
 
     # === ЖАЛОБЫ ===
 
-    async def add_report(self, reporter_id: int, reported_user_id: int, game: str, report_message: str = None) -> bool:
-        """Добавление жалобы с опциональным сообщением"""
+    async def add_report(self, reporter_id: int, reported_user_id: int, game: str, report_message: str) -> bool:
+        """Добавление жалобы с обязательным сообщением от пользователя
+
+        Args:
+            reporter_id: ID пользователя, который подал жалобу
+            reported_user_id: ID пользователя, на которого жалуются
+            game: Игра (dota/cs)
+            report_message: Причина жалобы от пользователя (минимум 5 символов)
+
+        Returns:
+            bool: True если жалоба добавлена, False если пользователь уже жаловался
+        """
+        if not report_message or len(report_message.strip()) < 5:
+            raise ValueError("report_message должно быть минимум 5 символов")
+
         async with self._pg_pool.acquire() as conn:
             try:
                 await conn.execute(
                     '''INSERT INTO reports (reporter_id, reported_user_id, game, report_reason, status, report_message)
                        VALUES ($1, $2, $3, 'inappropriate_content', 'pending', $4)''',
-                    reporter_id, reported_user_id, game, report_message
+                    reporter_id, reported_user_id, game, report_message.strip()
                 )
                 return True
             except:

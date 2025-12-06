@@ -1,8 +1,9 @@
 import logging
 import html
 from aiogram import Router, F
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, Message
 from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 
 import keyboards.keyboards as kb
 import utils.texts as texts
@@ -13,6 +14,11 @@ from handlers.notifications import notify_about_match, notify_admin_new_report
 
 logger = logging.getLogger(__name__)
 router = Router()
+
+# ==================== FSM СОСТОЯНИЯ ====================
+
+class LikesForm(StatesGroup):
+    waiting_report_message = State()
 
 # ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
@@ -496,8 +502,8 @@ async def skip_like(callback: CallbackQuery, db):
     await callback.answer()
 
 @router.callback_query(F.data.startswith("loves_report_"))
-async def report_like(callback: CallbackQuery, db):
-    """Жалоба на лайк"""
+async def report_like(callback: CallbackQuery, state: FSMContext, db):
+    """Инициация жалобы на лайк"""
     try:
         parts = callback.data.split("_")
         target_user_id = int(parts[2])
@@ -531,23 +537,211 @@ async def report_like(callback: CallbackQuery, db):
         await callback.answer()
         return
 
-    like_removed = await db.remove_like(target_user_id, user_id, game)
+    # Сохраняем данные для последующей отправки жалобы
+    await state.update_data(
+        report_target_user_id=target_user_id,
+        report_from_likes=True,
+        last_bot_message_id=callback.message.message_id,
+        current_index=current_index
+    )
+    await state.set_state(LikesForm.waiting_report_message)
 
+    text = (
+        "<b>Подача жалобы</b>\n\n"
+        "Напишите причину жалобы (ваше сообщение увидит только администратор):\n\n"
+        "Например:\n"
+        "• Неприемлемое фото\n"
+        "• Оскорбительное описание\n"
+        "• Спам или реклама\n"
+        "• Фейковая анкета"
+    )
+
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+        [kb.InlineKeyboardButton(text="Отмена", callback_data="cancel_report_likes")]
+    ])
+
+    await safe_edit_message(callback, text, keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data == "cancel_report_likes")
+async def cancel_report_likes(callback: CallbackQuery, state: FSMContext, db):
+    """Отмена жалобы из раздела лайков"""
+    data = await state.get_data()
+    current_index = data.get('current_index', 0)
+
+    await state.clear()
+    await callback.answer("Жалоба отменена")
+
+    # Возвращаемся к просмотру текущего лайка
+    user_id = callback.from_user.id
+    user = await db.get_user(user_id)
+    if user and user.get('current_game'):
+        game = user['current_game']
+        likes = await db.get_likes_for_user(user_id, game)
+
+        if likes and current_index < len(likes):
+            # Показываем тот же лайк, на который хотели пожаловаться
+            await show_like_profile(callback, likes, current_index)
+        else:
+            # Если лайков нет или индекс некорректный, показываем первый или сообщение
+            await show_next_like_or_finish(callback, user_id, game, db)
+    else:
+        await safe_edit_message(callback, "Возвращение в главное меню", kb.back())
+
+@router.message(LikesForm.waiting_report_message)
+async def receive_like_report_message(message: Message, state: FSMContext, db):
+    """Получение сообщения жалобы из раздела лайков"""
+    data = await state.get_data()
+    report_message = message.text
+    bot = message.bot
+    chat_id = message.chat.id
+    last_bot_message_id = data.get('last_bot_message_id')
+
+    # Удаляем сообщение пользователя
+    try:
+        await message.delete()
+    except Exception as e:
+        logger.warning(f"Не удалось удалить сообщение пользователя: {e}")
+
+    # Проверяем длину сообщения
+    if not report_message or len(report_message.strip()) < 5:
+        text = "Сообщение слишком короткое\n\nОпишите причину жалобы подробнее (минимум 5 символов):"
+        keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="Отмена", callback_data="cancel_report_likes")]
+        ])
+
+        if last_bot_message_id:
+            try:
+                await bot.edit_message_text(
+                    chat_id=chat_id,
+                    message_id=last_bot_message_id,
+                    text=text,
+                    reply_markup=keyboard,
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                logger.error(f"Ошибка редактирования сообщения: {e}")
+                sent = await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode='HTML')
+                await state.update_data(last_bot_message_id=sent.message_id)
+        else:
+            sent = await bot.send_message(chat_id, text, reply_markup=keyboard, parse_mode='HTML')
+            await state.update_data(last_bot_message_id=sent.message_id)
+        return
+
+    report_message = report_message[:500]
+    target_user_id = data.get('report_target_user_id')
+    user_id = message.from_user.id
+
+    user = await db.get_user(user_id)
+    if not user or not user.get('current_game'):
+        await message.answer("Ошибка: не удалось определить игру")
+        await state.clear()
+        return
+
+    game = user['current_game']
+
+    # Удаляем лайк
+    like_removed = await db.remove_like(target_user_id, user_id, game)
     if not like_removed:
         logger.info(f"Не удалось удалить лайк: {user_id} пожаловался на {target_user_id}")
 
-    report_added = await db.add_report(user_id, target_user_id, game)
+    # Добавляем жалобу с сообщением
+    report_added = await db.add_report(user_id, target_user_id, game, report_message)
+
+    # Очищаем данные жалобы из state
+    await state.update_data(report_target_user_id=None)
 
     if report_added:
-        await callback.answer("Жалоба отправлена модератору")
-        logger.info(f"Жалоба на лайк: {user_id} пожаловался на {target_user_id}")
+        await notify_admin_new_report(bot, user_id, target_user_id, game)
+        logger.info(f"Жалоба на лайк: {user_id} пожаловался на {target_user_id}, причина: {report_message[:50]}")
 
-        await notify_admin_new_report(callback.bot, user_id, target_user_id, game)
+        notification_text = "Жалоба отправлена модератору!"
     else:
-        await callback.answer("Вы уже жаловались на этого пользователя", show_alert=True)
-        return
+        notification_text = "Вы уже жаловались на этого пользователя"
 
-    await show_next_like_or_finish(callback, user_id, game, db)
+    # Отправляем уведомление и возвращаемся к просмотру лайков
+    if last_bot_message_id:
+        try:
+            await bot.edit_message_text(
+                chat_id=chat_id,
+                message_id=last_bot_message_id,
+                text=notification_text,
+                parse_mode='HTML'
+            )
+        except Exception as e:
+            logger.error(f"Ошибка редактирования сообщения: {e}")
+            sent = await bot.send_message(chat_id, notification_text, parse_mode='HTML')
+            await state.update_data(last_bot_message_id=sent.message_id)
+            last_bot_message_id = sent.message_id
+    else:
+        sent = await bot.send_message(chat_id, notification_text, parse_mode='HTML')
+        await state.update_data(last_bot_message_id=sent.message_id)
+        last_bot_message_id = sent.message_id
+
+    # Создаем фейковый callback для show_next_like_or_finish
+    import asyncio
+    await asyncio.sleep(0.5)
+
+    class FakeMessage:
+        def __init__(self, msg_id, chat, bot_instance):
+            self.message_id = msg_id
+            self.chat = chat
+            self.bot = bot_instance
+            self._bot = bot_instance
+            self._chat_id = chat.id
+
+        async def delete(self):
+            try:
+                await self._bot.delete_message(chat_id=self._chat_id, message_id=self.message_id)
+            except Exception as e:
+                logger.warning(f"Не удалось удалить сообщение {self.message_id}: {e}")
+
+        async def edit_text(self, text, reply_markup=None, parse_mode=None, disable_web_page_preview=None):
+            try:
+                await self._bot.edit_message_text(
+                    chat_id=self._chat_id,
+                    message_id=self.message_id,
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode,
+                    disable_web_page_preview=disable_web_page_preview
+                )
+            except Exception as e:
+                logger.error(f"Ошибка редактирования сообщения: {e}")
+
+        async def answer_photo(self, photo, caption=None, reply_markup=None, parse_mode=None, **kwargs):
+            return await self._bot.send_photo(
+                chat_id=self._chat_id,
+                photo=photo,
+                caption=caption,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+
+        async def answer(self, text, reply_markup=None, parse_mode=None, **kwargs):
+            return await self._bot.send_message(
+                chat_id=self._chat_id,
+                text=text,
+                reply_markup=reply_markup,
+                parse_mode=parse_mode
+            )
+
+    class FakeCallback:
+        def __init__(self, msg, user, bot_instance):
+            self.message = msg
+            self.from_user = user
+            self.bot = bot_instance
+
+        async def answer(self, text="", show_alert=False):
+            pass
+
+    fake_msg = FakeMessage(last_bot_message_id, message.chat, bot)
+    fake_callback = FakeCallback(fake_msg, message.from_user, bot)
+
+    await show_next_like_or_finish(fake_callback, user_id, game, db)
+
+    # Очищаем state после показа следующего лайка
+    await state.clear()
 
 # ==================== ПОКАЗ КОНТАКТОВ ====================
 

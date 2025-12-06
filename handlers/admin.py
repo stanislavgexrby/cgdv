@@ -179,12 +179,16 @@ async def _show_report(callback: CallbackQuery, report: dict, current_index: int
     
     mod_stats = await db.get_user_moderation_stats(reported_user_id)
     
+    # Получаем сообщение от жалобщика
+    report_message = report.get('report_message')
+    reason_text = f"«{report_message}»" if report_message else "не указана"
+
     header = (
         f"🚩 Жалоба #{report_id} ({current_index + 1}/{total_reports}) | {game_name}\n"
         f"📅 Дата: {_format_datetime(report.get('created_at'))}\n"
         f"👤 Жалоба от: {reporter_info}\n"
         f"🎯 На пользователя: {reported_info}\n"
-        f"📋 Причина: {report.get('report_reason', 'inappropriate_content')}\n\n"
+        f"📋 Причина жалобы: {reason_text}\n\n"
     )
     
     stats_text = "📊 <b>История нарушений:</b>\n"
@@ -200,11 +204,6 @@ async def _show_report(callback: CallbackQuery, report: dict, current_index: int
     else:
         stats_text += "• Последний бан: не было\n"
 
-    # Добавляем сообщение жалобы от пользователя
-    report_message = report.get('report_message')
-    if report_message:
-        stats_text += f"\n💬 <b>Сообщение от жалобщика:</b>\n<i>«{report_message}»</i>\n"
-    
     if profile:
         body = "\n👤 <b>Анкета нарушителя:</b>\n\n" + texts.format_profile(profile, show_contact=True)
     else:
