@@ -659,24 +659,15 @@ async def receive_like_report_message(message: Message, state: FSMContext, db):
     else:
         notification_text = "Вы уже жаловались на этого пользователя"
 
-    # Отправляем уведомление и возвращаемся к просмотру лайков
+    # Удаляем предыдущее сообщение и отправляем уведомление
     if last_bot_message_id:
         try:
-            await bot.edit_message_text(
-                chat_id=chat_id,
-                message_id=last_bot_message_id,
-                text=notification_text,
-                parse_mode='HTML'
-            )
+            await bot.delete_message(chat_id=chat_id, message_id=last_bot_message_id)
         except Exception as e:
-            logger.error(f"Ошибка редактирования сообщения: {e}")
-            sent = await bot.send_message(chat_id, notification_text, parse_mode='HTML')
-            await state.update_data(last_bot_message_id=sent.message_id)
-            last_bot_message_id = sent.message_id
-    else:
-        sent = await bot.send_message(chat_id, notification_text, parse_mode='HTML')
-        await state.update_data(last_bot_message_id=sent.message_id)
-        last_bot_message_id = sent.message_id
+            logger.warning(f"Не удалось удалить предыдущее сообщение: {e}")
+
+    sent = await bot.send_message(chat_id, notification_text, parse_mode='HTML')
+    last_bot_message_id = sent.message_id
 
     # Создаем фейковый callback для show_next_like_or_finish
     import asyncio
@@ -707,7 +698,7 @@ async def receive_like_report_message(message: Message, state: FSMContext, db):
                     disable_web_page_preview=disable_web_page_preview
                 )
             except Exception as e:
-                logger.error(f"Ошибка редактирования сообщения: {e}")
+                logger.warning(f"Не удалось отредактировать сообщение {self.message_id}: {e}")
 
         async def answer_photo(self, photo, caption=None, reply_markup=None, parse_mode=None, **kwargs):
             return await self._bot.send_photo(

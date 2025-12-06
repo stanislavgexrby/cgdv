@@ -694,15 +694,17 @@ def confirm_country(country_key: str) -> InlineKeyboardMarkup:
 
 # ==================== ЛАЙКИ И МЭТЧИ ====================
 
-def like_actions(user_id: int) -> InlineKeyboardMarkup:
+def like_actions(user_id: int, index: int = 0, total: int = 1) -> InlineKeyboardMarkup:
     """Действия с лайком"""
-    return InlineKeyboardMarkup(inline_keyboard=[
+    buttons = [
         [
-            InlineKeyboardButton(text="Лайк в ответ", callback_data=f"like_back_{user_id}"),
-            InlineKeyboardButton(text="Пропустить", callback_data=f"skip_like_{user_id}")
+            InlineKeyboardButton(text="❤️", callback_data=f"loves_back_{user_id}_{index}"),
+            InlineKeyboardButton(text="👎", callback_data=f"loves_skip_{user_id}_{index}")
         ],
+        [InlineKeyboardButton(text="Пожаловаться", callback_data=f"loves_report_{user_id}_{index}")],
         [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
-    ])
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 def contact(username: str = None) -> InlineKeyboardMarkup:
     """Контактная информация"""
