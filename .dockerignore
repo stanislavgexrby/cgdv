@@ -1,0 +1,58 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Docker
+Dockerfile
+docker-compose.yml
+docker-compose.yml.example
+.dockerignore
+
+# Logs (will be mounted as volume)
+logs/
+*.log
+
+# Environment files (will be passed via env_file)
+.env
+.env.example
+
+# Documentation
+README.md
+CLAUDE.md
+*.md
+
+# Claude
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Database
+*.db
+*.sqlite
+
+# Temporary files
+*.tmp
+*.temp
