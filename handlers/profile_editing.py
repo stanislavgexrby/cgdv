@@ -5,7 +5,7 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.fsm.context import FSMContext
 
 from handlers.notifications import update_user_activity
-from handlers.basic import check_ban_and_profile, safe_edit_message
+from handlers.basic import check_ban_and_profile, safe_edit_message, get_default_avatar
 from handlers.validation import validate_profile_input
 from handlers.profile_enum import ProfileForm, ProfileStep, EditProfileForm
 
@@ -442,7 +442,7 @@ async def edit_photo(callback: CallbackQuery, state: FSMContext, db):
 
     await safe_edit_message(
         callback,
-        "Отправьте новое фото или нажмите 'Удалить фото':",
+        "Отправьте новое фото или установите стандартную фотографию:",
         kb.edit_photo_menu()
     )
     await callback.answer()
@@ -1164,16 +1164,30 @@ async def delete_info(callback: CallbackQuery, state: FSMContext, db):
 
 @router.callback_query(F.data == "delete_photo", EditProfileForm.edit_photo)
 async def delete_photo(callback: CallbackQuery, state: FSMContext, db):
-    success = await update_profile_field(callback.from_user.id, 'photo_id', None, db)
+    # Получаем текущую игру пользователя
+    user = await db.get_user(callback.from_user.id)
+    game = user.get('current_game')
+
+    # Получаем file_id стандартной аватарки (с автозагрузкой и кешированием)
+    default_photo_id = await get_default_avatar(callback.bot, game)
+
+    if not default_photo_id:
+        await callback.answer("Ошибка загрузки стандартной фотографии", show_alert=True)
+        await state.clear()
+        await update_user_activity(callback.from_user.id, 'available', db)
+        await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
+        return
+
+    success = await update_profile_field(callback.from_user.id, 'photo_id', default_photo_id, db)
     await state.clear()
 
     await update_user_activity(callback.from_user.id, 'available', db)
 
     if success:
-        await callback.answer("Фото удалено")
+        await callback.answer("Установлена стандартная фотография")
         await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
     else:
-        await callback.answer("Ошибка удаления", show_alert=True)
+        await callback.answer("Ошибка обновления", show_alert=True)
         await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
 
 @router.callback_query(F.data == "cancel_edit")

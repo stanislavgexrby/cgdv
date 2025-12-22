@@ -442,7 +442,7 @@ async def process_photo(message: Message, state: FSMContext, db):
 @router.message(ProfileForm.photo)
 async def wrong_photo_format(message: Message, state: FSMContext):
     """Обработка неправильного формата при загрузке фото"""
-    await show_validation_error(message, state, "Отправьте фотографию или нажмите 'Пропустить'")
+    await show_validation_error(message, state, "Отправьте фотографию")
 
 # Обработчики для выбора роли
 @router.callback_query(F.data.startswith("role_select_"), ProfileForm.role)
@@ -1030,22 +1030,22 @@ async def skip_info(callback: CallbackQuery, state: FSMContext):
     await show_profile_step(callback, state, ProfileStep.PHOTO, show_current=has_next_data)
     await callback.answer()
 
-@router.callback_query(F.data == "skip_photo", ProfileForm.photo)
-async def skip_photo(callback: CallbackQuery, state: FSMContext, db):
-    """Пропуск загрузки фото и сохранение профиля"""
-    data = await state.get_data()
-    user_id = data.get('user_id', callback.from_user.id)
+# @router.callback_query(F.data == "skip_photo", ProfileForm.photo)
+# async def skip_photo(callback: CallbackQuery, state: FSMContext, db):
+#     """Пропуск загрузки фото и сохранение профиля"""
+#     data = await state.get_data()
+#     user_id = data.get('user_id', callback.from_user.id)
     
-    await save_profile_unified(
-        user_id=user_id,
-        data=data,
-        photo_id=None,
-        callback=callback,
-        state=state,
-        db=db
-    )
+#     await save_profile_unified(
+#         user_id=user_id,
+#         data=data,
+#         photo_id=None,
+#         callback=callback,
+#         state=state,
+#         db=db
+#     )
     
-    await callback.answer()
+#     await callback.answer()
 
 @router.callback_query(F.data == "cancel")
 async def confirm_cancel_profile(callback: CallbackQuery, state: FSMContext):

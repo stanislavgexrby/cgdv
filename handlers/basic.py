@@ -34,7 +34,7 @@ class SearchForm(StatesGroup):
     waiting_message = State()
     waiting_report_message = State()
 
-__all__ = ['safe_edit_message', 'router', 'SearchForm']
+__all__ = ['safe_edit_message', 'router', 'SearchForm', 'get_default_avatar']
 
 # ==================== ДЕКОРАТОРЫ ДЛЯ ПРОВЕРОК ====================
 
@@ -152,16 +152,56 @@ async def safe_edit_message(callback: CallbackQuery, text: str, reply_markup: Op
 async def get_menu_photo(bot, game: str = None):
     """Получить фото для меню (с кешированием file_id)"""
     photo_key = game if game in ['dota', 'cs'] else 'default'
-    
+
     cached_id = settings.get_cached_photo_id(photo_key)
     if cached_id:
         return cached_id
-    
+
     photo_path = settings.MENU_PHOTOS.get(photo_key)
     if photo_path and os.path.exists(photo_path):
         return FSInputFile(photo_path)
-    
+
     return None
+
+async def get_default_avatar(bot, game: str):
+    """Получить file_id дефолтной аватарки (с автозагрузкой и кешированием)"""
+    cache_key = f"avatar_{game}"
+
+    # Проверяем кэш
+    cached_id = settings.get_cached_photo_id(cache_key)
+    if cached_id:
+        return cached_id
+
+    # Загружаем файл и получаем file_id
+    avatar_path = settings.DEFAULT_AVATARS.get(game)
+    if not avatar_path or not os.path.exists(avatar_path):
+        logger.error(f"Файл дефолтной аватарки не найден: {avatar_path}")
+        return None
+
+    try:
+        # Отправляем фото админу чтобы получить file_id
+        if not settings.ADMIN_ID:
+            logger.error("ADMIN_ID не установлен, невозможно загрузить дефолтную аватарку")
+            return None
+
+        photo = FSInputFile(avatar_path)
+        message = await bot.send_photo(
+            chat_id=settings.ADMIN_ID,
+            photo=photo,
+            caption=f"🎮 Дефолтная аватарка {game} (автозагрузка)"
+        )
+
+        file_id = message.photo[-1].file_id
+
+        # Кэшируем file_id
+        settings.cache_photo_id(cache_key, file_id)
+        logger.info(f"Дефолтная аватарка {game} загружена и закэширована: {file_id}")
+
+        return file_id
+
+    except Exception as e:
+        logger.error(f"Ошибка загрузки дефолтной аватарки {game}: {e}")
+        return None
 
 async def _save_last_menu_message_id(user_id: int, message_id: int, db):
     """Сохранение ID последнего сообщения меню в Redis"""

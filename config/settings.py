@@ -44,6 +44,11 @@ MENU_PHOTOS = {
     'cs': os.path.join(ASSETS_DIR, 'cs2.png')
 }
 
+DEFAULT_AVATARS = {
+    'dota': os.path.join(ASSETS_DIR, 'dotaemptyavatar.png'),
+    'cs': os.path.join(ASSETS_DIR, 'csemptyavatar.png')
+}
+
 def load_photo_cache():
     """Загрузить кеш file_id из файла"""
     try:

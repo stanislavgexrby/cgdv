@@ -473,7 +473,7 @@ def skip_profile_url() -> InlineKeyboardMarkup:
 def skip_photo() -> InlineKeyboardMarkup:
     """Пропуск загрузки фото с навигацией"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Пропустить", callback_data="skip_photo")],
+        # [InlineKeyboardButton(text="Пропустить", callback_data="skip_photo")],
         [
             InlineKeyboardButton(text="Назад", callback_data="profile_back"),
             InlineKeyboardButton(text="Отмена", callback_data="cancel")
@@ -523,7 +523,7 @@ def edit_info_menu() -> InlineKeyboardMarkup:
 def edit_photo_menu() -> InlineKeyboardMarkup:
     """Меню редактирования фото"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Удалить фото", callback_data="delete_photo")],
+        [InlineKeyboardButton(text="Стандартная фотография", callback_data="delete_photo")],
         [InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")]
     ])
 
