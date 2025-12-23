@@ -37,3 +37,6 @@ venv/*
 *.log.*
 logs/
 logs/*
+backup_20251219_131911.sql
+teammates-bot.tar
+
