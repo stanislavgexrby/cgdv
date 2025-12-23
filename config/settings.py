@@ -26,14 +26,9 @@ def is_admin(user_id: int) -> bool:
 
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
-admin_id_str = os.getenv("ADMIN_ID", "0")
-try:
-    if admin_id_str and admin_id_str.isdigit():
-        ADMIN_ID = int(admin_id_str)
-    else:
-        ADMIN_ID = 0
-except (ValueError, TypeError):
-    ADMIN_ID = 0
+# ADMIN_ID используется для отправки служебных сообщений/фото
+# Берем первый ID из списка ADMIN_IDS
+ADMIN_ID = min(ADMIN_IDS) if ADMIN_IDS else 0
 
 ASSETS_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'assets')
 PHOTO_CACHE_FILE = os.path.join(ASSETS_DIR, 'photo_cache.json')
