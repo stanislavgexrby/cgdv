@@ -471,9 +471,9 @@ def skip_profile_url() -> InlineKeyboardMarkup:
     ])
 
 def skip_photo() -> InlineKeyboardMarkup:
-    """Пропуск загрузки фото с навигацией"""
+    """Меню выбора фото с возможностью установки стандартной"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        # [InlineKeyboardButton(text="Пропустить", callback_data="skip_photo")],
+        [InlineKeyboardButton(text="Стандартная фотография", callback_data="skip_photo")],
         [
             InlineKeyboardButton(text="Назад", callback_data="profile_back"),
             InlineKeyboardButton(text="Отмена", callback_data="cancel")

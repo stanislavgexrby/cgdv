@@ -4,7 +4,7 @@ from aiogram import Router, F
 from aiogram.fsm.context import FSMContext
 
 from handlers.notifications import update_user_activity
-from handlers.basic import check_ban_and_profile, safe_edit_message
+from handlers.basic import check_ban_and_profile, safe_edit_message, get_default_avatar
 from handlers.validation import validate_profile_input, show_validation_error
 from handlers.profile_enum import PROFILE_STEPS_ORDER, ProfileForm, ProfileStep, show_profile_step
 
@@ -1030,22 +1030,30 @@ async def skip_info(callback: CallbackQuery, state: FSMContext):
     await show_profile_step(callback, state, ProfileStep.PHOTO, show_current=has_next_data)
     await callback.answer()
 
-# @router.callback_query(F.data == "skip_photo", ProfileForm.photo)
-# async def skip_photo(callback: CallbackQuery, state: FSMContext, db):
-#     """Пропуск загрузки фото и сохранение профиля"""
-#     data = await state.get_data()
-#     user_id = data.get('user_id', callback.from_user.id)
-    
-#     await save_profile_unified(
-#         user_id=user_id,
-#         data=data,
-#         photo_id=None,
-#         callback=callback,
-#         state=state,
-#         db=db
-#     )
-    
-#     await callback.answer()
+@router.callback_query(F.data == "skip_photo", ProfileForm.photo)
+async def skip_photo(callback: CallbackQuery, state: FSMContext, db):
+    """Установка стандартной фотографии и сохранение профиля"""
+    data = await state.get_data()
+    user_id = data.get('user_id', callback.from_user.id)
+    game = data.get('game')
+
+    # Получаем file_id стандартной аватарки (с автозагрузкой и кешированием)
+    default_photo_id = await get_default_avatar(callback.bot, game)
+
+    if not default_photo_id:
+        await callback.answer("Ошибка загрузки стандартной фотографии", show_alert=True)
+        return
+
+    await save_profile_unified(
+        user_id=user_id,
+        data=data,
+        photo_id=default_photo_id,
+        callback=callback,
+        state=state,
+        db=db
+    )
+
+    await callback.answer()
 
 @router.callback_query(F.data == "cancel")
 async def confirm_cancel_profile(callback: CallbackQuery, state: FSMContext):
