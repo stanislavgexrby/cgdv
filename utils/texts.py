@@ -182,3 +182,192 @@ PROFILE_DELETED_BY_ADMIN = "Ваша анкета была удалена мод
 USER_BANNED = "Вы заблокированы до {until_date} за нарушение правил сообщества\n\nВо время блокировки Вы не можете:\n• Создавать анкеты\n• Искать игроков\n• Ставить лайки\n• Просматривать лайки и мэтчи"
 
 USER_UNBANNED = "Блокировка снята! Теперь Вы можете снова пользоваться ботом"
+
+# ==================== ОНБОРДИНГ ====================
+
+ONBOARDING_TIPS = {
+    'name': '<b>Совет:</b> Используй реальное имя или игровой никнейм, который тебе нравится',
+    'nickname': '<b>Совет:</b> Укажи твой игровой никнейм, так другим будет проще тебя найти',
+    'age': '<b>Совет:</b> Возраст помогает найти людей близких по возрасту',
+    'rating': '<b>Совет:</b> Указывай честный рейтинг - так найдешь игроков своего уровня',
+    'positions': '<b>Совет:</b> Выбери 1-3 позиции, на которых играешь лучше всего',
+    'goals': '<b>Совет:</b> Цели помогают найти единомышленников. Можно выбрать несколько',
+    'photo': '<b>Важно:</b> Профили с фото получают в 3 раза больше лайков\n\nМожешь загрузить своё фото или оставить стандартное',
+    'info': '<b>Совет:</b> Напиши пару слов о себе:\n• Когда обычно играешь\n• Что ищешь в тиммейтах\n• Стиль игры\n\nПрофили с описанием получают на 40% больше мэтчей'
+}
+
+def get_profile_quality_score(profile: dict) -> tuple:
+    """
+    Возвращает (текущий балл, максимальный балл)
+    Не учитываем имя и возраст - они обязательны
+    Для тренеров/менеджеров используется упрощенная оценка (только 3 параметра)
+    """
+    role = profile.get('role', 'player')
+
+    # Для тренеров и менеджеров упрощенная оценка
+    if role in ['coach', 'manager']:
+        score = 0
+        max_score = 3
+
+        # Регион
+        if profile.get('region') and profile['region'] != 'any':
+            score += 1
+
+        # Описание
+        if profile.get('additional_info') and profile.get('additional_info', '').strip():
+            score += 1
+
+        # Фото (только кастомное)
+        photo_id = profile.get('photo_id')
+        if photo_id:
+            game = profile.get('game') or profile.get('current_game')
+            is_default = False
+            if game:
+                import config.settings as settings
+                default_avatar = settings.get_cached_photo_id(f'avatar_{game}')
+                is_default = (default_avatar and photo_id == default_avatar)
+            if not is_default:
+                score += 1
+
+        return score, max_score
+
+    # Для игроков полная оценка (7 параметров)
+    score = 0
+    max_score = 7
+
+    # Рейтинг считается заполненным, если указан и не 'any'
+    if profile.get('rating') and profile['rating'] != 'any':
+        score += 1
+
+    # Позиции считаются заполненными, если есть и не ['any']
+    positions = profile.get('positions', [])
+    if positions and len(positions) > 0 and 'any' not in positions:
+        score += 1
+
+    # Регион считается заполненным, если указан и не 'any'
+    if profile.get('region') and profile['region'] != 'any':
+        score += 1
+
+    # Цели считаются заполненными, если есть и не ['any']
+    goals = profile.get('goals', [])
+    if goals and len(goals) > 0 and 'any' not in goals:
+        score += 1
+
+    # Описание считается заполненным, если не пустое
+    if profile.get('additional_info') and profile.get('additional_info', '').strip():
+        score += 1
+
+    # Ссылка на профиль (Dotabuff/Faceit)
+    if profile.get('profile_url') and profile['profile_url'].strip():
+        score += 1
+
+    # Фото (только кастомное, не дефолтное)
+    photo_id = profile.get('photo_id')
+    if photo_id:
+        # Проверяем, не является ли фото дефолтным
+        game = profile.get('game') or profile.get('current_game')
+        is_default = False
+
+        if game:
+            import config.settings as settings
+            default_avatar = settings.get_cached_photo_id(f'avatar_{game}')
+            is_default = (default_avatar and photo_id == default_avatar)
+
+        # Засчитываем только если НЕ дефолтное
+        if not is_default:
+            score += 1
+
+    return score, max_score
+
+def format_profile_quality(profile: dict) -> str:
+    """Форматирование качества профиля с прогресс-баром"""
+    score, max_score = get_profile_quality_score(profile)
+    percentage = int((score / max_score) * 100)
+
+    # Прогресс-бар
+    filled = '█' * (score * 2)
+    empty = '░' * ((max_score - score) * 2)
+
+    quality_text = f"\n<b>Заполненность профиля:</b> {score}/{max_score}\n{filled}{empty} {percentage}%"
+
+    # Добавляем мотивационный текст
+    if score < 4:
+        quality_text += "\n<i>Заполни профиль для большего количества лайков</i>"
+    elif score < 6:
+        quality_text += "\n<i>Хороший профиль! Добавь еще пару деталей</i>"
+    else:
+        quality_text += "\n<i>Отличный профиль</i>"
+
+    # Подсказки, что можно улучшить
+    missing = []
+    role = profile.get('role', 'player')
+
+    # Для тренеров/менеджеров упрощенный список
+    if role in ['coach', 'manager']:
+        # Проверяем регион
+        if not profile.get('region') or profile.get('region') == 'any':
+            missing.append("Укажи страну")
+
+        # Проверяем описание
+        if not profile.get('additional_info') or not profile.get('additional_info', '').strip():
+            missing.append("Напиши о себе")
+
+        # Проверяем фото
+        photo_id = profile.get('photo_id')
+        has_custom_photo = False
+        if photo_id:
+            game = profile.get('game') or profile.get('current_game')
+            if game:
+                import config.settings as settings
+                default_avatar = settings.get_cached_photo_id(f'avatar_{game}')
+                has_custom_photo = not (default_avatar and photo_id == default_avatar)
+
+        if not has_custom_photo:
+            missing.append("Добавь своё фото")
+
+    else:
+        # Для игроков полный список
+        # Проверяем рейтинг
+        if not profile.get('rating') or profile.get('rating') == 'any':
+            missing.append("Укажи рейтинг")
+
+        # Проверяем позиции
+        positions = profile.get('positions', [])
+        if not positions or len(positions) == 0 or 'any' in positions:
+            missing.append("Укажи позиции")
+
+        # Проверяем регион
+        if not profile.get('region') or profile.get('region') == 'any':
+            missing.append("Укажи страну")
+
+        # Проверяем цели
+        goals = profile.get('goals', [])
+        if not goals or len(goals) == 0 or 'any' in goals:
+            missing.append("Укажи цели")
+
+        # Проверяем описание
+        if not profile.get('additional_info') or not profile.get('additional_info', '').strip():
+            missing.append("Напиши о себе")
+
+        # Проверяем ссылку на профиль
+        if not profile.get('profile_url') or not profile['profile_url'].strip():
+            missing.append("Добавь ссылку на профиль")
+
+        # Проверяем фото (только кастомное, не дефолтное)
+        photo_id = profile.get('photo_id')
+        has_custom_photo = False
+        if photo_id:
+            game = profile.get('game') or profile.get('current_game')
+            if game:
+                import config.settings as settings
+                default_avatar = settings.get_cached_photo_id(f'avatar_{game}')
+                # Считаем кастомным, если фото есть И оно не дефолтное
+                has_custom_photo = not (default_avatar and photo_id == default_avatar)
+
+        if not has_custom_photo:
+            missing.append("Добавь своё фото")
+
+    if missing and score < max_score:
+        quality_text += f"\n\n<b>Можно улучшить:</b>\n• " + "\n• ".join(missing)
+
+    return quality_text

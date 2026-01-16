@@ -761,6 +761,14 @@ def admin_report_actions(reported_user_id: int, report_id: int, current_index: i
     
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def admin_stats_menu() -> InlineKeyboardMarkup:
+    """Меню выбора типа статистики"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📊 Общая статистика", callback_data="admin_stats_general")],
+        [InlineKeyboardButton(text="📈 Расширенная аналитика", callback_data="admin_analytics")],
+        [InlineKeyboardButton(text="◀️ Админ меню", callback_data="admin_back")]
+    ])
+
 def admin_back_menu() -> InlineKeyboardMarkup:
     """Возврат в админ меню"""
     return InlineKeyboardMarkup(inline_keyboard=[

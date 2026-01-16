@@ -100,18 +100,22 @@ async def update_user_activity(user_id: int, state: str = None, db=None):
     """Обновляем активность и состояние пользователя"""
     if not db:
         return
-        
+
     try:
         import time
         current_time = time.time()
-        
+
+        # Обновляем Redis кэш (быстро)
         activity_key = f"last_activity:{user_id}"
         await db._redis.setex(activity_key, 300, str(current_time))  # 5 минут
-        
+
         if state:
             state_key = f"user_state:{user_id}"
             await db._redis.setex(state_key, 300, state)  # 5 минут
-            
+
+        # Обновляем поле last_activity в PostgreSQL (для алгоритма подбора)
+        await db.update_user_activity(user_id)
+
     except Exception as e:
         logger.warning(f"Ошибка обновления активности пользователя {user_id}: {e}")
 
@@ -163,10 +167,10 @@ async def _send_notification_internal(
         logger.info(f"📨 Уведомление отправлено {user_id}")
     return success
 
-# ==================== УВЕДОМЛЕНИЯ О МАТЧАХ ====================
+# ==================== УВЕДОМЛЕНИЯ О МЭТЧАХ ====================
 
 async def notify_about_match(bot: Bot, user_id: int, match_user_id: int, game: str, db) -> bool:
-    """Уведомление о новом матче (упрощенное, как лайки)"""
+    """Уведомление о новом мэтче (упрощенное, как лайки)"""
     async def _notify():
         try:
             game_name = settings.GAMES.get(game, game)
