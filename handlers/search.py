@@ -302,6 +302,7 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
                 position_filter=data.get('position_filter'),
                 country_filter=data.get('country_filter'),
                 goals_filter=data.get('goals_filter'),
+                role_filter=data.get('role_filter'),
                 limit=20,
                 offset=new_offset
             )

@@ -723,7 +723,7 @@ class Database:
                 WHERE p.telegram_id != $1
                     AND p.game = $2
                     AND p.telegram_id NOT IN (SELECT excluded_id FROM excluded_users)
-                    AND (p.role = $7 OR p.role IS NULL)
+                    AND COALESCE(p.role, 'player') = $7
             ),
             filtered_profiles AS (
                 SELECT * FROM potential_profiles
@@ -796,13 +796,17 @@ class Database:
                 results = [self._format_profile(row) for row in rows]
 
                 # Детерминированное перемешивание новых анкет на первой странице
+                # Seed меняется каждый день, чтобы анкеты не застревали в одном порядке
                 if offset == 0 and len(results) > 1:
                     new_profiles = [p for p in results if p.get('display_priority', 0) == 0]
                     skipped_profiles = [p for p in results if p.get('display_priority', 0) > 0]
 
                     if new_profiles:
                         import hashlib, random
-                        seed_str = f"{user_id}{game}{filters_hash}"
+                        from datetime import datetime
+                        # Добавляем день в seed, чтобы порядок менялся ежедневно
+                        today = datetime.now().strftime("%Y-%m-%d")
+                        seed_str = f"{user_id}{game}{filters_hash}{today}"
                         seed = int(hashlib.md5(seed_str.encode()).hexdigest()[:8], 16)
                         random.seed(seed)
                         random.shuffle(new_profiles)
