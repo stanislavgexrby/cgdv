@@ -723,15 +723,15 @@ class Database:
                 WHERE p.telegram_id != $1
                     AND p.game = $2
                     AND p.telegram_id NOT IN (SELECT excluded_id FROM excluded_users)
-                    AND COALESCE(p.role, 'player') = $7
+                    AND COALESCE(p.role, 'player') = $7::text
             ),
             filtered_profiles AS (
                 SELECT * FROM potential_profiles
                 WHERE
-                    ($3 IS NULL OR rating = $3)
-                    AND ($4 IS NULL OR positions ? $4 OR positions ? 'any')
-                    AND ($5 IS NULL OR region = $5 OR region = 'any')
-                    AND ($6 IS NULL OR goals ? $6)
+                    ($3::text IS NULL OR rating = $3::text)
+                    AND ($4::text IS NULL OR positions ? $4 OR positions ? 'any')
+                    AND ($5::text IS NULL OR region = $5::text OR region = 'any')
+                    AND ($6::text IS NULL OR goals ? $6)
             )
             SELECT
                 telegram_id, game, name, nickname, age, rating, region,
