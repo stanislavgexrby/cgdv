@@ -483,7 +483,11 @@ async def view_profile(callback: CallbackQuery, db):
 
     game_name = settings.GAMES.get(game, game)
     profile_text = texts.format_profile(profile)
-    text = f"Ваша анкета в {game_name}:\n\n{profile_text}"
+
+    # ДОБАВЛЯЕМ ОЦЕНКУ КАЧЕСТВА
+    quality_text = texts.format_profile_quality(profile)
+
+    text = f"Ваша анкета в {game_name}:\n\n{profile_text}{quality_text}"
 
     keyboard = kb.view_profile_menu()
 
