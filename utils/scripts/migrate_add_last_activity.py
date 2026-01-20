@@ -50,6 +50,24 @@ async def migrate():
             
             print("✅ Поле добавлено")
 
+  bot:
+    image: teammates-bot:latest
+    container_name: teammates_bot
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres
+      REDIS_HOST: redis
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./logs:/app/logs
+      - ./assets:/app/assets
+    restart: unless-stopped
+
             # Обновляем существующих пользователей (ставим время создания)
             # Это логичнее чем текущее время, т.к. пользователь был активен минимум при создании
             print("\n⏳ Обновление существующих пользователей...")
