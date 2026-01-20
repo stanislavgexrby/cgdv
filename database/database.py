@@ -1302,6 +1302,603 @@ class Database:
 
             return deleted_count
 
+    # === РАССЫЛКИ (BROADCASTS) ===
+
+    async def create_broadcast(self, message_id: int, chat_id: int, caption: str,
+                              admin_id: int, broadcast_type: str = 'copy',
+                              target_games: List[str] = None, target_regions: List[str] = None,
+                              target_purposes: List[str] = None) -> int:
+        """Создание рассылки (черновик)
+
+        Args:
+            message_id: ID сообщения в Telegram
+            chat_id: ID чата откуда сообщение
+            caption: Название рассылки для админки
+            admin_id: ID админа создавшего рассылку
+            broadcast_type: Тип 'copy' (копировать) или 'forward' (пересылать)
+            target_games: Список игр ['dota', 'cs']
+            target_regions: Список регионов ['all'] или конкретные
+            target_purposes: Список целей ['teammates', 'relationship', 'friendship']
+        """
+        if target_games is None:
+            target_games = ['dota', 'cs']
+        if target_regions is None:
+            target_regions = ['all']
+
+        async with self._pg_pool.acquire() as conn:
+            broadcast_id = await conn.fetchval("""
+                INSERT INTO broadcasts (
+                    message_id, chat_id, caption, created_by, broadcast_type,
+                    target_games, target_regions, target_purposes, status
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'draft')
+                RETURNING id
+            """, message_id, chat_id, caption, admin_id, broadcast_type,
+                target_games, target_regions, target_purposes
+            )
+            logger.info(f"Создана рассылка #{broadcast_id}: {caption}")
+            return broadcast_id
+
+    async def get_broadcast(self, broadcast_id: int) -> Optional[Dict]:
+        """Получение рассылки по ID"""
+        async with self._pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM broadcasts WHERE id = $1",
+                broadcast_id
+            )
+            return dict(row) if row else None
+
+    async def get_all_broadcasts(self) -> List[Dict]:
+        """Получение всех рассылок для админ панели"""
+        async with self._pg_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM broadcasts ORDER BY created_at DESC"
+            )
+            return [dict(row) for row in rows]
+
+    async def update_broadcast_targets(self, broadcast_id: int,
+                                      games: List[str] = None,
+                                      regions: List[str] = None,
+                                      purposes: List[str] = None) -> bool:
+        """Обновление таргетинга рассылки"""
+        try:
+            async with self._pg_pool.acquire() as conn:
+                updates = []
+                values = []
+                param_count = 1
+
+                if games is not None:
+                    updates.append(f"target_games = ${param_count}")
+                    values.append(games)
+                    param_count += 1
+
+                if regions is not None:
+                    updates.append(f"target_regions = ${param_count}")
+                    values.append(regions)
+                    param_count += 1
+
+                if purposes is not None:
+                    updates.append(f"target_purposes = ${param_count}")
+                    values.append(purposes)
+                    param_count += 1
+
+                if not updates:
+                    return False
+
+                values.append(broadcast_id)
+                query = f"UPDATE broadcasts SET {', '.join(updates)} WHERE id = ${param_count}"
+
+                await conn.execute(query, *values)
+                logger.info(f"Обновлен таргетинг рассылки #{broadcast_id}")
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка обновления таргетинга рассылки #{broadcast_id}: {e}")
+            return False
+
+    async def get_broadcast_recipients(self, broadcast_id: int) -> List[int]:
+        """Получение списка telegram_id получателей рассылки по таргетингу
+
+        Возвращает список telegram_id пользователей, которые соответствуют
+        критериям таргетинга (игры, регионы, цели)
+
+        ВАЖНО: Пользователи с "any" в region или goals попадают в любую выборку
+        """
+        broadcast = await self.get_broadcast(broadcast_id)
+        if not broadcast:
+            return []
+
+        target_games = broadcast['target_games']
+        target_regions = broadcast['target_regions']
+        target_purposes = broadcast['target_purposes']
+
+        async with self._pg_pool.acquire() as conn:
+            # Базовый запрос - пользователи с анкетами
+            query_parts = ["""
+                SELECT DISTINCT p.telegram_id
+                FROM profiles p
+                JOIN users u ON p.telegram_id = u.telegram_id
+                WHERE 1=1
+            """]
+            params = []
+            param_count = 1
+
+            # Фильтр по играм (игра всегда конкретная, нет "any")
+            if target_games and 'all' not in target_games:
+                query_parts.append(f"AND p.game = ANY(${param_count})")
+                params.append(target_games)
+                param_count += 1
+
+            # Фильтр по регионам (включаем пользователей с region='any' в любую выборку)
+            if target_regions and 'all' not in target_regions:
+                query_parts.append(f"AND (p.region = ANY(${param_count}) OR p.region = 'any')")
+                params.append(target_regions)
+                param_count += 1
+
+            # Фильтр по целям (включаем пользователей с goals содержащим 'any' в любую выборку)
+            if target_purposes:
+                query_parts.append(f"AND (p.goals ?| ${param_count} OR p.goals @> '[\"any\"]'::jsonb)")
+                params.append(target_purposes)
+                param_count += 1
+
+            # Исключаем забаненных
+            query_parts.append("""
+                AND NOT EXISTS (
+                    SELECT 1 FROM bans b
+                    WHERE b.user_id = p.telegram_id
+                    AND b.expires_at > NOW()
+                )
+            """)
+
+            query = "\n".join(query_parts)
+            logger.info(f"SQL Query: {query}")
+            logger.info(f"Параметры: {params}")
+
+            rows = await conn.fetch(query, *params)
+
+            recipient_ids = [row['telegram_id'] for row in rows]
+            logger.info(f"Найдено {len(recipient_ids)} получателей для рассылки #{broadcast_id}")
+            return recipient_ids
+
+    async def start_broadcast_sending(self, broadcast_id: int, total_recipients: int) -> bool:
+        """Начало отправки рассылки - меняет статус на 'sending'"""
+        try:
+            async with self._pg_pool.acquire() as conn:
+                await conn.execute("""
+                    UPDATE broadcasts
+                    SET status = 'sending',
+                        sent_at = NOW(),
+                        total_recipients = $1
+                    WHERE id = $2
+                """, total_recipients, broadcast_id)
+                logger.info(f"Начата отправка рассылки #{broadcast_id} для {total_recipients} получателей")
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка начала отправки рассылки #{broadcast_id}: {e}")
+            return False
+
+    async def add_broadcast_stat(self, broadcast_id: int, user_id: int,
+                                status: str, error_message: str = None) -> bool:
+        """Добавление записи о результате отправки пользователю
+
+        Args:
+            broadcast_id: ID рассылки
+            user_id: telegram_id пользователя
+            status: 'sent', 'failed', 'blocked'
+            error_message: Текст ошибки (если есть)
+        """
+        try:
+            async with self._pg_pool.acquire() as conn:
+                await conn.execute("""
+                    INSERT INTO broadcast_stats (broadcast_id, user_id, status, error_message)
+                    VALUES ($1, $2, $3, $4)
+                """, broadcast_id, user_id, status, error_message)
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка добавления статистики рассылки: {e}")
+            return False
+
+    async def update_broadcast_counters(self, broadcast_id: int,
+                                       sent_count: int, failed_count: int) -> bool:
+        """Обновление счетчиков отправленных и неудачных сообщений"""
+        try:
+            async with self._pg_pool.acquire() as conn:
+                await conn.execute("""
+                    UPDATE broadcasts
+                    SET sent_count = $1, failed_count = $2
+                    WHERE id = $3
+                """, sent_count, failed_count, broadcast_id)
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка обновления счетчиков рассылки #{broadcast_id}: {e}")
+            return False
+
+    async def complete_broadcast(self, broadcast_id: int) -> bool:
+        """Завершение рассылки - меняет статус на 'completed' или 'failed'"""
+        try:
+            async with self._pg_pool.acquire() as conn:
+                # Получаем статистику
+                stats = await conn.fetchrow("""
+                    SELECT
+                        COUNT(*) as total,
+                        COUNT(*) FILTER (WHERE status = 'sent') as sent,
+                        COUNT(*) FILTER (WHERE status = 'failed') as failed
+                    FROM broadcast_stats
+                    WHERE broadcast_id = $1
+                """, broadcast_id)
+
+                sent = stats['sent'] if stats else 0
+                failed = stats['failed'] if stats else 0
+
+                # Определяем финальный статус
+                final_status = 'completed' if sent > 0 else 'failed'
+
+                await conn.execute("""
+                    UPDATE broadcasts
+                    SET status = $1, sent_count = $2, failed_count = $3
+                    WHERE id = $4
+                """, final_status, sent, failed, broadcast_id)
+
+                logger.info(f"Рассылка #{broadcast_id} завершена: {final_status}, отправлено: {sent}, ошибок: {failed}")
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка завершения рассылки #{broadcast_id}: {e}")
+            return False
+
+    async def delete_broadcast(self, broadcast_id: int) -> bool:
+        """Удаление рассылки и всей связанной статистики"""
+        try:
+            async with self._pg_pool.acquire() as conn:
+                # Сначала удаляем статистику (из-за foreign key)
+                await conn.execute(
+                    "DELETE FROM broadcast_stats WHERE broadcast_id = $1",
+                    broadcast_id
+                )
+                # Затем саму рассылку
+                await conn.execute(
+                    "DELETE FROM broadcasts WHERE id = $1",
+                    broadcast_id
+                )
+                logger.info(f"Рассылка #{broadcast_id} удалена")
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка удаления рассылки #{broadcast_id}: {e}")
+            return False
+
+    async def get_broadcast_stats_summary(self, broadcast_id: int) -> Dict:
+        """Получение сводной статистики по рассылке"""
+        async with self._pg_pool.acquire() as conn:
+            stats = await conn.fetchrow("""
+                SELECT
+                    COUNT(*) as total,
+                    COUNT(*) FILTER (WHERE status = 'sent') as sent,
+                    COUNT(*) FILTER (WHERE status = 'failed') as failed,
+                    COUNT(*) FILTER (WHERE status = 'blocked') as blocked
+                FROM broadcast_stats
+                WHERE broadcast_id = $1
+            """, broadcast_id)
+
+            if stats:
+                return {
+                    'total': stats['total'],
+                    'sent': stats['sent'],
+                    'failed': stats['failed'],
+                    'blocked': stats['blocked']
+                }
+            return {'total': 0, 'sent': 0, 'failed': 0, 'blocked': 0}
+
+    # === АВТОМАТИЧЕСКИЕ ENGAGEMENT-УВЕДОМЛЕНИЯ ===
+
+    async def get_active_engagement_templates(self) -> List[Dict]:
+        """Получение всех активных шаблонов engagement-уведомлений"""
+        async with self._pg_pool.acquire() as conn:
+            rows = await conn.fetch("""
+                SELECT * FROM engagement_templates
+                WHERE is_active = true
+                ORDER BY priority DESC
+            """)
+            return [dict(row) for row in rows]
+
+    async def get_engagement_template(self, template_id: int) -> Optional[Dict]:
+        """Получение шаблона по ID"""
+        async with self._pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM engagement_templates WHERE id = $1",
+                template_id
+            )
+            return dict(row) if row else None
+
+    async def get_engagement_template_by_type(self, template_type: str) -> Optional[Dict]:
+        """Получение первого шаблона по типу (для обратной совместимости)"""
+        async with self._pg_pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT * FROM engagement_templates WHERE type = $1 LIMIT 1",
+                template_type
+            )
+            return dict(row) if row else None
+
+    async def get_engagement_templates_by_type(self, template_type: str) -> List[Dict]:
+        """Получение всех вариантов шаблонов по типу"""
+        async with self._pg_pool.acquire() as conn:
+            rows = await conn.fetch(
+                "SELECT * FROM engagement_templates WHERE type = $1 AND is_active = true",
+                template_type
+            )
+            return [dict(row) for row in rows]
+
+    async def get_last_engagement_sent(self, user_id: int, template_id: int) -> Optional[datetime]:
+        """Получение времени последней отправки уведомления пользователю"""
+        async with self._pg_pool.acquire() as conn:
+            row = await conn.fetchrow("""
+                SELECT MAX(sent_at) as last_sent
+                FROM engagement_history
+                WHERE user_id = $1 AND template_id = $2
+            """, user_id, template_id)
+
+            return row['last_sent'] if row else None
+
+    async def add_engagement_history(self, user_id: int, template_id: int, data: dict = None) -> bool:
+        """Добавление записи об отправке engagement-уведомления"""
+        try:
+            async with self._pg_pool.acquire() as conn:
+                import json
+                data_json = json.dumps(data) if data else None
+
+                await conn.execute("""
+                    INSERT INTO engagement_history (user_id, template_id, data)
+                    VALUES ($1, $2, $3::jsonb)
+                """, user_id, template_id, data_json)
+                return True
+        except Exception as e:
+            logger.error(f"Ошибка добавления engagement_history: {e}")
+            return False
+
+    async def get_inactive_users(self, min_hours: int, max_hours: int = None) -> List[int]:
+        """Получение пользователей неактивных N часов
+
+        Args:
+            min_hours: Минимальное количество часов неактивности
+            max_hours: Максимальное количество часов неактивности (опционально)
+
+        Returns:
+            Список telegram_id неактивных пользователей
+        """
+        async with self._pg_pool.acquire() as conn:
+            if max_hours:
+                query = """
+                    SELECT telegram_id
+                    FROM users
+                    WHERE last_activity IS NOT NULL
+                      AND last_activity < NOW() - INTERVAL '%s hours'
+                      AND last_activity >= NOW() - INTERVAL '%s hours'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM bans b
+                          WHERE b.user_id = users.telegram_id
+                          AND b.expires_at > NOW()
+                      )
+                """ % (min_hours, max_hours)
+            else:
+                query = """
+                    SELECT telegram_id
+                    FROM users
+                    WHERE last_activity IS NOT NULL
+                      AND last_activity < NOW() - INTERVAL '%s hours'
+                      AND NOT EXISTS (
+                          SELECT 1 FROM bans b
+                          WHERE b.user_id = users.telegram_id
+                          AND b.expires_at > NOW()
+                      )
+                """ % min_hours
+
+            rows = await conn.fetch(query)
+            return [row['telegram_id'] for row in rows]
+
+    async def get_unviewed_likes_count(self, user_id: int) -> int:
+        """Получение количества непросмотренных лайков пользователя"""
+        async with self._pg_pool.acquire() as conn:
+            # Считаем все входящие лайки пользователю
+            count = await conn.fetchval("""
+                SELECT COUNT(*)
+                FROM likes
+                WHERE to_user = $1
+            """, user_id)
+
+            return count or 0
+
+    async def get_new_profiles_count_for_user(self, user_id: int, days: int = 7) -> int:
+        """Получение количества новых анкет за N дней подходящих пользователю
+
+        Args:
+            user_id: telegram_id пользователя
+            days: За сколько дней считать новые анкеты
+
+        Returns:
+            Количество новых анкет
+        """
+        async with self._pg_pool.acquire() as conn:
+            # Получаем анкету пользователя
+            user_profile = await conn.fetchrow("""
+                SELECT game, region
+                FROM profiles
+                WHERE telegram_id = $1
+                LIMIT 1
+            """, user_id)
+
+            if not user_profile:
+                return 0
+
+            # Считаем новые анкеты той же игры
+            count = await conn.fetchval("""
+                SELECT COUNT(*)
+                FROM profiles
+                WHERE game = $1
+                  AND created_at >= NOW() - INTERVAL '%s days'
+                  AND telegram_id != $2
+            """ % days, user_profile['game'], user_id)
+
+            return count or 0
+
+    async def should_send_engagement(self, user_id: int, template: dict) -> bool:
+        """Проверка нужно ли отправлять engagement-уведомление пользователю
+
+        Args:
+            user_id: telegram_id пользователя
+            template: Словарь с данными шаблона
+
+        Returns:
+            True если нужно отправить, False если нет
+        """
+        template_id = template['id']
+        min_interval_hours = template.get('min_interval_hours', 24)
+
+        # Проверяем когда последний раз отправляли
+        last_sent = await self.get_last_engagement_sent(user_id, template_id)
+
+        if last_sent:
+            from datetime import datetime, timedelta
+            hours_since_last = (datetime.now() - last_sent).total_seconds() / 3600
+
+            if hours_since_last < min_interval_hours:
+                return False
+
+        # Проверяем условия из шаблона
+        import json
+        conditions = template.get('conditions')
+
+        if isinstance(conditions, str):
+            conditions = json.loads(conditions)
+
+        if not conditions:
+            return True
+
+        template_type = template['type']
+
+        # Проверка для непросмотренных лайков
+        if 'min_unviewed_likes' in conditions:
+            unviewed_count = await self.get_unviewed_likes_count(user_id)
+            if unviewed_count < conditions['min_unviewed_likes']:
+                return False
+
+        # Проверка для новых анкет
+        if 'min_new_profiles' in conditions:
+            days = conditions.get('check_days', 7)
+            new_count = await self.get_new_profiles_count_for_user(user_id, days)
+            if new_count < conditions['min_new_profiles']:
+                return False
+
+        return True
+
+    async def get_users_for_engagement(self, template: dict) -> List[int]:
+        """Получение пользователей для отправки engagement-уведомления
+
+        Args:
+            template: Словарь с данными шаблона
+
+        Returns:
+            Список telegram_id пользователей
+        """
+        import json
+        conditions = template.get('conditions')
+
+        if isinstance(conditions, str):
+            conditions = json.loads(conditions)
+
+        if not conditions:
+            return []
+
+        template_type = template['type']
+        users = []
+
+        # Для уведомлений о неактивности
+        if 'min_inactive_hours' in conditions:
+            min_hours = conditions['min_inactive_hours']
+            max_hours = conditions.get('max_inactive_hours')
+            users = await self.get_inactive_users(min_hours, max_hours)
+
+        # Для уведомлений о непросмотренных лайках
+        elif 'min_unviewed_likes' in conditions:
+            async with self._pg_pool.acquire() as conn:
+                # Получаем всех пользователей у которых есть входящие лайки
+                rows = await conn.fetch("""
+                    SELECT DISTINCT l.to_user as telegram_id
+                    FROM likes l
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM bans b
+                        WHERE b.user_id = l.to_user
+                        AND b.expires_at > NOW()
+                    )
+                """)
+                users = [row['telegram_id'] for row in rows]
+
+        # Для уведомлений о новых анкетах
+        elif 'min_new_profiles' in conditions:
+            async with self._pg_pool.acquire() as conn:
+                # Получаем всех пользователей с анкетами
+                rows = await conn.fetch("""
+                    SELECT DISTINCT telegram_id
+                    FROM profiles
+                    WHERE NOT EXISTS (
+                        SELECT 1 FROM bans b
+                        WHERE b.user_id = profiles.telegram_id
+                        AND b.expires_at > NOW()
+                    )
+                """)
+                users = [row['telegram_id'] for row in rows]
+
+        # Фильтруем пользователей по условиям отправки
+        filtered_users = []
+        for user_id in users:
+            if await self.should_send_engagement(user_id, template):
+                filtered_users.append(user_id)
+
+        return filtered_users
+
+    async def format_engagement_message(self, template: dict, user_id: int) -> str:
+        """Форматирование сообщения engagement-уведомления с подстановкой данных
+
+        Args:
+            template: Словарь с данными шаблона
+            user_id: telegram_id пользователя
+
+        Returns:
+            Отформатированный текст сообщения
+        """
+        import random
+
+        message = template['message_text']
+        template_type = template.get('type', '')
+
+        # Подсчитываем данные для плейсхолдеров
+        unviewed_likes = await self.get_unviewed_likes_count(user_id)
+        new_profiles = await self.get_new_profiles_count_for_user(user_id, 7)
+
+        # Если данных нет (0), заменяем на случайные правдоподобные числа
+        # чтобы не показывать "0 новых анкет"
+        if unviewed_likes == 0:
+            # Для лайков: от 1 до 3
+            unviewed_likes = random.randint(1, 3)
+
+        if new_profiles == 0:
+            # Для новых анкет: диапазон зависит от периода неактивности
+            if 'inactive_2h' in template_type or 'inactive_1d' in template_type:
+                new_profiles = random.randint(3, 8)  # 2 часа - 1 день
+            elif 'inactive_3d' in template_type:
+                new_profiles = random.randint(15, 35)  # 3 дня
+            elif 'inactive_1w' in template_type:
+                new_profiles = random.randint(30, 60)  # 1 неделя
+            elif 'inactive_1m' in template_type:
+                new_profiles = random.randint(150, 300)  # 1 месяц
+            else:
+                new_profiles = random.randint(10, 30)  # По умолчанию
+
+        # Заменяем плейсхолдеры
+        message = message.replace('{count}', str(unviewed_likes))
+        message = message.replace('{unviewed_likes}', str(unviewed_likes))
+        message = message.replace('{new_profiles}', str(new_profiles))
+
+        # Можно добавить еще плейсхолдеры по необходимости
+
+        return message
+
     # === СЛУЖЕБНЫЕ МЕТОДЫ ===
 
     async def get_users_for_monthly_reminder(self) -> List[Dict]:

@@ -729,6 +729,7 @@ def admin_main_menu() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="Реклама", callback_data="admin_ads")],
+        [InlineKeyboardButton(text="Рассылки", callback_data="admin_broadcasts")],
         [InlineKeyboardButton(text="Жалобы", callback_data="admin_reports")],
         [InlineKeyboardButton(text="Баны", callback_data="admin_bans")],
         [InlineKeyboardButton(text="Забанить пользователя", callback_data="admin_ban_user")],
@@ -942,5 +943,196 @@ def interval_choice_keyboard(ad_id: int = None, current_interval: int = None) ->
         buttons.append([InlineKeyboardButton(text="✏️ Ввести своё значение", callback_data="custom_interval")])
 
         buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="admin_ads")])
-    
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+# ==================== РАССЫЛКИ ====================
+
+def admin_broadcasts_menu_empty() -> InlineKeyboardMarkup:
+    """Меню рассылок когда список пуст"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Создать рассылку", callback_data="broadcast_add")],
+        [InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")]
+    ])
+
+def admin_broadcasts_menu_list(broadcasts: List[dict]) -> InlineKeyboardMarkup:
+    """Список рассылок с кнопками"""
+    buttons = []
+
+    for bc in broadcasts[:20]:  # Максимум 20 рассылок на странице
+        status_emoji = {
+            'draft': '📝',
+            'sending': '⏳',
+            'completed': '✅',
+            'failed': '❌'
+        }.get(bc['status'], '❓')
+
+        button_text = f"{status_emoji} #{bc['id']} {bc['caption'][:30]}"
+        buttons.append([InlineKeyboardButton(text=button_text, callback_data=f"bc_view_{bc['id']}")])
+
+    buttons.append([InlineKeyboardButton(text="➕ Создать рассылку", callback_data="broadcast_add")])
+    buttons.append([InlineKeyboardButton(text="◀️ Назад", callback_data="admin_back")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def broadcast_type_choice_keyboard() -> InlineKeyboardMarkup:
+    """Выбор типа рассылки"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📋 Копировать сообщение", callback_data="bctype_copy")],
+        [InlineKeyboardButton(text="↗️ Переслать сообщение", callback_data="bctype_forward")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="admin_broadcasts")]
+    ])
+
+def broadcast_games_keyboard(selected_games: List[str] = None) -> InlineKeyboardMarkup:
+    """Выбор игр для рассылки"""
+    if selected_games is None:
+        selected_games = ['dota', 'cs']
+
+    buttons = []
+
+    # Dota 2
+    dota_text = "✅ Dota 2" if 'dota' in selected_games else "Dota 2"
+    # CS2
+    cs_text = "✅ CS2" if 'cs' in selected_games else "CS2"
+    # Both
+    both_text = "✅ Обе игры" if len(selected_games) == 2 else "Обе игры"
+
+    buttons.append([
+        InlineKeyboardButton(text=dota_text, callback_data="bcgames_dota"),
+        InlineKeyboardButton(text=cs_text, callback_data="bcgames_cs")
+    ])
+    buttons.append([InlineKeyboardButton(text=both_text, callback_data="bcgames_both")])
+    buttons.append([InlineKeyboardButton(text="➡️ Далее", callback_data="bcgames_done")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="admin_broadcasts")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def broadcast_regions_keyboard(selected_regions: List[str] = None) -> InlineKeyboardMarkup:
+    """Выбор регионов для рассылки"""
+    if selected_regions is None:
+        selected_regions = ['all']
+
+    buttons = []
+
+    all_text = "✅ Все регионы" if 'all' in selected_regions else "Все регионы"
+    buttons.append([InlineKeyboardButton(text=all_text, callback_data="bcregions_all")])
+
+    # Используем MAIN_COUNTRIES из settings
+    for code, name in settings.MAIN_COUNTRIES.items():
+        text = f"✅ {name}" if code in selected_regions else name
+        buttons.append([InlineKeyboardButton(text=text, callback_data=f"bcregion_{code}")])
+
+    buttons.append([InlineKeyboardButton(text="➡️ Далее", callback_data="bcregions_done")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="admin_broadcasts")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def broadcast_purposes_keyboard(selected_purposes: List[str] = None) -> InlineKeyboardMarkup:
+    """Выбор целей поиска для рассылки"""
+    if selected_purposes is None:
+        selected_purposes = []
+
+    buttons = []
+
+    all_text = "✅ Все цели" if not selected_purposes else "Все цели"
+    buttons.append([InlineKeyboardButton(text=all_text, callback_data="bcpurpose_all")])
+
+    # Используем GOALS из settings
+    for code, name in settings.GOALS.items():
+        text = f"✅ {name}" if code in selected_purposes else name
+        buttons.append([InlineKeyboardButton(text=text, callback_data=f"bcpurpose_{code}")])
+
+    buttons.append([InlineKeyboardButton(text="➡️ Готово", callback_data="bcpurpose_done")])
+    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="admin_broadcasts")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def admin_broadcast_actions(broadcast: dict) -> InlineKeyboardMarkup:
+    """Действия с конкретной рассылкой"""
+    bc_id = broadcast['id']
+    status = broadcast['status']
+
+    buttons = []
+
+    # В зависимости от статуса показываем разные кнопки
+    if status == 'draft':
+        buttons.extend([
+            [InlineKeyboardButton(text="👁️ Предпросмотр", callback_data=f"bc_preview_{bc_id}")],
+            [InlineKeyboardButton(text="🎮 Изменить игры", callback_data=f"bc_edit_games_{bc_id}")],
+            [InlineKeyboardButton(text="🌍 Изменить регионы", callback_data=f"bc_edit_regions_{bc_id}")],
+            [InlineKeyboardButton(text="🎯 Изменить цели", callback_data=f"bc_edit_purposes_{bc_id}")],
+            [InlineKeyboardButton(text="📊 Посчитать получателей", callback_data=f"bc_count_{bc_id}")],
+            [InlineKeyboardButton(text="🚀 ОТПРАВИТЬ", callback_data=f"bc_send_confirm_{bc_id}")],
+        ])
+    elif status in ['completed', 'failed']:
+        buttons.extend([
+            [InlineKeyboardButton(text="📊 Статистика", callback_data=f"bc_stats_{bc_id}")],
+        ])
+    elif status == 'sending':
+        buttons.extend([
+            [InlineKeyboardButton(text="📊 Статистика (в процессе)", callback_data=f"bc_stats_{bc_id}")],
+        ])
+
+    # Общие кнопки
+    if status != 'sending':
+        buttons.append([InlineKeyboardButton(text="🗑️ Удалить", callback_data=f"bc_delete_{bc_id}")])
+
+    buttons.append([InlineKeyboardButton(text="◀️ К списку", callback_data="admin_broadcasts")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def broadcast_send_confirm(bc_id: int, recipients_count: int) -> InlineKeyboardMarkup:
+    """Подтверждение отправки рассылки"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"✅ Да, отправить {recipients_count} польз.", callback_data=f"bc_send_start_{bc_id}")],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data=f"bc_view_{bc_id}")]
+    ])
+
+def broadcast_edit_games_keyboard(bc_id: int, current_games: List[str]) -> InlineKeyboardMarkup:
+    """Редактирование игр для рассылки"""
+    buttons = []
+
+    dota_text = "✅ Dota 2" if 'dota' in current_games else "Dota 2"
+    cs_text = "✅ CS2" if 'cs' in current_games else "CS2"
+    both_text = "✅ Обе игры" if len(current_games) == 2 else "Обе игры"
+
+    buttons.append([
+        InlineKeyboardButton(text=dota_text, callback_data=f"bc_setgames_{bc_id}_dota"),
+        InlineKeyboardButton(text=cs_text, callback_data=f"bc_setgames_{bc_id}_cs")
+    ])
+    buttons.append([InlineKeyboardButton(text=both_text, callback_data=f"bc_setgames_{bc_id}_both")])
+    buttons.append([InlineKeyboardButton(text="❌ Назад", callback_data=f"bc_view_{bc_id}")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def broadcast_edit_regions_keyboard(bc_id: int, current_regions: List[str]) -> InlineKeyboardMarkup:
+    """Редактирование регионов для рассылки"""
+    buttons = []
+
+    all_text = "✅ Все регионы" if 'all' in current_regions else "Все регионы"
+    buttons.append([InlineKeyboardButton(text=all_text, callback_data=f"bc_setregions_{bc_id}_all")])
+
+    # Используем MAIN_COUNTRIES из settings
+    for code, name in settings.MAIN_COUNTRIES.items():
+        text = f"✅ {name}" if code in current_regions else name
+        buttons.append([InlineKeyboardButton(text=text, callback_data=f"bc_setregions_{bc_id}_{code}")])
+
+    buttons.append([InlineKeyboardButton(text="❌ Назад", callback_data=f"bc_view_{bc_id}")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def broadcast_edit_purposes_keyboard(bc_id: int, current_purposes: List[str]) -> InlineKeyboardMarkup:
+    """Редактирование целей для рассылки"""
+    buttons = []
+
+    all_text = "✅ Все цели" if not current_purposes else "Все цели"
+    buttons.append([InlineKeyboardButton(text=all_text, callback_data=f"bc_setpurposes_{bc_id}_all")])
+
+    # Используем GOALS из settings
+    for code, name in settings.GOALS.items():
+        text = f"✅ {name}" if code in current_purposes else name
+        buttons.append([InlineKeyboardButton(text=text, callback_data=f"bc_setpurposes_{bc_id}_{code}")])
+
+    buttons.append([InlineKeyboardButton(text="❌ Назад", callback_data=f"bc_view_{bc_id}")])
+
     return InlineKeyboardMarkup(inline_keyboard=buttons)

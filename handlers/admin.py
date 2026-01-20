@@ -1,5 +1,6 @@
 import logging
 import contextlib
+import asyncio
 from datetime import datetime, timedelta
 from aiogram import Router, F
 from aiogram.types import CallbackQuery, Message, InputMediaPhoto
@@ -30,6 +31,14 @@ class AdminBanForm(StatesGroup):
     waiting_user_input = State()
     waiting_ban_duration = State()
     waiting_ban_reason = State()
+
+class AdminBroadcastForm(StatesGroup):
+    waiting_broadcast_message = State()
+    waiting_broadcast_type = State()
+    waiting_broadcast_caption = State()
+    waiting_broadcast_games = State()
+    waiting_broadcast_regions = State()
+    waiting_broadcast_purposes = State()
 
 logger = logging.getLogger(__name__)
 router = Router()
@@ -1790,6 +1799,755 @@ async def back_to_ads_list(callback: CallbackQuery, state: FSMContext, db):
     """Возврат к списку реклам"""
     await state.clear()
     await admin_ads_menu(callback, db)
+
+# ==================== УПРАВЛЕНИЕ РАССЫЛКАМИ ====================
+
+@router.callback_query(F.data == "admin_broadcasts")
+@admin_only
+async def admin_broadcasts_menu(callback: CallbackQuery, db):
+    """Меню управления рассылками - список всех рассылок"""
+    broadcasts = await db.get_all_broadcasts()
+
+    if not broadcasts:
+        text = "📮 Рассылки\n\nНет рассылок.\n\nСоздайте первую рассылку, переслав боту сообщение."
+        await safe_edit_message(callback, text, kb.admin_broadcasts_menu_empty())
+    else:
+        text = "📮 Управление рассылками:\n\n"
+        for bc in broadcasts[:15]:
+            status_emoji = {
+                'draft': '📝',
+                'sending': '⏳',
+                'completed': '✅',
+                'failed': '❌'
+            }.get(bc['status'], '❓')
+
+            status_text = {
+                'draft': 'Черновик',
+                'sending': 'Отправляется',
+                'completed': 'Завершено',
+                'failed': 'Ошибка'
+            }.get(bc['status'], bc['status'])
+
+            text += f"{status_emoji} <b>#{bc['id']}</b> - {bc['caption']}\n"
+            text += f"   {status_text}"
+            if bc['status'] in ['completed', 'failed']:
+                text += f" | Отправлено: {bc.get('sent_count', 0)}/{bc.get('total_recipients', 0)}\n"
+            text += "\n"
+
+        text += "\n💡 Нажмите на рассылку для управления"
+
+        await safe_edit_message(callback, text, kb.admin_broadcasts_menu_list(broadcasts))
+
+    await callback.answer()
+
+@router.callback_query(F.data == "broadcast_add")
+@admin_only
+async def start_add_broadcast(callback: CallbackQuery, state: FSMContext):
+    """Начало добавления рассылки"""
+    await state.clear()
+    await state.set_state(AdminBroadcastForm.waiting_broadcast_message)
+
+    text = ("📮 Создание рассылки\n\n"
+            "<b>Шаг 1/6: Перешлите боту сообщение</b>\n\n"
+            "Сообщение может содержать:\n"
+            "• Текст с форматированием\n"
+            "• Фото или видео\n"
+            "• Ссылки и кнопки\n\n"
+            "Оно будет отправлено пользователям согласно таргетингу.")
+
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+        [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_broadcasts")]
+    ])
+    await safe_edit_message(callback, text, keyboard)
+    await callback.answer()
+
+@router.message(AdminBroadcastForm.waiting_broadcast_message)
+async def receive_broadcast_message(message: Message, state: FSMContext):
+    """Получение сообщения для рассылки"""
+    await state.update_data(
+        message_id=message.message_id,
+        chat_id=message.chat.id
+    )
+
+    await state.set_state(AdminBroadcastForm.waiting_broadcast_type)
+    await message.answer(
+        "✅ Сообщение получено!\n\n"
+        "<b>Шаг 2/6: Выберите тип рассылки</b>\n\n"
+        "📋 <b>Копировать</b> - сообщение копируется без указания источника\n"
+        "↗️ <b>Переслать</b> - сообщение пересылается с указанием источника",
+        reply_markup=kb.broadcast_type_choice_keyboard(),
+        parse_mode='HTML'
+    )
+
+@router.callback_query(F.data.startswith("bctype_"), AdminBroadcastForm.waiting_broadcast_type)
+async def select_broadcast_type(callback: CallbackQuery, state: FSMContext):
+    """Выбор типа рассылки"""
+    bc_type = callback.data.split("_")[1]  # 'copy' или 'forward'
+
+    if bc_type not in ['copy', 'forward']:
+        await callback.answer("❌ Неизвестный тип", show_alert=True)
+        return
+
+    await state.update_data(broadcast_type=bc_type)
+    await state.set_state(AdminBroadcastForm.waiting_broadcast_caption)
+
+    type_name = "Копирование" if bc_type == 'copy' else "Пересылка"
+    text = (
+        f"✅ Выбран тип: <b>{type_name}</b>\n\n"
+        f"<b>Шаг 3/6: Отправьте название рассылки</b>\n\n"
+        f"Это название будет видно только в админ панели."
+    )
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=kb.InlineKeyboardMarkup(inline_keyboard=[
+            [kb.InlineKeyboardButton(text="❌ Отмена", callback_data="admin_broadcasts")]
+        ]),
+        parse_mode='HTML'
+    )
+    await callback.answer()
+
+@router.message(AdminBroadcastForm.waiting_broadcast_caption)
+async def receive_broadcast_caption(message: Message, state: FSMContext):
+    """Получение названия рассылки"""
+    caption = message.text[:100] if message.text else "Без названия"
+
+    await state.update_data(caption=caption)
+    await state.set_state(AdminBroadcastForm.waiting_broadcast_games)
+
+    text = (f"✅ Название: <b>{caption}</b>\n\n"
+            f"<b>Шаг 4/6: Выберите игры для таргетинга</b>")
+
+    await message.answer(
+        text,
+        reply_markup=kb.broadcast_games_keyboard(['dota', 'cs']),
+        parse_mode='HTML'
+    )
+
+@router.callback_query(F.data.startswith("bcgames_"), AdminBroadcastForm.waiting_broadcast_games)
+async def select_games_for_broadcast(callback: CallbackQuery, state: FSMContext):
+    """Выбор игр для рассылки"""
+    choice = callback.data.split("_")[1]
+
+    data = await state.get_data()
+    current_games = data.get('target_games', ['dota', 'cs'])
+
+    if choice == "dota":
+        games = ['dota']
+    elif choice == "cs":
+        games = ['cs']
+    elif choice == "both":
+        games = ['dota', 'cs']
+    elif choice == "done":
+        # Переход к выбору регионов
+        await state.update_data(target_games=current_games)
+        await state.set_state(AdminBroadcastForm.waiting_broadcast_regions)
+
+        text = "✅ Игры выбраны\n\n<b>Шаг 5/6: Выберите регионы</b>"
+        await callback.message.edit_text(
+            text,
+            reply_markup=kb.broadcast_regions_keyboard(['all']),
+            parse_mode='HTML'
+        )
+        await callback.answer()
+        return
+    else:
+        await callback.answer("❌ Неизвестный выбор", show_alert=True)
+        return
+
+    await state.update_data(target_games=games)
+
+    # Обновляем клавиатуру
+    await callback.message.edit_reply_markup(reply_markup=kb.broadcast_games_keyboard(games))
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("bcregion"), AdminBroadcastForm.waiting_broadcast_regions)
+async def select_regions_for_broadcast(callback: CallbackQuery, state: FSMContext):
+    """Выбор регионов для рассылки"""
+    data = await state.get_data()
+    current_regions = data.get('target_regions', ['all'])
+
+    if callback.data == "bcregions_all":
+        regions = ['all']
+    elif callback.data == "bcregions_done":
+        # Переход к выбору целей
+        await state.update_data(target_regions=current_regions)
+        await state.set_state(AdminBroadcastForm.waiting_broadcast_purposes)
+
+        text = "✅ Регионы выбраны\n\n<b>Шаг 6/6: Выберите цели поиска (опционально)</b>"
+        await callback.message.edit_text(
+            text,
+            reply_markup=kb.broadcast_purposes_keyboard([]),
+            parse_mode='HTML'
+        )
+        await callback.answer()
+        return
+    else:
+        # Переключение региона
+        region_code = callback.data.split("_")[1]
+
+        if 'all' in current_regions:
+            # Если выбраны все регионы, убираем "all" и добавляем конкретный
+            regions = [region_code]
+        elif region_code in current_regions:
+            # Убираем регион
+            regions = [r for r in current_regions if r != region_code]
+            if not regions:
+                regions = ['all']
+        else:
+            # Добавляем регион
+            regions = current_regions + [region_code]
+
+    await state.update_data(target_regions=regions)
+    await callback.message.edit_reply_markup(reply_markup=kb.broadcast_regions_keyboard(regions))
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("bcpurpose"), AdminBroadcastForm.waiting_broadcast_purposes)
+async def select_purposes_for_broadcast(callback: CallbackQuery, state: FSMContext, db):
+    """Выбор целей для рассылки"""
+    data = await state.get_data()
+    current_purposes = data.get('target_purposes', [])
+
+    if callback.data == "bcpurpose_all":
+        purposes = []
+    elif callback.data == "bcpurpose_done":
+        # Сохраняем рассылку в БД
+        await state.update_data(target_purposes=current_purposes)
+
+        # Получаем ID админа из callback
+        admin_id = callback.from_user.id
+
+        # Создаем рассылку
+        bc_id = await db.create_broadcast(
+            message_id=data['message_id'],
+            chat_id=data['chat_id'],
+            caption=data['caption'],
+            admin_id=admin_id,
+            broadcast_type=data['broadcast_type'],
+            target_games=data.get('target_games', ['dota', 'cs']),
+            target_regions=data.get('target_regions', ['all']),
+            target_purposes=current_purposes
+        )
+
+        await state.clear()
+
+        # Показываем созданную рассылку
+        broadcast = await db.get_broadcast(bc_id)
+        if broadcast:
+            await _show_broadcast_details(callback, broadcast)
+        else:
+            await callback.answer("✅ Рассылка создана!", show_alert=True)
+            await admin_broadcasts_menu(callback, db)
+
+        return
+    else:
+        # Переключение цели
+        purpose_code = callback.data.split("_")[1]
+
+        if purpose_code in current_purposes:
+            purposes = [p for p in current_purposes if p != purpose_code]
+        else:
+            purposes = current_purposes + [purpose_code]
+
+    await state.update_data(target_purposes=purposes)
+    await callback.message.edit_reply_markup(reply_markup=kb.broadcast_purposes_keyboard(purposes))
+    await callback.answer()
+
+async def _show_broadcast_details(callback: CallbackQuery, broadcast: dict):
+    """Показ деталей рассылки"""
+    bc_id = broadcast['id']
+    status = broadcast['status']
+
+    status_text = {
+        'draft': '📝 Черновик',
+        'sending': '⏳ Отправляется',
+        'completed': '✅ Завершено',
+        'failed': '❌ Ошибка'
+    }.get(status, status)
+
+    games = broadcast.get('target_games', ['dota', 'cs'])
+    if len(games) == 2:
+        games_text = "Обе игры"
+    elif 'dota' in games:
+        games_text = "Dota 2"
+    else:
+        games_text = "CS2"
+
+    regions = broadcast.get('target_regions', ['all'])
+    if 'all' in regions:
+        regions_text = "Все регионы"
+    else:
+        regions_text = f"{len(regions)} регион(ов)"
+
+    purposes = broadcast.get('target_purposes', [])
+    if not purposes:
+        purposes_text = "Все цели"
+    else:
+        purposes_text = f"{len(purposes)} цель(ей)"
+
+    bc_type = broadcast.get('broadcast_type', 'copy')
+    type_text = "Копирование" if bc_type == 'copy' else "Пересылка"
+
+    created = _format_datetime(broadcast.get('created_at'))
+
+    text = (f"📮 Рассылка <b>#{bc_id}</b>\n\n"
+            f"<b>Название:</b> {broadcast['caption']}\n"
+            f"<b>Статус:</b> {status_text}\n"
+            f"<b>Тип:</b> {type_text}\n\n"
+            f"<b>Таргетинг:</b>\n"
+            f"🎮 Игры: {games_text}\n"
+            f"🌍 Регионы: {regions_text}\n"
+            f"🎯 Цели: {purposes_text}\n\n"
+            f"<b>Создано:</b> {created}\n")
+
+    if status in ['completed', 'failed', 'sending']:
+        sent = broadcast.get('sent_count', 0)
+        total = broadcast.get('total_recipients', 0)
+        failed = broadcast.get('failed_count', 0)
+        text += f"\n📊 <b>Статистика:</b>\n"
+        text += f"Отправлено: {sent}/{total}\n"
+        if failed > 0:
+            text += f"Ошибок: {failed}\n"
+
+    await safe_edit_message(callback, text, kb.admin_broadcast_actions(broadcast))
+
+@router.callback_query(F.data.startswith("bc_view_"))
+@admin_only
+async def view_broadcast_details(callback: CallbackQuery, db):
+    """Просмотр деталей рассылки"""
+    try:
+        bc_id = int(callback.data.split("_")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+
+    broadcast = await db.get_broadcast(bc_id)
+
+    if not broadcast:
+        await callback.answer("Рассылка не найдена", show_alert=True)
+        await admin_broadcasts_menu(callback, db)
+        return
+
+    await _show_broadcast_details(callback, broadcast)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("bc_preview_"))
+@admin_only
+async def preview_broadcast(callback: CallbackQuery, db):
+    """Предпросмотр рассылки"""
+    try:
+        bc_id = int(callback.data.split("_")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+
+    broadcast = await db.get_broadcast(bc_id)
+    if not broadcast:
+        await callback.answer("Рассылка не найдена", show_alert=True)
+        return
+
+    try:
+        bot = callback.bot
+        chat_id = callback.from_user.id
+        message_id = broadcast['message_id']
+        from_chat_id = broadcast['chat_id']
+        bc_type = broadcast.get('broadcast_type', 'copy')
+
+        preview_text = "📮 Предпросмотр рассылки:\n\n"
+
+        await callback.message.answer(preview_text, parse_mode='HTML')
+
+        if bc_type == 'forward':
+            await bot.forward_message(
+                chat_id=chat_id,
+                from_chat_id=from_chat_id,
+                message_id=message_id
+            )
+        else:  # copy
+            await bot.copy_message(
+                chat_id=chat_id,
+                from_chat_id=from_chat_id,
+                message_id=message_id
+            )
+
+        await callback.answer("Предпросмотр отправлен")
+
+    except Exception as e:
+        logger.error(f"Ошибка предпросмотра рассылки: {e}")
+        await callback.answer(
+            "Ошибка загрузки сообщения. Возможно, оригинал был удален.",
+            show_alert=True
+        )
+
+@router.callback_query(F.data.startswith("bc_count_"))
+@admin_only
+async def count_broadcast_recipients(callback: CallbackQuery, db):
+    """Подсчет получателей рассылки"""
+    try:
+        bc_id = int(callback.data.split("_")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+
+    await callback.answer("Подсчитываю получателей...", show_alert=False)
+
+    recipients = await db.get_broadcast_recipients(bc_id)
+    count = len(recipients)
+
+    await callback.answer(
+        f"📊 Получателей: {count} пользователей",
+        show_alert=True
+    )
+
+@router.callback_query(F.data.startswith("bc_send_confirm_"))
+@admin_only
+async def confirm_broadcast_send(callback: CallbackQuery, db):
+    """Подтверждение отправки рассылки"""
+    try:
+        bc_id = int(callback.data.split("_")[3])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+
+    broadcast = await db.get_broadcast(bc_id)
+    if not broadcast:
+        await callback.answer("Рассылка не найдена", show_alert=True)
+        return
+
+    # Считаем получателей
+    recipients = await db.get_broadcast_recipients(bc_id)
+    count = len(recipients)
+
+    if count == 0:
+        await callback.answer("⚠️ Нет получателей по заданным критериям!", show_alert=True)
+        return
+
+    text = (f"⚠️ <b>Подтвердите отправку</b>\n\n"
+            f"Рассылка будет отправлена <b>{count}</b> пользователям.\n\n"
+            f"Это действие нельзя отменить!")
+
+    await safe_edit_message(
+        callback,
+        text,
+        kb.broadcast_send_confirm(bc_id, count)
+    )
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("bc_send_start_"))
+@admin_only
+async def start_broadcast_send(callback: CallbackQuery, db):
+    """Начало отправки рассылки"""
+    try:
+        bc_id = int(callback.data.split("_")[3])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+
+    broadcast = await db.get_broadcast(bc_id)
+    if not broadcast or broadcast['status'] != 'draft':
+        await callback.answer("Рассылка недоступна для отправки", show_alert=True)
+        return
+
+    # Получаем список получателей
+    recipients = await db.get_broadcast_recipients(bc_id)
+    if not recipients:
+        await callback.answer("Нет получателей!", show_alert=True)
+        return
+
+    # Меняем статус на 'sending'
+    await db.start_broadcast_sending(bc_id, len(recipients))
+
+    await callback.answer("✅ Рассылка запущена!", show_alert=True)
+
+    # Запускаем отправку в фоне
+    asyncio.create_task(_send_broadcast_to_users(callback.bot, db, bc_id, broadcast, recipients))
+
+    # Показываем обновленную информацию
+    broadcast = await db.get_broadcast(bc_id)
+    await _show_broadcast_details(callback, broadcast)
+
+async def _send_broadcast_to_users(bot, db, bc_id: int, broadcast: dict, recipients: list):
+    """Фоновая отправка рассылки пользователям"""
+    message_id = broadcast['message_id']
+    from_chat_id = broadcast['chat_id']
+    bc_type = broadcast.get('broadcast_type', 'copy')
+
+    sent_count = 0
+    failed_count = 0
+
+    for user_id in recipients:
+        try:
+            if bc_type == 'forward':
+                await bot.forward_message(
+                    chat_id=user_id,
+                    from_chat_id=from_chat_id,
+                    message_id=message_id
+                )
+            else:  # copy
+                await bot.copy_message(
+                    chat_id=user_id,
+                    from_chat_id=from_chat_id,
+                    message_id=message_id
+                )
+
+            await db.add_broadcast_stat(bc_id, user_id, 'sent')
+            sent_count += 1
+
+        except Exception as e:
+            error_msg = str(e)
+
+            # Определяем статус ошибки
+            if 'blocked' in error_msg.lower() or 'bot was blocked' in error_msg.lower():
+                status = 'blocked'
+            else:
+                status = 'failed'
+
+            await db.add_broadcast_stat(bc_id, user_id, status, error_msg[:500])
+            failed_count += 1
+
+        # Обновляем счетчики каждые 10 пользователей
+        if (sent_count + failed_count) % 10 == 0:
+            await db.update_broadcast_counters(bc_id, sent_count, failed_count)
+
+        # Небольшая задержка между отправками
+        await asyncio.sleep(0.05)
+
+    # Финальное обновление счетчиков и статуса
+    await db.complete_broadcast(bc_id)
+
+    logger.info(f"Рассылка #{bc_id} завершена: отправлено {sent_count}, ошибок {failed_count}")
+
+@router.callback_query(F.data.startswith("bc_stats_"))
+@admin_only
+async def show_broadcast_stats(callback: CallbackQuery, db):
+    """Показ статистики рассылки"""
+    try:
+        bc_id = int(callback.data.split("_")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+
+    broadcast = await db.get_broadcast(bc_id)
+    if not broadcast:
+        await callback.answer("Рассылка не найдена", show_alert=True)
+        return
+
+    stats = await db.get_broadcast_stats_summary(bc_id)
+
+    text = (f"📊 <b>Статистика рассылки #{bc_id}</b>\n"
+            f"<b>{broadcast['caption']}</b>\n\n"
+            f"✅ Отправлено: {stats['sent']}\n"
+            f"❌ Ошибок: {stats['failed']}\n"
+            f"🚫 Заблокировали бота: {stats['blocked']}\n"
+            f"📈 Всего: {stats['total']}\n")
+
+    keyboard = kb.InlineKeyboardMarkup(inline_keyboard=[
+        [kb.InlineKeyboardButton(text="◀️ Назад", callback_data=f"bc_view_{bc_id}")]
+    ])
+
+    await safe_edit_message(callback, text, keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("bc_delete_"))
+@admin_only
+async def delete_broadcast(callback: CallbackQuery, db):
+    """Удаление рассылки"""
+    try:
+        bc_id = int(callback.data.split("_")[2])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+
+    broadcast = await db.get_broadcast(bc_id)
+    if not broadcast:
+        await callback.answer("Рассылка не найдена", show_alert=True)
+        return
+
+    if broadcast['status'] == 'sending':
+        await callback.answer("❌ Нельзя удалить рассылку в процессе отправки", show_alert=True)
+        return
+
+    success = await db.delete_broadcast(bc_id)
+
+    if success:
+        await callback.answer("✅ Рассылка удалена", show_alert=True)
+        await admin_broadcasts_menu(callback, db)
+    else:
+        await callback.answer("❌ Ошибка удаления", show_alert=True)
+
+@router.callback_query(F.data.startswith("bc_edit_games_"))
+@admin_only
+async def edit_broadcast_games(callback: CallbackQuery, db):
+    """Редактирование игр для рассылки"""
+    try:
+        bc_id = int(callback.data.split("_")[3])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+
+    broadcast = await db.get_broadcast(bc_id)
+    if not broadcast:
+        await callback.answer("Рассылка не найдена", show_alert=True)
+        return
+
+    current_games = broadcast.get('target_games', ['dota', 'cs'])
+
+    text = f"🎮 Редактирование игр для рассылки #{bc_id}"
+    await safe_edit_message(callback, text, kb.broadcast_edit_games_keyboard(bc_id, current_games))
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("bc_setgames_"))
+@admin_only
+async def set_broadcast_games(callback: CallbackQuery, db):
+    """Установка игр для рассылки"""
+    try:
+        parts = callback.data.split("_")
+        bc_id = int(parts[2])
+        choice = parts[3]
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка параметров", show_alert=True)
+        return
+
+    if choice == "dota":
+        games = ['dota']
+    elif choice == "cs":
+        games = ['cs']
+    elif choice == "both":
+        games = ['dota', 'cs']
+    else:
+        await callback.answer("❌ Неизвестный выбор", show_alert=True)
+        return
+
+    success = await db.update_broadcast_targets(bc_id, games=games)
+
+    if success:
+        await callback.answer("✅ Игры обновлены", show_alert=True)
+        broadcast = await db.get_broadcast(bc_id)
+        await _show_broadcast_details(callback, broadcast)
+    else:
+        await callback.answer("❌ Ошибка обновления", show_alert=True)
+
+@router.callback_query(F.data.startswith("bc_edit_regions_"))
+@admin_only
+async def edit_broadcast_regions(callback: CallbackQuery, db):
+    """Редактирование регионов для рассылки"""
+    try:
+        bc_id = int(callback.data.split("_")[3])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+
+    broadcast = await db.get_broadcast(bc_id)
+    if not broadcast:
+        await callback.answer("Рассылка не найдена", show_alert=True)
+        return
+
+    current_regions = broadcast.get('target_regions', ['all'])
+
+    text = f"🌍 Редактирование регионов для рассылки #{bc_id}"
+    await safe_edit_message(callback, text, kb.broadcast_edit_regions_keyboard(bc_id, current_regions))
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("bc_setregions_"))
+@admin_only
+async def set_broadcast_regions(callback: CallbackQuery, db):
+    """Установка регионов для рассылки"""
+    try:
+        parts = callback.data.split("_")
+        bc_id = int(parts[2])
+        choice = parts[3]
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка параметров", show_alert=True)
+        return
+
+    broadcast = await db.get_broadcast(bc_id)
+    if not broadcast:
+        await callback.answer("Рассылка не найдена", show_alert=True)
+        return
+
+    current_regions = broadcast.get('target_regions', ['all'])
+
+    if choice == "all":
+        regions = ['all']
+    else:
+        # Переключаем выбранный регион
+        if 'all' in current_regions:
+            regions = [choice]
+        elif choice in current_regions:
+            regions = [r for r in current_regions if r != choice]
+            if not regions:
+                regions = ['all']
+        else:
+            regions = current_regions + [choice]
+
+    success = await db.update_broadcast_targets(bc_id, regions=regions)
+
+    if success:
+        await callback.answer("✅ Регионы обновлены")
+        # Обновляем клавиатуру
+        text = f"🌍 Редактирование регионов для рассылки #{bc_id}"
+        await safe_edit_message(callback, text, kb.broadcast_edit_regions_keyboard(bc_id, regions))
+    else:
+        await callback.answer("❌ Ошибка обновления", show_alert=True)
+
+@router.callback_query(F.data.startswith("bc_edit_purposes_"))
+@admin_only
+async def edit_broadcast_purposes(callback: CallbackQuery, db):
+    """Редактирование целей для рассылки"""
+    try:
+        bc_id = int(callback.data.split("_")[3])
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка ID", show_alert=True)
+        return
+
+    broadcast = await db.get_broadcast(bc_id)
+    if not broadcast:
+        await callback.answer("Рассылка не найдена", show_alert=True)
+        return
+
+    current_purposes = broadcast.get('target_purposes', [])
+
+    text = f"🎯 Редактирование целей для рассылки #{bc_id}"
+    await safe_edit_message(callback, text, kb.broadcast_edit_purposes_keyboard(bc_id, current_purposes))
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("bc_setpurposes_"))
+@admin_only
+async def set_broadcast_purposes(callback: CallbackQuery, db):
+    """Установка целей для рассылки"""
+    try:
+        parts = callback.data.split("_")
+        bc_id = int(parts[2])
+        choice = parts[3]
+    except (IndexError, ValueError):
+        await callback.answer("Ошибка параметров", show_alert=True)
+        return
+
+    broadcast = await db.get_broadcast(bc_id)
+    if not broadcast:
+        await callback.answer("Рассылка не найдена", show_alert=True)
+        return
+
+    current_purposes = broadcast.get('target_purposes', [])
+
+    if choice == "all":
+        purposes = []
+    else:
+        # Переключаем выбранную цель
+        if choice in current_purposes:
+            purposes = [p for p in current_purposes if p != choice]
+        else:
+            purposes = current_purposes + [choice]
+
+    success = await db.update_broadcast_targets(bc_id, purposes=purposes)
+
+    if success:
+        await callback.answer("✅ Цели обновлены")
+        # Обновляем клавиатуру
+        text = f"🎯 Редактирование целей для рассылки #{bc_id}"
+        await safe_edit_message(callback, text, kb.broadcast_edit_purposes_keyboard(bc_id, purposes))
+    else:
+        await callback.answer("❌ Ошибка обновления", show_alert=True)
 
 # ==================== БАН ПОЛЬЗОВАТЕЛЯ ПО ID/USERNAME ====================
 
