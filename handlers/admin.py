@@ -66,10 +66,24 @@ def _format_datetime(dt):
         return str(dt)
 
 def _truncate_text(text: str, limit: int = 1024) -> str:
-    """Обрезка текста для Telegram"""
+    """Обрезка текста для Telegram с учетом HTML-тегов"""
     if not text or len(text) <= limit:
         return text or ""
-    return text[:limit-1] + "…"
+
+    # Обрезаем текст
+    truncated = text[:limit-1]
+
+    # Проверяем, не обрезали ли мы текст посередине HTML-тега
+    # Ищем последний открывающий '<' без соответствующего закрывающего '>'
+    last_open = truncated.rfind('<')
+    last_close = truncated.rfind('>')
+
+    # Если последний '<' находится после последнего '>', значит мы обрезали тег
+    if last_open > last_close:
+        # Удаляем незакрытый тег
+        truncated = truncated[:last_open]
+
+    return truncated + "…"
 
 def _format_user_info(user_id: int, username: str = None) -> str:
     """Форматирование информации о пользователе"""
