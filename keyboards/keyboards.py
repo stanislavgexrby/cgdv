@@ -88,15 +88,7 @@ def profile_creation_navigation(step: str, has_prev_data: bool = False) -> Inlin
     """Навигация при создании профиля"""
     buttons = []
     
-    if step == "name":
-        if has_prev_data:
-            buttons.extend([
-                [InlineKeyboardButton(text="Продолжить", callback_data="profile_continue")],
-                [InlineKeyboardButton(text="Отмена", callback_data="cancel")]
-            ])
-        else:
-            buttons.append([InlineKeyboardButton(text="Отмена", callback_data="cancel")])
-    elif has_prev_data:
+    if has_prev_data:
         buttons.extend([
             [InlineKeyboardButton(text="Продолжить", callback_data="profile_continue")],
             [
@@ -129,7 +121,7 @@ def roles(selected_role: str = None, with_navigation: bool = False, with_cancel:
     if with_navigation:
         bottom_row = []
         if selected_role:
-            bottom_row.append(InlineKeyboardButton(text="Готово", callback_data="role_done"))
+            bottom_row.append(InlineKeyboardButton(text="Продолжить", callback_data="role_done"))
         else:
             bottom_row.append(InlineKeyboardButton(text="Выберите роль", callback_data="role_need"))
         
@@ -172,7 +164,7 @@ def ratings(game: str, selected_rating: str = None, with_navigation: bool = Fals
 
     if with_navigation:
         if selected_rating:
-            bottom_row.append(InlineKeyboardButton(text="Готово", callback_data="rating_done"))
+            bottom_row.append(InlineKeyboardButton(text="Продолжить", callback_data="rating_done"))
         else:
             bottom_row.append(InlineKeyboardButton(text="Выберите рейтинг", callback_data="rating_need"))
     
@@ -219,7 +211,7 @@ def countries(selected_country: str = None, with_navigation: bool = False,
 
     if with_navigation:
         if selected_country:
-            bottom_row.append(InlineKeyboardButton(text="Готово", callback_data="country_done"))
+            bottom_row.append(InlineKeyboardButton(text="Продолжить", callback_data="country_done"))
         else:
             bottom_row.append(InlineKeyboardButton(text="Выберите страну", callback_data="country_need"))
 
@@ -353,7 +345,7 @@ def positions(game: str, selected: List[str] = None, with_navigation: bool = Fal
 
     if with_navigation:
         if selected:
-            bottom_row.append(InlineKeyboardButton(text="Готово", callback_data="pos_done"))
+            bottom_row.append(InlineKeyboardButton(text="Продолжить", callback_data="pos_done"))
         else:
             bottom_row.append(InlineKeyboardButton(text="Выберите позицию", callback_data="pos_need"))
     elif editing:
@@ -407,7 +399,7 @@ def goals(selected: List[str] = None, with_navigation: bool = False,
 
     if with_navigation:
         if selected:
-            bottom_row.append(InlineKeyboardButton(text="Готово", callback_data="goals_done"))
+            bottom_row.append(InlineKeyboardButton(text="Продолжить", callback_data="goals_done"))
         else:
             bottom_row.append(InlineKeyboardButton(text="Выберите цель", callback_data="goals_need"))
     elif editing:
@@ -446,6 +438,69 @@ def goals_filter() -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def gender_selection(selected_gender: str = None, with_navigation: bool = False, show_back: bool = True) -> InlineKeyboardMarkup:
+    """Выбор пола при создании анкеты"""
+    buttons = []
+
+    for key, name in settings.GENDERS.items():
+        if key == selected_gender:
+            text = f"✅ {name}"
+            callback = f"gender_remove_{key}"
+        else:
+            text = name
+            callback = f"gender_select_{key}"
+
+        buttons.append([InlineKeyboardButton(text=text, callback_data=callback)])
+
+    if with_navigation:
+        if selected_gender:
+            buttons.append([InlineKeyboardButton(text="Продолжить", callback_data="gender_done")])
+
+        if show_back:
+            buttons.append([
+                InlineKeyboardButton(text="Назад", callback_data="profile_back"),
+                InlineKeyboardButton(text="Отмена", callback_data="cancel")
+            ])
+        else:
+            buttons.append([InlineKeyboardButton(text="Отмена", callback_data="cancel")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def gender_for_edit(selected_gender: str = None) -> InlineKeyboardMarkup:
+    """Выбор пола при редактировании"""
+    buttons = []
+
+    for key, name in settings.GENDERS.items():
+        text = f"✅ {name}" if key == selected_gender else name
+        buttons.append([InlineKeyboardButton(text=text, callback_data=f"edit_gender_{key}")])
+
+    buttons.append([InlineKeyboardButton(text="Отмена", callback_data="cancel_edit")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def gender_filter() -> InlineKeyboardMarkup:
+    """Фильтр по полу в поиске"""
+    buttons = []
+
+    for key, name in settings.GENDERS.items():
+        buttons.append([InlineKeyboardButton(text=name, callback_data=f"gender_filter_{key}")])
+
+    buttons.extend([
+        [InlineKeyboardButton(text="Сбросить фильтр", callback_data="gender_reset")],
+        [InlineKeyboardButton(text="Отмена", callback_data="cancel_filter")]
+    ])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def gender_force_select() -> InlineKeyboardMarkup:
+    """Принудительный выбор пола (без кнопки назад)"""
+    buttons = []
+
+    for key, name in settings.GENDERS.items():
+        buttons.append([InlineKeyboardButton(text=name, callback_data=f"force_gender_{key}")])
+
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 def role_filter() -> InlineKeyboardMarkup:
     """Фильтр по роли"""
     buttons = []
@@ -463,7 +518,7 @@ def role_filter() -> InlineKeyboardMarkup:
 def skip_profile_url() -> InlineKeyboardMarkup:
     """Пропуск ссылки профиля с навигацией"""
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Пропустить", callback_data="skip_profile_url")],
+        [InlineKeyboardButton(text="Пропустить", callback_data="profile_url_skip")],
         [
             InlineKeyboardButton(text="Назад", callback_data="profile_back"),
             InlineKeyboardButton(text="Отмена", callback_data="cancel")
@@ -550,9 +605,10 @@ def filters_setup_menu(role_filter: str = 'player') -> InlineKeyboardMarkup:
     """Меню выбора какой фильтр настроить (с учетом роли)"""
     buttons = []
     
-    # Роль показываем всегда
+    # Роль и пол показываем всегда
     buttons.append([InlineKeyboardButton(text="Роль", callback_data="filter_role")])
-    
+    buttons.append([InlineKeyboardButton(text="Пол", callback_data="filter_gender")])
+
     # Для игроков показываем игровые фильтры
     if role_filter == 'player':
         buttons.extend([
@@ -578,6 +634,7 @@ def edit_profile_menu(game: str = 'dota', role: str = 'player') -> InlineKeyboar
     
     # Общие поля для всех ролей
     buttons.extend([
+        [InlineKeyboardButton(text="Изменить пол", callback_data="edit_gender")],
         [InlineKeyboardButton(text="Изменить имя", callback_data="edit_name")],
         [InlineKeyboardButton(text="Изменить никнейм", callback_data="edit_nickname")],
         [InlineKeyboardButton(text="Изменить возраст", callback_data="edit_age")],
@@ -706,13 +763,14 @@ def like_actions(user_id: int, index: int = 0, total: int = 1) -> InlineKeyboard
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
-def contact(username: str = None) -> InlineKeyboardMarkup:
+def contact(username: str = None, page: int = 0) -> InlineKeyboardMarkup:
     """Контактная информация"""
     buttons = []
 
     if username:
         buttons.append([InlineKeyboardButton(text="💬 Написать", url=f"https://t.me/{username}")])
 
+    buttons.append([InlineKeyboardButton(text="← Назад к мэтчам", callback_data=f"my_matches_page_{page}")])
     buttons.append([InlineKeyboardButton(text="Главное меню", callback_data="main_menu")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)

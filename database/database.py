@@ -294,13 +294,37 @@ class Database:
                 await conn.execute("ALTER TABLE ad_posts ADD COLUMN IF NOT EXISTS regions TEXT[] DEFAULT ARRAY['all']::TEXT[]")
                 logger.info("✅ Миграция: добавлена колонка regions в ad_posts")
             except Exception as e:
-                logger.warning(f"Миграция поля games: {e}")
+                logger.warning(f"Миграция поля regions: {e}")
+
+            try:
+                await conn.execute("ALTER TABLE ad_posts ADD COLUMN IF NOT EXISTS ad_type TEXT DEFAULT 'forward'")
+                logger.info("✅ Миграция: добавлена колонка ad_type в ad_posts")
+            except Exception as e:
+                logger.warning(f"Миграция поля ad_type: {e}")
+
+            try:
+                await conn.execute("ALTER TABLE ad_posts ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP")
+                logger.info("✅ Миграция: добавлена колонка expires_at в ad_posts")
+            except Exception as e:
+                logger.warning(f"Миграция поля expires_at: {e}")
 
             try:
                 await conn.execute("ALTER TABLE reports ADD COLUMN IF NOT EXISTS report_message TEXT")
                 logger.info("✅ Миграция: добавлена колонка report_message в reports")
             except Exception as e:
                 logger.warning(f"Миграция поля report_message: {e}")
+
+            try:
+                await conn.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS gender TEXT")
+                logger.info("✅ Миграция: добавлена колонка gender в profiles")
+            except Exception as e:
+                logger.warning(f"Миграция поля gender: {e}")
+
+            try:
+                await conn.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_activity TIMESTAMP")
+                logger.info("✅ Миграция: добавлена колонка last_activity в users")
+            except Exception as e:
+                logger.warning(f"Миграция поля last_activity: {e}")
 
             for index_sql in optimized_indexes:
                 try:
@@ -343,9 +367,9 @@ class Database:
 
         return profile
 
-    def _generate_filters_hash(self, rating_filter, position_filter, region_filter, goals_filter, role_filter) -> str:
+    def _generate_filters_hash(self, rating_filter, position_filter, region_filter, goals_filter, role_filter, gender_filter=None) -> str:
         """Генерация хэша для фильтров поиска"""
-        filters_str = f"{rating_filter or 'any'}_{position_filter or 'any'}_{region_filter or 'any'}_{goals_filter or 'any'}_{role_filter or 'player'}"
+        filters_str = f"{rating_filter or 'any'}_{position_filter or 'any'}_{region_filter or 'any'}_{goals_filter or 'any'}_{role_filter or 'player'}_{gender_filter or 'any'}"
         return hashlib.md5(filters_str.encode()).hexdigest()[:8]
 
     # === ОПТИМИЗИРОВАННОЕ КЭШИРОВАНИЕ ===
@@ -482,7 +506,7 @@ class Database:
                                  age: int, rating: str, region: str, positions: List[str],
                                  goals: List[str], additional_info: str = "", photo_id: str = None,
                                  profile_url: str = None, username: str = None,
-                                 role: str = 'player'):
+                                 role: str = 'player', gender: str = None):
         """Создание или обновление профиля пользователя"""
 
         async with self._pg_pool.acquire() as conn:
@@ -496,25 +520,25 @@ class Database:
                 if existing:
                     # ОБНОВЛЕНИЕ существующего профиля (БЕЗ username)
                     await conn.execute(
-                        '''UPDATE profiles 
+                        '''UPDATE profiles
                            SET name = $3, nickname = $4, age = $5, rating = $6, region = $7,
                                positions = $8, goals = $9, additional_info = $10, photo_id = $11,
-                               profile_url = $12, role = $13, updated_at = NOW()
+                               profile_url = $12, role = $13, gender = $14, updated_at = NOW()
                            WHERE telegram_id = $1 AND game = $2''',
                         telegram_id, game, name, nickname, age, rating, region,
                         json.dumps(positions), json.dumps(goals), additional_info,
-                        photo_id, profile_url, role
+                        photo_id, profile_url, role, gender
                     )
                 else:
                     # СОЗДАНИЕ нового профиля (БЕЗ username)
                     await conn.execute(
-                        '''INSERT INTO profiles 
+                        '''INSERT INTO profiles
                            (telegram_id, game, name, nickname, age, rating, region, positions, goals,
-                            additional_info, photo_id, profile_url, role, created_at, updated_at)
-                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, NOW(), NOW())''',
+                            additional_info, photo_id, profile_url, role, gender, created_at, updated_at)
+                           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, NOW(), NOW())''',
                         telegram_id, game, name, nickname, age, rating, region,
                         json.dumps(positions), json.dumps(goals), additional_info,
-                        photo_id, profile_url, role
+                        photo_id, profile_url, role, gender
                     )
 
                 # Если передан username, обновляем его в таблице users
@@ -609,6 +633,7 @@ class Database:
                                    country_filter: str = None,
                                    goals_filter: str = None,
                                    role_filter: str = None,
+                                   gender_filter: str = None,
                                    limit: int = 20,
                                    offset: int = 0) -> List[Dict]:
         """Умный поиск с приоритетом активным пользователям, близким рейтингом и комплементарностью"""
@@ -638,7 +663,7 @@ class Database:
 
         # Генерация ключа кэша
         filters_hash = self._generate_filters_hash(
-            rating_filter, position_filter, country_filter, goals_filter, role_filter
+            rating_filter, position_filter, country_filter, goals_filter, role_filter, gender_filter
         )
         cache_key = f"search:{user_id}:{game}:{filters_hash}:{offset//limit}"
 
@@ -669,7 +694,7 @@ class Database:
                     p.telegram_id, p.game, p.name, p.nickname, p.age,
                     p.rating, p.region, p.positions, p.goals,
                     p.additional_info, p.photo_id, p.profile_url,
-                    p.created_at, p.updated_at, p.role,
+                    p.created_at, p.updated_at, p.role, p.gender,
                     u.username, u.last_activity,
                     COALESCE(s.skip_count, 0) as skip_count,
                     s.last_skipped,
@@ -732,11 +757,12 @@ class Database:
                     AND ($4::text IS NULL OR positions ? $4 OR positions ? 'any')
                     AND ($5::text IS NULL OR region = $5::text OR region = 'any')
                     AND ($6::text IS NULL OR goals ? $6)
+                    AND ($16::text IS NULL OR gender = $16::text)
             )
             SELECT
                 telegram_id, game, name, nickname, age, rating, region,
                 positions, goals, additional_info, photo_id, profile_url,
-                username, created_at, updated_at, role, display_priority
+                username, created_at, updated_at, role, gender, display_priority
             FROM (
                 SELECT *,
                     -- Разбиваем на группы качества для чередования
@@ -787,7 +813,8 @@ class Database:
             default_cs_avatar,         # $12
             user_rating_idx,           # $13
             user_goals,                # $14
-            user_positions             # $15
+            user_positions,            # $15
+            gender_filter if gender_filter and gender_filter != 'any' else None  # $16
         ]
 
         async with self._pg_pool.acquire() as conn:
@@ -912,9 +939,10 @@ class Database:
 
         async with self._pg_pool.acquire() as conn:
             rows = await conn.fetch(
-                '''SELECT p.telegram_id, p.game, p.name, p.nickname, p.age, 
+                '''SELECT p.telegram_id, p.game, p.name, p.nickname, p.age,
                         p.rating, p.region, p.positions, p.goals,
                         p.additional_info, p.photo_id, p.profile_url,
+                        p.role, p.gender,
                         p.created_at, p.updated_at,
                         u.username,
                         l.message, l.created_at as like_created_at

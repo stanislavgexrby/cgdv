@@ -364,3 +364,8 @@ ROLES = {
     'coach': 'Тренер',
     'manager': 'Менеджер'
 }
+
+GENDERS = {
+    "male": "Парень",
+    "female": "Девушка"
+}

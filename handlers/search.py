@@ -79,6 +79,13 @@ async def update_filters_display(callback: CallbackQuery, state: FSMContext, mes
         else:
             filters_text.append("<b>Цель:</b> не указана")
 
+    gender_f = data.get('gender_filter')
+    if gender_f:
+        gender_name = settings.GENDERS.get(gender_f, gender_f)
+        filters_text.append(f"<b>Пол:</b> {gender_name}")
+    else:
+        filters_text.append("<b>Пол:</b> не указан")
+
     country_filter = data.get('country_filter')
     if country_filter:
         country_name = settings.MAIN_COUNTRIES.get(country_filter) or settings.COUNTRIES_DICT.get(country_filter, country_filter)
@@ -127,6 +134,13 @@ async def get_full_filters_display(data: dict) -> str:
             filters_text.append(f"<b>Цель:</b> {goals_name}")
         else:
             filters_text.append("<b>Цель:</b> не указана")
+
+    gender_f = data.get('gender_filter')
+    if gender_f:
+        gender_name = settings.GENDERS.get(gender_f, gender_f)
+        filters_text.append(f"<b>Пол:</b> {gender_name}")
+    else:
+        filters_text.append("<b>Пол:</b> не указан")
 
     country_filter = data.get('country_filter')
     if country_filter:
@@ -303,6 +317,7 @@ async def show_next_profile(callback: CallbackQuery, state: FSMContext, db):
                 country_filter=data.get('country_filter'),
                 goals_filter=data.get('goals_filter'),
                 role_filter=data.get('role_filter'),
+                gender_filter=data.get('gender_filter'),
                 limit=20,
                 offset=new_offset
             )
@@ -532,6 +547,7 @@ async def start_search_menu(callback: CallbackQuery, state: FSMContext, db):
             region_filter=None,
             goals_filter=None,
             role_filter='player',
+            gender_filter=None,
             profiles=[],
             current_index=0,
             profiles_shown=0
@@ -627,6 +643,12 @@ async def set_role_filter(callback: CallbackQuery, state: FSMContext):
     await safe_edit_message(callback, "Выберите роль:", kb.role_filter())
     await callback.answer()
 
+@router.callback_query(F.data == "filter_gender", SearchForm.filters)
+async def set_gender_filter(callback: CallbackQuery, state: FSMContext):
+    """Показать меню выбора пола"""
+    await safe_edit_message(callback, "Выберите пол:", kb.gender_filter())
+    await callback.answer()
+
 @router.callback_query(F.data == "filter_rating", SearchForm.filters)
 async def set_rating_filter(callback: CallbackQuery, state: FSMContext):
     """Показать меню выбора рейтинга"""
@@ -666,7 +688,8 @@ async def reset_all_filters(callback: CallbackQuery, state: FSMContext):
         position_filter=None,
         country_filter=None,
         goals_filter=None,
-        role_filter='player'
+        role_filter='player',
+        gender_filter=None
     )
     await update_filters_display(callback, state, "Все фильтры сброшены")
 
@@ -702,6 +725,29 @@ async def save_role_filter(callback: CallbackQuery, state: FSMContext):
     
     role_name = settings.ROLES.get(role, role)
     await update_filters_display(callback, state, f"Фильтр по роли: {role_name}")
+
+@router.callback_query(F.data.startswith("gender_filter_"), SearchForm.filters)
+async def save_gender_filter(callback: CallbackQuery, state: FSMContext):
+    """Сохранение выбранного пола"""
+    gender = callback.data.replace("gender_filter_", "")
+
+    if gender not in settings.GENDERS:
+        return
+
+    data = await state.get_data()
+    if data.get('gender_filter') == gender:
+        await callback.answer("Этот пол уже выбран")
+        return
+
+    await state.update_data(gender_filter=gender)
+    gender_name = settings.GENDERS.get(gender, gender)
+    await update_filters_display(callback, state, f"Фильтр по полу: {gender_name}")
+
+@router.callback_query(F.data == "gender_reset", SearchForm.filters)
+async def reset_gender_filter(callback: CallbackQuery, state: FSMContext):
+    """Сброс фильтра по полу"""
+    await state.update_data(gender_filter=None)
+    await update_filters_display(callback, state, "Фильтр по полу сброшен")
 
 @router.callback_query(F.data.startswith("rating_"), SearchForm.filters)
 async def save_rating_filter(callback: CallbackQuery, state: FSMContext):
@@ -921,7 +967,7 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
         data = await state.get_data()
     
     await update_user_activity(data['user_id'], 'search_browsing', db)
-    
+
     all_profiles = []
     for batch_offset in [0, 20, 40]:
         batch = await db.get_potential_matches(
@@ -932,6 +978,7 @@ async def begin_search(callback: CallbackQuery, state: FSMContext, db):
             country_filter=data.get('country_filter'),
             goals_filter=data.get('goals_filter'),
             role_filter=data.get('role_filter'),
+            gender_filter=data.get('gender_filter'),
             limit=20,
             offset=batch_offset
         )

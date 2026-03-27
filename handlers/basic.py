@@ -295,8 +295,17 @@ async def rules_understood(callback: CallbackQuery, db):
     game = user['current_game']
     profile = await db.get_user_profile(user_id, game)
     has_profile = profile is not None
-    text = get_main_menu_text(game, has_profile)
 
+    if profile and not profile.get('gender'):
+        await safe_edit_message(
+            callback,
+            "Мы добавили новое поле — пол. Пожалуйста, укажите:",
+            kb.gender_force_select()
+        )
+        await callback.answer()
+        return
+
+    text = get_main_menu_text(game, has_profile)
     await send_main_menu_with_photo(callback, text, kb.main_menu(has_profile, game), game=game, db=db)
     await callback.answer()
 
@@ -463,6 +472,15 @@ async def show_main_menu(callback: CallbackQuery, db):
     profile = await db.get_user_profile(user_id, game)
     has_profile = profile is not None
 
+    if profile and not profile.get('gender'):
+        await safe_edit_message(
+            callback,
+            "Мы добавили новое поле — пол. Пожалуйста, укажите:",
+            kb.gender_force_select()
+        )
+        await callback.answer()
+        return
+
     text = get_main_menu_text(game, has_profile)
     await send_main_menu_with_photo(callback, text, kb.main_menu(has_profile, game), game=game, db=db)
     await callback.answer()
@@ -597,9 +615,62 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
         
         await callback.bot.send_message(
             chat_id=callback.message.chat.id,
-            text=current_info, 
-            reply_markup=keyboard, 
+            text=current_info,
+            reply_markup=keyboard,
             parse_mode='HTML'
         )
 
     await callback.answer()
+
+# ==================== ПРИНУДИТЕЛЬНЫЙ ВЫБОР ПОЛА ====================
+
+@router.callback_query(F.data.startswith("force_gender_"))
+async def force_gender_select(callback: CallbackQuery, db):
+    """Принудительный выбор пола для существующих анкет без пола"""
+    gender = callback.data.replace("force_gender_", "")
+
+    if gender not in settings.GENDERS:
+        await callback.answer("Некорректный выбор", show_alert=True)
+        return
+
+    user_id = callback.from_user.id
+    user = await db.get_user(user_id)
+    if not user or not user.get('current_game'):
+        await callback.answer("Ошибка", show_alert=True)
+        return
+
+    game = user['current_game']
+    profile = await db.get_user_profile(user_id, game)
+    if not profile:
+        await callback.answer("Профиль не найден", show_alert=True)
+        return
+
+    # Обновляем пол через полное обновление профиля
+    import json as _json
+    positions = profile.get('positions', ['any'])
+    goals = profile.get('goals', ['any'])
+
+    await db.update_user_profile(
+        telegram_id=user_id,
+        game=game,
+        name=profile['name'],
+        nickname=profile['nickname'],
+        age=profile['age'],
+        rating=profile.get('rating', 'any'),
+        region=profile.get('region', 'any'),
+        positions=positions,
+        goals=goals,
+        additional_info=profile.get('additional_info', ''),
+        photo_id=profile.get('photo_id'),
+        profile_url=profile.get('profile_url', ''),
+        role=profile.get('role', 'player'),
+        gender=gender
+    )
+
+    gender_name = settings.GENDERS.get(gender, gender)
+    await callback.answer(f"Пол указан: {gender_name}")
+
+    # Показываем главное меню
+    has_profile = True
+    text = get_main_menu_text(game, has_profile)
+    await send_main_menu_with_photo(callback, text, kb.main_menu(has_profile, game), game=game, db=db)

@@ -32,7 +32,12 @@ def format_profile(user: dict, show_contact: bool = False) -> str:
         nickname_with_link = nickname
 
     # Имя с ссылкой на профиль в игре
-    text = f"{name} <b>{nickname_with_link}</b>, {format_age(user['age'])}\n\n"
+    gender = user.get('gender')
+    gender_text = settings.GENDERS.get(gender, '') if gender else ''
+    if gender_text:
+        text = f"{name} <b>{nickname_with_link}</b>, {gender_text}, {format_age(user['age'])}\n\n"
+    else:
+        text = f"{name} <b>{nickname_with_link}</b>, {format_age(user['age'])}\n\n"
 
     if role != 'player':
         # Для тренера/менеджера: только страна, описание

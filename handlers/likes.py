@@ -266,10 +266,12 @@ async def _show_likes_internal(callback: CallbackQuery, user_id: int, game: str,
     else:
         await show_like_profile(callback, likes, 0)
 
-async def _show_matches_internal(callback: CallbackQuery, user_id: int, game: str, state: FSMContext, db):
-    """Внутренняя функция показа матчей"""
+MATCHES_PAGE_SIZE = 8
+
+async def _show_matches_internal(callback: CallbackQuery, user_id: int, game: str, state: FSMContext, db, page: int = 0):
+    """Внутренняя функция показа матчей с пагинацией"""
     await state.clear()
-    
+
     matches = await db.get_matches(user_id, game)
     game_name = settings.GAMES.get(game, game)
 
@@ -282,21 +284,38 @@ async def _show_matches_internal(callback: CallbackQuery, user_id: int, game: st
         await show_empty_state(callback, text)
         return
 
-    text = f"Ваши мэтчи в {game_name} ({len(matches)}):\n\n"
-    for i, match in enumerate(matches, 1):
-        name = match['name']
-        username = match.get('username', 'нет username')
-        text += f"{i}. {name} (@{username})\n"
+    total = len(matches)
+    total_pages = (total + MATCHES_PAGE_SIZE - 1) // MATCHES_PAGE_SIZE
+    page = max(0, min(page, total_pages - 1))
 
-    text += "\nВы можете связаться с любым из них!"
+    page_matches = matches[page * MATCHES_PAGE_SIZE:(page + 1) * MATCHES_PAGE_SIZE]
+    start_num = page * MATCHES_PAGE_SIZE + 1
+
+    text = f"Ваши мэтчи в {game_name} ({total}):\n\n"
+    for i, match in enumerate(page_matches, start_num):
+        name = match['name']
+        username = match.get('username')
+        username_text = f"@{username}" if username else "нет username"
+        text += f"{i}. {name} ({username_text})\n"
+
+    if total_pages > 1:
+        text += f"\nСтраница {page + 1} из {total_pages}"
 
     buttons = []
-    for match in matches[:5]:
-        name = match['name'][:15] + "..." if len(match['name']) > 15 else match['name']
+    for match in page_matches:
+        name = match['name'][:20] + "..." if len(match['name']) > 20 else match['name']
         buttons.append([kb.InlineKeyboardButton(
-            text=f"{name}", 
-            callback_data=f"contact_{match['telegram_id']}"
+            text=name,
+            callback_data=f"contact_{match['telegram_id']}_{page}"
         )])
+
+    nav_row = []
+    if page > 0:
+        nav_row.append(kb.InlineKeyboardButton(text="←", callback_data=f"my_matches_page_{page - 1}"))
+    if page < total_pages - 1:
+        nav_row.append(kb.InlineKeyboardButton(text="→", callback_data=f"my_matches_page_{page + 1}"))
+    if nav_row:
+        buttons.append(nav_row)
 
     buttons.append([kb.InlineKeyboardButton(text="Главное меню", callback_data="main_menu")])
     keyboard = kb.InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -327,8 +346,24 @@ async def show_my_matches(callback: CallbackQuery, state: FSMContext, db):
     user_id = callback.from_user.id
     user = await db.get_user(user_id)
     game = user['current_game']
-    
-    await _show_matches_internal(callback, user_id, game, state, db)
+
+    await _show_matches_internal(callback, user_id, game, state, db, page=0)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("my_matches_page_"))
+@check_ban_and_profile()
+async def show_matches_page(callback: CallbackQuery, state: FSMContext, db):
+    """Пагинация мэтчей"""
+    try:
+        page = int(callback.data.split("_")[-1])
+    except (ValueError, IndexError):
+        page = 0
+
+    user_id = callback.from_user.id
+    user = await db.get_user(user_id)
+    game = user['current_game']
+
+    await _show_matches_internal(callback, user_id, game, state, db, page=page)
     await callback.answer()
 
 @router.callback_query(F.data.startswith("switch_and_likes_"))
@@ -740,7 +775,9 @@ async def receive_like_report_message(message: Message, state: FSMContext, db):
 async def show_contact(callback: CallbackQuery, db):
     """Показ контактной информации матча"""
     try:
-        target_user_id = int(callback.data.split("_")[1])
+        parts = callback.data.split("_")
+        target_user_id = int(parts[1])
+        page = int(parts[2]) if len(parts) > 2 else 0
     except (ValueError, IndexError):
         await callback.answer("Ошибка", show_alert=True)
         return
@@ -771,9 +808,9 @@ async def show_contact(callback: CallbackQuery, db):
         await callback.answer("Пользователь не найден", show_alert=True)
         return
 
-    profile_text = texts.format_profile(target_profile, show_contact=True)
+    profile_text = texts.format_profile(target_profile)
     text = f"Ваш мэтч:\n\n{profile_text}"
 
-    keyboard = kb.contact(target_profile.get('username'))
+    keyboard = kb.contact(target_profile.get('username'), page=page)
 
     await show_profile_with_photo(callback, target_profile, text, keyboard)

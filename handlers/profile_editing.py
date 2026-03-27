@@ -53,7 +53,8 @@ async def update_profile_field(user_id: int, field: str, value, db) -> bool:
         additional_info=profile['additional_info'] if field != 'additional_info' else value,
         photo_id=profile.get('photo_id') if field != 'photo_id' else value,
         profile_url=profile.get('profile_url', '') if field != 'profile_url' else value,
-        role=profile.get('role', 'player') if field != 'role' else value
+        role=profile.get('role', 'player') if field != 'role' else value,
+        gender=profile.get('gender') if field != 'gender' else value
     )
 
     if success:
@@ -192,8 +193,9 @@ async def recreate_profile(callback: CallbackQuery, state: FSMContext, db):
         user_id=user_id,
         game=game,
         positions_selected=[],
+        goals_selected=[],
         recreating=True,
-        current_step=ProfileStep.NAME.value
+        current_step=ProfileStep.GENDER.value
     )
 
     try:
@@ -201,9 +203,8 @@ async def recreate_profile(callback: CallbackQuery, state: FSMContext, db):
     except Exception as e:
         logger.warning(f"Не удалось удалить меню профиля: {e}")
 
-    game_name = settings.GAMES.get(game, game)
-    text = f"Создание новой анкеты для {game_name}\n\n{texts.QUESTIONS['name']}"
-    keyboard = kb.profile_creation_navigation("name", False)
+    text = "Укажите ваш пол:"
+    keyboard = kb.gender_selection(selected_gender=None, with_navigation=True, show_back=False)
 
     sent_message = await callback.message.answer(
         text=text,
@@ -213,7 +214,7 @@ async def recreate_profile(callback: CallbackQuery, state: FSMContext, db):
     )
 
     await state.update_data(last_bot_message_id=sent_message.message_id)
-    await state.set_state(ProfileForm.name)
+    await state.set_state(ProfileForm.gender)
     await callback.answer()
 
 # ==================== ОБРАБОТЧИКИ РЕДАКТИРОВАНИЯ ПОЛЕЙ ====================
@@ -271,6 +272,56 @@ async def edit_age(callback: CallbackQuery, state: FSMContext, db):
     sent_message = await callback.message.answer("Введите новый возраст:", reply_markup=kb.cancel_edit(), parse_mode='HTML')
     await state.update_data(last_bot_message_id=sent_message.message_id)
     await callback.answer()
+
+@router.callback_query(F.data == "edit_gender")
+@check_ban_and_profile()
+async def edit_gender(callback: CallbackQuery, state: FSMContext, db):
+    """Редактирование пола"""
+    user_id = callback.from_user.id
+    await update_user_activity(user_id, 'editing_profile', db)
+
+    user = await db.get_user(user_id)
+    if not user:
+        await callback.answer("Пользователь не найден", show_alert=True)
+        return
+
+    profile = await db.get_user_profile(user_id, user['current_game'])
+    if not profile:
+        await callback.answer("Профиль не найден", show_alert=True)
+        return
+
+    current_gender = profile.get('gender')
+    await state.update_data(user_id=user_id, current_game=user['current_game'])
+    await state.set_state(EditProfileForm.edit_gender)
+
+    text = "Выберите пол:"
+    keyboard = kb.gender_for_edit(selected_gender=current_gender)
+
+    await safe_edit_message(callback, text, keyboard)
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("edit_gender_"), EditProfileForm.edit_gender)
+async def process_edit_gender_select(callback: CallbackQuery, state: FSMContext, db):
+    """Обработка выбора пола при редактировании"""
+    gender = callback.data.replace("edit_gender_", "")
+
+    if gender not in settings.GENDERS:
+        await callback.answer("Некорректный выбор", show_alert=True)
+        return
+
+    user_id = callback.from_user.id
+    success = await update_profile_field(user_id, 'gender', gender, db)
+
+    await state.clear()
+    await update_user_activity(user_id, 'available', db)
+
+    if success:
+        gender_name = settings.GENDERS.get(gender, gender)
+        await callback.answer(f"Пол: {gender_name}")
+    else:
+        await callback.answer("Ошибка обновления", show_alert=True)
+
+    await show_edit_menu_after_update(user_id, db, callback=callback)
 
 @router.callback_query(F.data == "edit_role")
 @check_ban_and_profile()
@@ -732,7 +783,8 @@ async def process_edit_role_select(callback: CallbackQuery, state: FSMContext, d
             additional_info=profile.get('additional_info', ''),
             photo_id=profile.get('photo_id'),
             profile_url='',
-            role=role
+            role=role,
+            gender=profile.get('gender')
         )
     else:
         success = await update_profile_field(user_id, 'role', role, db)

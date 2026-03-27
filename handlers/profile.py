@@ -65,7 +65,8 @@ async def save_profile_unified(user_id: int, data: dict, photo_id: str = None,
         additional_info=data.get('additional_info', ''),
         photo_id=photo_id,
         profile_url=profile_url,
-        role=role
+        role=role,
+        gender=data.get('gender')
     )
     
     if state:
@@ -153,9 +154,9 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext, db):
         game=game,
         positions_selected=[],
         goals_selected=[],
-        current_step=ProfileStep.NAME.value
+        current_step=ProfileStep.GENDER.value
     )
-    
+
     try:
         for i in range(10):
             try:
@@ -167,20 +168,20 @@ async def start_create_profile(callback: CallbackQuery, state: FSMContext, db):
                 break
     except Exception:
         pass
-    
-    text = texts.QUESTIONS['name']
-    keyboard = kb.profile_creation_navigation("name", False)
-    
+
+    text = "Укажите ваш пол:"
+    keyboard = kb.gender_selection(selected_gender=None, with_navigation=True, show_back=False)
+
     sent_message = await callback.message.answer(
         text=text,
         reply_markup=keyboard,
         parse_mode='HTML',
         disable_web_page_preview=True
     )
-    
+
     await state.update_data(last_bot_message_id=sent_message.message_id)
-    await state.set_state(ProfileForm.name)
-    
+    await state.set_state(ProfileForm.gender)
+
     logger.info(f"Сохранен last_bot_message_id: {sent_message.message_id}")
     await callback.answer()
 
@@ -443,6 +444,50 @@ async def process_photo(message: Message, state: FSMContext, db):
 async def wrong_photo_format(message: Message, state: FSMContext):
     """Обработка неправильного формата при загрузке фото"""
     await show_validation_error(message, state, "Отправьте фотографию")
+
+# Обработчики для выбора пола
+@router.callback_query(F.data.startswith("gender_select_"), ProfileForm.gender)
+async def select_gender(callback: CallbackQuery, state: FSMContext):
+    """Выбор пола"""
+    gender = callback.data.split("_")[-1]
+    await state.update_data(gender=gender)
+
+    keyboard = kb.gender_selection(selected_gender=gender, with_navigation=True, show_back=False)
+    gender_name = settings.GENDERS.get(gender, gender)
+    text = f"Укажите ваш пол:\n\nВыбрано: <b>{gender_name}</b>"
+
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
+    await callback.answer()
+
+@router.callback_query(F.data.startswith("gender_remove_"), ProfileForm.gender)
+async def remove_gender_selection(callback: CallbackQuery, state: FSMContext):
+    """Снять выбор пола"""
+    await state.update_data(gender=None)
+
+    keyboard = kb.gender_selection(selected_gender=None, with_navigation=True, show_back=False)
+    text = "Укажите ваш пол:"
+
+    await callback.message.edit_text(text, reply_markup=keyboard, parse_mode='HTML')
+    await callback.answer()
+
+@router.callback_query(F.data == "gender_need")
+async def gender_need_selection(callback: CallbackQuery):
+    """Напоминание о необходимости выбрать пол"""
+    await callback.answer("Пожалуйста, выберите пол", show_alert=True)
+
+@router.callback_query(F.data == "gender_done")
+async def gender_confirmed(callback: CallbackQuery, state: FSMContext):
+    """Подтверждение выбора пола"""
+    data = await state.get_data()
+    gender = data.get('gender')
+
+    if not gender:
+        await callback.answer("Выберите пол", show_alert=True)
+        return
+
+    has_next_data = bool(data.get('name'))
+    await show_profile_step(callback, state, ProfileStep.NAME, show_current=has_next_data)
+    await callback.answer()
 
 # Обработчики для выбора роли
 @router.callback_query(F.data.startswith("role_select_"), ProfileForm.role)
@@ -1008,7 +1053,7 @@ async def goals_need(callback: CallbackQuery):
     """Напоминание о необходимости выбора цели"""
     await callback.answer("Выберите хотя бы одну цель", show_alert=True)
 
-@router.callback_query(F.data == "skip_profile_url", ProfileForm.profile_url)
+@router.callback_query(F.data == "profile_url_skip", ProfileForm.profile_url)
 async def skip_profile_url(callback: CallbackQuery, state: FSMContext):
     """Пропуск ввода ссылки на профиль"""
     await state.update_data(profile_url="")

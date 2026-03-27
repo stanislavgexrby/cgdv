@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 class ProfileForm(StatesGroup):
+    gender = State()
     name = State()
     nickname = State()
     age = State()
@@ -27,6 +28,7 @@ class ProfileForm(StatesGroup):
     photo = State()
 
 class ProfileStep(Enum):
+    GENDER = "gender"
     NAME = "name"
     NICKNAME = "nickname"
     AGE = "age"
@@ -40,6 +42,7 @@ class ProfileStep(Enum):
     PHOTO = "photo"
 
 PROFILE_STEPS_ORDER = [
+    ProfileStep.GENDER,
     ProfileStep.NAME,
     ProfileStep.NICKNAME,
     ProfileStep.AGE,
@@ -54,6 +57,7 @@ PROFILE_STEPS_ORDER = [
 ]
 
 class EditProfileForm(StatesGroup):
+    edit_gender = State()
     edit_name = State()
     edit_nickname = State()
     edit_age = State()
@@ -69,7 +73,11 @@ class EditProfileForm(StatesGroup):
 
 async def get_step_question_text(step: ProfileStep, data: dict = None, show_current: bool = False) -> str:
     if show_current and data:
-        if step == ProfileStep.NAME:
+        if step == ProfileStep.GENDER:
+            current = data.get('gender', '')
+            gender_name = settings.GENDERS.get(current, current) if current else 'Не указан'
+            return f"Текущий пол: <b>{gender_name}</b>\n\nВыберите или нажмите 'Продолжить':"
+        elif step == ProfileStep.NAME:
             current = data.get('name', '')
             return f"Текущее имя: <b>{current}</b>\n\nВведите новое имя или нажмите 'Продолжить':"
         elif step == ProfileStep.NICKNAME:
@@ -141,7 +149,9 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
             return f"Текущее фото: <b>{current}</b>\n\nОтправьте новое фото или нажмите 'Продолжить':"
     
     # Базовые тексты для шагов без текущих данных
-    if step == ProfileStep.NAME:
+    if step == ProfileStep.GENDER:
+        return "Укажите ваш пол:"
+    elif step == ProfileStep.NAME:
         return texts.QUESTIONS.get('name', "Введите имя:")
     elif step == ProfileStep.NICKNAME:
         return texts.QUESTIONS.get('nickname', "Введите никнейм:")
@@ -158,9 +168,9 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
     elif step == ProfileStep.PROFILE_URL:
         game = data.get('game', 'dota') if data else 'dota'
         if game == 'dota':
-            return "Введите ссылку на профиль Dotabuff/OpenDota или нажмите 'Пропустить':\n\nНапример: https://www.dotabuff.com/players/123456789"
+            return "Введите ссылку на профиль Dotabuff или нажмите 'Пропустить':\n\nНапример: https://www.dotabuff.com/players/123456789"
         elif game == 'cs':
-            return "Введите ссылку на профиль Steam/FACEIT или нажмите 'Пропустить':\n\nНапример: https://www.faceit.com/en/players/nickname"
+            return "Введите ссылку на профиль FACEIT или нажмите 'Пропустить':\n\nНапример: https://www.faceit.com/en/players/nickname"
     elif step == ProfileStep.REGION:
         return "Выберите страну:"
     elif step == ProfileStep.POSITIONS:
@@ -187,7 +197,9 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
                 break
 
     has_data = False
-    if step == ProfileStep.NAME and data.get('name'):
+    if step == ProfileStep.GENDER and data.get('gender'):
+        has_data = True
+    elif step == ProfileStep.NAME and data.get('name'):
         has_data = True
     elif step == ProfileStep.NICKNAME and data.get('nickname'):
         has_data = True
@@ -217,10 +229,15 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
     
     show_continue_button = show_existing_data
     
-    if step == ProfileStep.NAME:
+    if step == ProfileStep.GENDER:
+        await state.set_state(ProfileForm.gender)
+        current_gender = data.get('gender') if show_existing_data else None
+        keyboard = kb.gender_selection(selected_gender=current_gender, with_navigation=True, show_back=False)
+
+    elif step == ProfileStep.NAME:
         await state.set_state(ProfileForm.name)
         keyboard = kb.profile_creation_navigation(step.value, show_continue_button)
-        
+
     elif step == ProfileStep.NICKNAME:
         await state.set_state(ProfileForm.nickname)
         keyboard = kb.profile_creation_navigation(step.value, show_continue_button)
