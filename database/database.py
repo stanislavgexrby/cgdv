@@ -326,6 +326,13 @@ class Database:
             except Exception as e:
                 logger.warning(f"Миграция поля last_activity: {e}")
 
+            try:
+                await conn.execute("ALTER TABLE profiles ADD COLUMN IF NOT EXISTS is_active BOOLEAN DEFAULT TRUE")
+                await conn.execute("UPDATE profiles SET is_active = TRUE WHERE is_active IS NULL")
+                logger.info("✅ Миграция: добавлена колонка is_active в profiles")
+            except Exception as e:
+                logger.warning(f"Миграция поля is_active: {e}")
+
             for index_sql in optimized_indexes:
                 try:
                     await conn.execute(index_sql)
@@ -636,44 +643,36 @@ class Database:
                                    gender_filter: str = None,
                                    limit: int = 20,
                                    offset: int = 0) -> List[Dict]:
-        """Умный поиск с приоритетом активным пользователям, близким рейтингом и комплементарностью"""
+        """Поиск анкет с приоритетом по заполненности и релевантности"""
 
-        # Получаем file_id дефолтных аватарок для определения кастомных фото
         from config import settings
         default_dota_avatar = settings.get_cached_photo_id('avatar_dota')
         default_cs_avatar = settings.get_cached_photo_id('avatar_cs')
 
-        # Получаем данные текущего пользователя для расчета совместимости
         user_profile = await self.get_user_profile(user_id, game)
         user_rating = user_profile.get('rating') if user_profile else None
         user_goals = user_profile.get('goals', []) if user_profile else []
         user_positions = user_profile.get('positions', []) if user_profile else []
+        user_region = user_profile.get('region') if user_profile else None
 
-        # Создаем маппинг рейтингов для расчета близости
-        rating_order = {}
         if game == 'dota':
             ratings_list = ['herald', 'guardian', 'crusader', 'archon', 'legend', 'ancient', 'divine', 'immortal1', 'immortal2', 'immortal3', 'immortal4', 'immortal5']
-        else:  # cs
+        else:
             ratings_list = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '10_plus', '10_advanced', '10_elite', 'pro']
 
-        for idx, rating in enumerate(ratings_list):
-            rating_order[rating] = idx
-
+        rating_order = {r: i for i, r in enumerate(ratings_list)}
         user_rating_idx = rating_order.get(user_rating, -1) if user_rating else -1
 
-        # Генерация ключа кэша
         filters_hash = self._generate_filters_hash(
             rating_filter, position_filter, country_filter, goals_filter, role_filter, gender_filter
         )
         cache_key = f"search:{user_id}:{game}:{filters_hash}:{offset//limit}"
 
-        # Кэшируем только первые 3 страницы
         if offset < 60:
             cached = await self._get_cache(cache_key)
             if cached:
                 return cached
 
-        # Умный SQL-запрос с приоритетами
         query = '''
             WITH excluded_users AS (
                 SELECT DISTINCT to_user as excluded_id FROM likes WHERE from_user = $1 AND game = $2
@@ -687,59 +686,71 @@ class Database:
                 FROM search_skipped WHERE user_id = $1 AND game = $2
             ),
             rating_indices AS (
-                SELECT unnest($10::text[]) as rating, generate_series(0, array_length($10::text[], 1) - 1) as rating_idx
+                SELECT unnest($10::text[]) as rating,
+                       generate_series(0, array_length($10::text[], 1) - 1) as rating_idx
             ),
-            potential_profiles AS (
+            scored_profiles AS (
                 SELECT
                     p.telegram_id, p.game, p.name, p.nickname, p.age,
                     p.rating, p.region, p.positions, p.goals,
                     p.additional_info, p.photo_id, p.profile_url,
                     p.created_at, p.updated_at, p.role, p.gender,
-                    u.username, u.last_activity,
+                    u.username,
                     COALESCE(s.skip_count, 0) as skip_count,
                     s.last_skipped,
 
-                    -- Приоритет отображения (новые vs пропущенные)
+                    -- Новые анкеты (никогда не пропускавшиеся) показываем первыми
                     CASE
                         WHEN s.skipped_id IS NULL THEN 0
-                        WHEN s.skip_count = 1 AND s.last_skipped < NOW() - INTERVAL '1 day' THEN 0.5
                         WHEN s.last_skipped < NOW() - INTERVAL '7 days' THEN 1
                         ELSE 2
                     END as display_priority,
 
-                    -- Приоритет фото: 0 = кастомное, 1 = дефолтное
-                    CASE
-                        WHEN p.photo_id IS NULL THEN 1
-                        WHEN (p.game = 'dota' AND p.photo_id = $11) OR (p.game = 'cs' AND p.photo_id = $12) THEN 1
-                        ELSE 0
-                    END as photo_priority,
-
-                    -- Приоритет активности
-                    CASE
-                        WHEN u.last_activity > NOW() - INTERVAL '3 days' THEN 0
-                        WHEN u.last_activity > NOW() - INTERVAL '7 days' THEN 1
-                        WHEN u.last_activity > NOW() - INTERVAL '30 days' THEN 2
-                        ELSE 3
-                    END as activity_priority,
-
-                    -- Близость рейтинга
-                    COALESCE(ABS(ri.rating_idx - $13), 999) as rating_distance,
-
-                    -- Совпадение целей
-                    (SELECT COUNT(*) FROM jsonb_array_elements_text(p.goals) AS goal WHERE goal = ANY($14)) as goals_overlap,
-
-                    -- ОБРАТНОЕ совпадение позиций (меньше = лучше)
-                    (SELECT COUNT(*) FROM jsonb_array_elements_text(p.positions) AS pos WHERE pos = ANY($15)) as position_overlap,
-
-                    -- Заполненность анкеты
+                    -- Составной скор релевантности (чем выше — тем лучше совпадение)
                     (
-                        CASE WHEN p.rating IS NOT NULL AND p.rating != '' AND p.rating != 'any' THEN 1 ELSE 0 END +
-                        CASE WHEN p.positions IS NOT NULL AND jsonb_array_length(p.positions) > 0 AND p.positions != '["any"]'::jsonb THEN 1 ELSE 0 END +
-                        CASE WHEN p.region IS NOT NULL AND p.region != '' AND p.region != 'any' THEN 1 ELSE 0 END +
-                        CASE WHEN p.goals IS NOT NULL AND jsonb_array_length(p.goals) > 0 AND p.goals != '["any"]'::jsonb THEN 1 ELSE 0 END +
-                        CASE WHEN p.additional_info IS NOT NULL AND LENGTH(p.additional_info) > 20 THEN 2 ELSE 0 END +
-                        CASE WHEN p.profile_url IS NOT NULL AND p.profile_url != '' THEN 1 ELSE 0 END
-                    ) as filled_score
+                        -- Заполненность анкеты (вес 4, макс ~28)
+                        (
+                            CASE WHEN p.rating IS NOT NULL AND p.rating != 'any' THEN 1 ELSE 0 END +
+                            CASE WHEN p.positions IS NOT NULL AND p.positions != '["any"]'::jsonb THEN 1 ELSE 0 END +
+                            CASE WHEN p.region IS NOT NULL AND p.region != 'any' THEN 1 ELSE 0 END +
+                            CASE WHEN p.goals IS NOT NULL AND p.goals != '["any"]'::jsonb THEN 1 ELSE 0 END +
+                            CASE WHEN LENGTH(TRIM(COALESCE(p.additional_info, ''))) > 20 THEN 2 ELSE 0 END +
+                            CASE WHEN p.profile_url IS NOT NULL AND TRIM(p.profile_url) != '' THEN 1 ELSE 0 END
+                        ) * 4 +
+
+                        -- Кастомное фото (+8)
+                        CASE WHEN p.photo_id IS NOT NULL
+                             AND ($11::text IS NULL OR p.photo_id != $11::text)
+                             AND ($12::text IS NULL OR p.photo_id != $12::text) THEN 8 ELSE 0 END +
+
+                        -- Близость рейтинга (вес 3, макс 30 при совпадении)
+                        CASE WHEN $13 >= 0 AND ri.rating_idx IS NOT NULL
+                            THEN GREATEST(0, 10 - ABS(ri.rating_idx - $13)) * 3
+                            ELSE 0
+                        END +
+
+                        -- Совпадение целей (4 за каждую, 'any' не считается)
+                        (SELECT COUNT(*) FROM jsonb_array_elements_text(p.goals) g
+                         WHERE g = ANY($14::text[]) AND g != 'any') * 4 +
+
+                        -- Комплементарные позиции: награждаем за несовпадающие позиции
+                        -- (ищем тех, кто дополняет команду, а не дублирует)
+                        CASE WHEN $15::text[] IS NOT NULL
+                                  AND array_length($15::text[], 1) > 0
+                                  AND NOT ('any' = ANY($15::text[]))
+                                  AND p.positions IS NOT NULL
+                                  AND p.positions != '["any"]'::jsonb
+                            THEN GREATEST(0,
+                                jsonb_array_length(p.positions) -
+                                (SELECT COUNT(*) FROM jsonb_array_elements_text(p.positions) pos
+                                 WHERE pos = ANY($15::text[]))
+                            ) * 3
+                            ELSE 0
+                        END +
+
+                        -- Та же страна (небольшой бонус, +2)
+                        CASE WHEN $17::text IS NOT NULL AND p.region = $17 THEN 2 ELSE 0 END
+                    ) as relevance_score
 
                 FROM profiles p
                 JOIN users u ON p.telegram_id = u.telegram_id
@@ -747,74 +758,44 @@ class Database:
                 LEFT JOIN rating_indices ri ON p.rating = ri.rating
                 WHERE p.telegram_id != $1
                     AND p.game = $2
+                    AND p.is_active = TRUE
                     AND p.telegram_id NOT IN (SELECT excluded_id FROM excluded_users)
                     AND COALESCE(p.role, 'player') = $7::text
-            ),
-            filtered_profiles AS (
-                SELECT * FROM potential_profiles
-                WHERE
-                    ($3::text IS NULL OR rating = $3::text)
-                    AND ($4::text IS NULL OR positions ? $4 OR positions ? 'any')
-                    AND ($5::text IS NULL OR region = $5::text OR region = 'any')
-                    AND ($6::text IS NULL OR goals ? $6)
-                    AND ($16::text IS NULL OR gender = $16::text)
+                    AND ($3::text IS NULL OR p.rating = $3::text)
+                    AND ($4::text IS NULL OR p.positions ? $4 OR p.positions ? 'any')
+                    AND ($5::text IS NULL OR p.region = $5::text OR p.region = 'any')
+                    AND ($6::text IS NULL OR p.goals ? $6)
+                    AND ($16::text IS NULL OR p.gender = $16::text)
             )
             SELECT
                 telegram_id, game, name, nickname, age, rating, region,
                 positions, goals, additional_info, photo_id, profile_url,
                 username, created_at, updated_at, role, gender, display_priority
-            FROM (
-                SELECT *,
-                    -- Разбиваем на группы качества для чередования
-                    CASE
-                        WHEN filled_score >= 6 THEN 1  -- Premium
-                        WHEN filled_score >= 4 THEN 2  -- Good
-                        ELSE 3                          -- Basic
-                    END as quality_tier,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY CASE
-                            WHEN filled_score >= 6 THEN 1
-                            WHEN filled_score >= 4 THEN 2
-                            ELSE 3
-                        END
-                        ORDER BY
-                            display_priority ASC,
-                            photo_priority ASC,
-                            activity_priority ASC,
-                            rating_distance ASC,
-                            goals_overlap DESC,
-                            position_overlap ASC,
-                            skip_count ASC,
-                            last_skipped ASC NULLS FIRST,
-                            created_at DESC
-                    ) as tier_position
-                FROM filtered_profiles
-            ) as ranked
+            FROM scored_profiles
             ORDER BY
-                -- Чередуем: Premium → Good → Premium → Basic
-                CASE
-                    WHEN quality_tier = 1 THEN tier_position * 3
-                    WHEN quality_tier = 2 THEN tier_position * 3 + 1
-                    ELSE tier_position * 3 + 2
-                END
+                display_priority ASC,
+                relevance_score DESC,
+                skip_count ASC,
+                last_skipped ASC NULLS FIRST
             LIMIT $8 OFFSET $9
         '''
 
         params = [
             user_id, game,
-            rating_filter if rating_filter and rating_filter != 'any' else None,
-            position_filter if position_filter and position_filter != 'any' else None,
-            country_filter if country_filter and country_filter != 'any' else None,
-            goals_filter if goals_filter and goals_filter != 'any' else None,
-            role_filter if role_filter and role_filter != 'player' else 'player',
-            limit, offset,
-            ratings_list,              # $10
-            default_dota_avatar,       # $11
-            default_cs_avatar,         # $12
-            user_rating_idx,           # $13
-            user_goals,                # $14
-            user_positions,            # $15
-            gender_filter if gender_filter and gender_filter != 'any' else None  # $16
+            rating_filter if rating_filter and rating_filter != 'any' else None,   # $3
+            position_filter if position_filter and position_filter != 'any' else None,  # $4
+            country_filter if country_filter and country_filter != 'any' else None,  # $5
+            goals_filter if goals_filter and goals_filter != 'any' else None,  # $6
+            role_filter if role_filter else 'player',  # $7
+            limit, offset,           # $8, $9
+            ratings_list,            # $10
+            default_dota_avatar,     # $11
+            default_cs_avatar,       # $12
+            user_rating_idx,         # $13
+            user_goals,              # $14
+            user_positions,          # $15
+            gender_filter if gender_filter and gender_filter != 'any' else None,  # $16
+            user_region if user_region and user_region != 'any' else None,  # $17
         ]
 
         async with self._pg_pool.acquire() as conn:
@@ -822,25 +803,6 @@ class Database:
                 rows = await conn.fetch(query, *params)
                 results = [self._format_profile(row) for row in rows]
 
-                # Детерминированное перемешивание новых анкет на первой странице
-                # Seed меняется каждый день, чтобы анкеты не застревали в одном порядке
-                if offset == 0 and len(results) > 1:
-                    new_profiles = [p for p in results if p.get('display_priority', 0) == 0]
-                    skipped_profiles = [p for p in results if p.get('display_priority', 0) > 0]
-
-                    if new_profiles:
-                        import hashlib, random
-                        from datetime import datetime
-                        # Добавляем день в seed, чтобы порядок менялся ежедневно
-                        today = datetime.now().strftime("%Y-%m-%d")
-                        seed_str = f"{user_id}{game}{filters_hash}{today}"
-                        seed = int(hashlib.md5(seed_str.encode()).hexdigest()[:8], 16)
-                        random.seed(seed)
-                        random.shuffle(new_profiles)
-
-                    results = new_profiles + skipped_profiles
-
-                # Кэшируем только первые страницы
                 if offset < 60:
                     await self._set_cache(cache_key, results, self._cache_ttl['search'])
 
@@ -1703,6 +1665,10 @@ class Database:
                           WHERE b.user_id = users.telegram_id
                           AND b.expires_at > NOW()
                       )
+                      AND EXISTS (
+                          SELECT 1 FROM profiles p
+                          WHERE p.telegram_id = users.telegram_id AND p.is_active = TRUE
+                      )
                 """ % (min_hours, max_hours)
             else:
                 query = """
@@ -1714,6 +1680,10 @@ class Database:
                           SELECT 1 FROM bans b
                           WHERE b.user_id = users.telegram_id
                           AND b.expires_at > NOW()
+                      )
+                      AND EXISTS (
+                          SELECT 1 FROM profiles p
+                          WHERE p.telegram_id = users.telegram_id AND p.is_active = TRUE
                       )
                 """ % min_hours
 
@@ -1948,6 +1918,42 @@ class Database:
             """)
             return [dict(row) for row in rows]
 
+    async def deactivate_inactive_profiles(self, days: int = 30) -> List[int]:
+        """Деактивирует анкеты пользователей неактивных N дней.
+        Возвращает список telegram_id деактивированных пользователей."""
+        async with self._pg_pool.acquire() as conn:
+            rows = await conn.fetch("""
+                UPDATE profiles SET is_active = FALSE
+                WHERE is_active = TRUE
+                  AND telegram_id IN (
+                      SELECT u.telegram_id FROM users u
+                      WHERE (u.last_activity IS NULL OR u.last_activity < NOW() - ($1 || ' days')::INTERVAL)
+                  )
+                  AND NOT EXISTS (
+                      SELECT 1 FROM bans b
+                      WHERE b.user_id = profiles.telegram_id AND b.expires_at > NOW()
+                  )
+                RETURNING DISTINCT telegram_id
+            """, str(days))
+            user_ids = list({row['telegram_id'] for row in rows})
+            if user_ids:
+                await self._clear_pattern_cache("search:*")
+            return user_ids
+
+    async def reactivate_profile(self, user_id: int) -> bool:
+        """Реактивирует анкеты пользователя (is_active = TRUE).
+        Возвращает True если хотя бы одна анкета была реактивирована."""
+        async with self._pg_pool.acquire() as conn:
+            result = await conn.execute(
+                "UPDATE profiles SET is_active = TRUE WHERE telegram_id = $1 AND is_active = FALSE",
+                user_id
+            )
+            reactivated = result != "UPDATE 0"
+            if reactivated:
+                await self._clear_pattern_cache(f"search:*")
+                await self._clear_user_cache(user_id)
+            return reactivated
+
     async def get_database_stats(self) -> Dict[str, Union[int, str]]:
         """Получение детальной статистики базы данных"""
         stats = {}
@@ -2019,3 +2025,30 @@ class Database:
                 )
 
                 logger.info(f"Очищены данные старше {days} дней")
+
+    async def get_all_user_ids(self) -> List[int]:
+        """Возвращает список всех telegram_id пользователей"""
+        async with self._pg_pool.acquire() as conn:
+            rows = await conn.fetch("SELECT telegram_id FROM users")
+            return [row['telegram_id'] for row in rows]
+
+    async def delete_user_completely(self, telegram_id: int) -> bool:
+        """Полное удаление пользователя и всех его данных из БД"""
+        try:
+            async with self._pg_pool.acquire() as conn:
+                async with conn.transaction():
+                    await conn.execute("DELETE FROM likes WHERE from_user = $1 OR to_user = $1", telegram_id)
+                    await conn.execute("DELETE FROM matches WHERE user1 = $1 OR user2 = $1", telegram_id)
+                    await conn.execute("DELETE FROM skipped_likes WHERE user_id = $1 OR skipped_user_id = $1", telegram_id)
+                    await conn.execute("DELETE FROM search_skipped WHERE user_id = $1 OR skipped_user_id = $1", telegram_id)
+                    await conn.execute("DELETE FROM reports WHERE reporter_id = $1 OR reported_user_id = $1", telegram_id)
+                    await conn.execute("DELETE FROM bans WHERE user_id = $1", telegram_id)
+                    await conn.execute("DELETE FROM engagement_history WHERE user_id = $1", telegram_id)
+                    await conn.execute("DELETE FROM profiles WHERE telegram_id = $1", telegram_id)
+                    await conn.execute("DELETE FROM users WHERE telegram_id = $1", telegram_id)
+            await self._clear_user_cache(telegram_id)
+            await self._clear_pattern_cache("search:*")
+            return True
+        except Exception as e:
+            logger.error(f"Ошибка полного удаления пользователя {telegram_id}: {e}")
+            return False

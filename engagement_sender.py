@@ -123,6 +123,53 @@ class EngagementSender:
         except Exception as e:
             logger.error(f"   ❌ Ошибка обработки типа {template_type}: {e}")
 
+    async def deactivate_inactive_profiles(self, days: int = 30):
+        """Деактивирует анкеты пользователей неактивных N дней и уведомляет их"""
+        from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+
+        logger.info(f"\n🔕 Деактивация анкет пользователей неактивных {days}+ дней...")
+
+        try:
+            user_ids = await self.db.deactivate_inactive_profiles(days=days)
+
+            if not user_ids:
+                logger.info("   ℹ️  Нет анкет для деактивации")
+                return
+
+            logger.info(f"   👥 Деактивировано анкет: {len(user_ids)}")
+
+            keyboard = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="Понятно", callback_data="deactivation_ok")]
+            ])
+
+            sent = 0
+            failed = 0
+            for user_id in user_ids:
+                try:
+                    await self.bot.send_message(
+                        chat_id=user_id,
+                        text=(
+                            "Ваша анкета была скрыта из поиска, так как вы не заходили "
+                            "в бот более 30 дней.\n\n"
+                            "Как только вы снова откроете бот, анкета автоматически "
+                            "появится в поиске."
+                        ),
+                        reply_markup=keyboard,
+                        parse_mode='HTML'
+                    )
+                    sent += 1
+                except Exception as e:
+                    error_msg = str(e).lower()
+                    if 'blocked' not in error_msg and 'bot was blocked' not in error_msg:
+                        logger.warning(f"   ⚠️  Не удалось уведомить {user_id}: {e}")
+                    failed += 1
+                await asyncio.sleep(0.05)
+
+            logger.info(f"   ✅ Уведомлено: {sent}, ❌ Ошибок: {failed}")
+
+        except Exception as e:
+            logger.error(f"   ❌ Ошибка деактивации: {e}")
+
     async def _send_to_user(self, user_id: int, template: dict) -> bool:
         """Отправка уведомления одному пользователю"""
         try:
@@ -169,6 +216,7 @@ async def main():
     try:
         # Создаем sender и запускаем отправку
         sender = EngagementSender(bot, db)
+        await sender.deactivate_inactive_profiles(days=30)
         await sender.send_engagement_notifications()
 
     finally:

@@ -116,6 +116,9 @@ async def update_user_activity(user_id: int, state: str = None, db=None):
         # Обновляем поле last_activity в PostgreSQL (для алгоритма подбора)
         await db.update_user_activity(user_id)
 
+        # Реактивируем анкету если пользователь вернулся после деактивации
+        await db.reactivate_profile(user_id)
+
     except Exception as e:
         logger.warning(f"Ошибка обновления активности пользователя {user_id}: {e}")
 

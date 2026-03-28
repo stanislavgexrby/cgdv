@@ -553,7 +553,19 @@ async def start_search_menu(callback: CallbackQuery, state: FSMContext, db):
             profiles_shown=0
         )
         data = await state.get_data()
-    
+
+    # Проверка: ссылка обязательна если в целях турниры
+    profile = await db.get_user_profile(user_id, game)
+    if profile and 'tournaments' in (profile.get('goals') or []) and not (profile.get('profile_url') or '').strip():
+        platform = 'Dotabuff' if game == 'dota' else 'FACEIT'
+        text = (
+            f"Для поиска с целью «Турниры» необходимо указать ссылку на профиль {platform}.\n\n"
+            f"Укажите ссылку или измените цели:"
+        )
+        await safe_edit_message(callback, text, kb.tournament_url_required(game))
+        await callback.answer()
+        return
+
     await state.set_state(SearchForm.menu)
 
     text = await get_full_filters_display(data)

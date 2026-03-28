@@ -366,7 +366,7 @@ async def wrong_age_format(message: Message, state: FSMContext):
 async def process_profile_url(message: Message, state: FSMContext):
     """Обработка введенной ссылки на профиль"""
     if not message.text:
-        await show_validation_error(message, state, "Отправьте ссылку на профиль или нажмите 'Пропустить'")
+        await show_validation_error(message, state, "Отправьте ссылку на профиль текстовым сообщением")
         return
 
     data = await state.get_data()
@@ -380,11 +380,10 @@ async def process_profile_url(message: Message, state: FSMContext):
         return
 
     await state.update_data(profile_url=profile_url)
-    
+
     data = await state.get_data()
-    has_next_data = bool(data.get('region'))
-    
-    await show_profile_step(message, state, ProfileStep.REGION, show_current=has_next_data)
+    has_next_data = 'additional_info' in data
+    await show_profile_step(message, state, ProfileStep.INFO, show_current=has_next_data)
 
 @router.message(ProfileForm.profile_url, ~F.text)
 async def wrong_profile_url_format(message: Message, state: FSMContext):
@@ -641,9 +640,9 @@ async def rating_done(callback: CallbackQuery, state: FSMContext):
         await callback.answer("Выберите рейтинг", show_alert=True)
         return
     
-    has_next_data = data.get('profile_url') is not None
-    
-    await show_profile_step(callback, state, ProfileStep.PROFILE_URL, show_current=has_next_data)
+    has_next_data = bool(data.get('region'))
+
+    await show_profile_step(callback, state, ProfileStep.REGION, show_current=has_next_data)
     await callback.answer()
 
 @router.callback_query(F.data == "rating_need", ProfileForm.rating)
@@ -1042,10 +1041,9 @@ async def goals_done(callback: CallbackQuery, state: FSMContext):
         return
 
     await state.update_data(goals=selected)
-    
-    has_next_data = 'additional_info' in data
-    
-    await show_profile_step(callback, state, ProfileStep.INFO, show_current=has_next_data)
+
+    has_next_data = data.get('profile_url') is not None
+    await show_profile_step(callback, state, ProfileStep.PROFILE_URL, show_current=has_next_data)
     await callback.answer()
 
 @router.callback_query(F.data == "goals_need", ProfileForm.goals)
@@ -1056,12 +1054,16 @@ async def goals_need(callback: CallbackQuery):
 @router.callback_query(F.data == "profile_url_skip", ProfileForm.profile_url)
 async def skip_profile_url(callback: CallbackQuery, state: FSMContext):
     """Пропуск ввода ссылки на профиль"""
-    await state.update_data(profile_url="")
-    
     data = await state.get_data()
-    has_next_data = bool(data.get('region'))
-    
-    await show_profile_step(callback, state, ProfileStep.REGION, show_current=has_next_data)
+    goals = data.get('goals_selected', data.get('goals', []))
+    if 'tournaments' in goals:
+        await callback.answer("Ссылка обязательна, так как вы выбрали цель «Турниры»", show_alert=True)
+        return
+
+    await state.update_data(profile_url="")
+    data = await state.get_data()
+    has_next_data = 'additional_info' in data
+    await show_profile_step(callback, state, ProfileStep.INFO, show_current=has_next_data)
     await callback.answer()
 
 @router.callback_query(F.data == "skip_info", ProfileForm.additional_info)

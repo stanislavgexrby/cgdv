@@ -492,6 +492,12 @@ def gender_filter() -> InlineKeyboardMarkup:
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
+def profile_deactivated_notification() -> InlineKeyboardMarkup:
+    """Уведомление о деактивации анкеты из-за неактивности"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Понятно", callback_data="deactivation_ok")]
+    ])
+
 def gender_force_select() -> InlineKeyboardMarkup:
     """Принудительный выбор пола (без кнопки назад)"""
     buttons = []
@@ -500,6 +506,15 @@ def gender_force_select() -> InlineKeyboardMarkup:
         buttons.append([InlineKeyboardButton(text=name, callback_data=f"force_gender_{key}")])
 
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+def tournament_url_required(game: str = 'dota') -> InlineKeyboardMarkup:
+    """Блокирующий экран: нужна ссылка на профиль для цели «Турниры»"""
+    platform = 'Dotabuff' if game == 'dota' else 'FACEIT'
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"Указать ссылку на {platform}", callback_data="edit_profile_url")],
+        [InlineKeyboardButton(text="Изменить цели", callback_data="edit_goals")],
+        [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+    ])
 
 def role_filter() -> InlineKeyboardMarkup:
     """Фильтр по роли"""
@@ -519,6 +534,15 @@ def skip_profile_url() -> InlineKeyboardMarkup:
     """Пропуск ссылки профиля с навигацией"""
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Пропустить", callback_data="profile_url_skip")],
+        [
+            InlineKeyboardButton(text="Назад", callback_data="profile_back"),
+            InlineKeyboardButton(text="Отмена", callback_data="cancel")
+        ]
+    ])
+
+def required_profile_url() -> InlineKeyboardMarkup:
+    """Ссылка обязательна (выбраны турниры) — без кнопки пропуска"""
+    return InlineKeyboardMarkup(inline_keyboard=[
         [
             InlineKeyboardButton(text="Назад", callback_data="profile_back"),
             InlineKeyboardButton(text="Отмена", callback_data="cancel")
@@ -791,6 +815,7 @@ def admin_main_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="Жалобы", callback_data="admin_reports")],
         [InlineKeyboardButton(text="Баны", callback_data="admin_bans")],
         [InlineKeyboardButton(text="Забанить пользователя", callback_data="admin_ban_user")],
+        [InlineKeyboardButton(text="Очистить заблокировавших бота", callback_data="admin_cleanup_blocked")],
         [InlineKeyboardButton(text="Главное меню", callback_data="back_to_games")]
     ])
 
@@ -826,6 +851,13 @@ def admin_stats_menu() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="📊 Общая статистика", callback_data="admin_stats_general")],
         [InlineKeyboardButton(text="📈 Расширенная аналитика", callback_data="admin_analytics")],
         [InlineKeyboardButton(text="◀️ Админ меню", callback_data="admin_back")]
+    ])
+
+def admin_cleanup_blocked_confirm() -> InlineKeyboardMarkup:
+    """Подтверждение очистки заблокировавших бота"""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Да, удалить", callback_data="admin_cleanup_blocked_confirm")],
+        [InlineKeyboardButton(text="Отмена", callback_data="admin_back")]
     ])
 
 def admin_back_menu() -> InlineKeyboardMarkup:

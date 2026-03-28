@@ -27,6 +27,25 @@ async def show_success_notification(message: Message, text: str, duration: float
     except Exception as e:
         logger.warning(f"Не удалось показать/удалить уведомление: {e}")
 
+async def check_tournament_url_required(callback: CallbackQuery, selected_goals: list, db) -> bool:
+    """Проверяет, нужна ли ссылка для турниров. Если да — показывает блокирующий экран и возвращает True."""
+    if 'tournaments' not in selected_goals:
+        return False
+    user = await db.get_user(callback.from_user.id)
+    if not user:
+        return False
+    game = user.get('current_game', 'dota')
+    profile = await db.get_user_profile(callback.from_user.id, game)
+    if not profile or (profile.get('profile_url') or '').strip():
+        return False
+    platform = 'Dotabuff' if game == 'dota' else 'FACEIT'
+    text = (
+        f"Вы выбрали цель «Турниры». Для поиска необходимо указать ссылку на профиль {platform}.\n\n"
+        f"Укажите ссылку или измените цели:"
+    )
+    await safe_edit_message(callback, text, kb.tournament_url_required(game))
+    return True
+
 async def update_profile_field(user_id: int, field: str, value, db) -> bool:
     """Обновить поле профиля в базе данных"""
     user = await db.get_user(user_id)
@@ -1161,6 +1180,8 @@ async def save_edit_goals(callback: CallbackQuery, state: FSMContext, db):
 
     if success:
         await callback.answer("Цели обновлены")
+        if await check_tournament_url_required(callback, selected, db):
+            return
         await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
     else:
         await callback.answer("Ошибка обновления", show_alert=True)
@@ -1190,6 +1211,8 @@ async def edit_goals_done(callback: CallbackQuery, state: FSMContext, db):
 
     if success:
         await callback.answer("Цели обновлены")
+        if await check_tournament_url_required(callback, selected, db):
+            return
         await show_edit_menu_after_update(callback.from_user.id, db, callback=callback)
     else:
         await callback.answer("Ошибка обновления", show_alert=True)

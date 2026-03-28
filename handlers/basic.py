@@ -622,6 +622,17 @@ async def back_to_editing_handler(callback: CallbackQuery, db):
 
     await callback.answer()
 
+# ==================== ДЕАКТИВАЦИЯ АНКЕТЫ ====================
+
+@router.callback_query(F.data == "deactivation_ok")
+async def deactivation_acknowledged(callback: CallbackQuery):
+    """Пользователь ознакомился с уведомлением о деактивации анкеты"""
+    try:
+        await callback.message.delete()
+    except Exception:
+        pass
+    await callback.answer()
+
 # ==================== ПРИНУДИТЕЛЬНЫЙ ВЫБОР ПОЛА ====================
 
 @router.callback_query(F.data.startswith("force_gender_"))

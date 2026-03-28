@@ -187,203 +187,197 @@ async def show_admin_analytics(callback: CallbackQuery, db):
 
     try:
         async with db._pg_pool.acquire() as conn:
-            # === КОНВЕРСИИ ===
-            total_likes = await conn.fetchval("SELECT COUNT(*) FROM likes")
-            total_matches = await conn.fetchval("SELECT COUNT(*) FROM matches")
-            overall_conversion = (total_matches / total_likes * 100) if total_likes > 0 else 0
 
-            # Конверсия по играм
-            conversions_by_game = await conn.fetch("""
-                SELECT
-                    l.game,
-                    COUNT(DISTINCT l.id) as likes_count,
-                    COUNT(DISTINCT m.id) as matches_count,
-                    CASE
-                        WHEN COUNT(DISTINCT l.id) > 0
-                        THEN ROUND((COUNT(DISTINCT m.id)::numeric / COUNT(DISTINCT l.id) * 100), 1)
-                        ELSE 0
-                    END as conversion_rate
-                FROM likes l
-                LEFT JOIN matches m ON l.from_user = m.user1 AND l.to_user = m.user2 AND l.game = m.game
-                GROUP BY l.game
-            """)
+            # === ВОРОНКА ===
+            total_users = await conn.fetchval("SELECT COUNT(*) FROM users") or 0
+            users_with_profile = await conn.fetchval("SELECT COUNT(DISTINCT telegram_id) FROM profiles") or 0
+            active_profiles = await conn.fetchval("SELECT COUNT(*) FROM profiles WHERE is_active = TRUE") or 0
+            inactive_profiles = await conn.fetchval("SELECT COUNT(*) FROM profiles WHERE is_active = FALSE") or 0
+            profile_rate = (users_with_profile / total_users * 100) if total_users > 0 else 0
 
-            # === АКТИВНОСТЬ ПО ДНЯМ НЕДЕЛИ ===
-            activity_by_day = await conn.fetch("""
-                SELECT
-                    TO_CHAR(created_at, 'Day') as day_name,
-                    EXTRACT(DOW FROM created_at) as day_num,
-                    COUNT(*) as count
-                FROM likes
-                WHERE created_at > NOW() - INTERVAL '30 days'
-                GROUP BY day_num, day_name
-                ORDER BY day_num
-            """)
-
-            # === RETENTION (возвращаемость) ===
-            retention_7d = await conn.fetchval("""
-                WITH first_activity AS (
-                    SELECT telegram_id, MIN(created_at) as first_seen
-                    FROM users
-                    WHERE created_at > NOW() - INTERVAL '14 days'
-                    GROUP BY telegram_id
-                ),
-                returned AS (
-                    SELECT COUNT(DISTINCT u.telegram_id) as count
-                    FROM users u
-                    JOIN first_activity fa ON u.telegram_id = fa.telegram_id
-                    WHERE u.last_activity > fa.first_seen + INTERVAL '7 days'
-                )
-                SELECT count FROM returned
-            """) or 0
-
-            total_new_users_14d = await conn.fetchval("""
-                SELECT COUNT(*) FROM users
-                WHERE created_at > NOW() - INTERVAL '14 days'
-                AND created_at < NOW() - INTERVAL '7 days'
-            """) or 0
-
-            retention_rate = (retention_7d / total_new_users_14d * 100) if total_new_users_14d > 0 else 0
-
-            # === ТОП РЕГИОНЫ ===
-            top_regions = await conn.fetch("""
-                SELECT region, COUNT(*) as count
-                FROM profiles
-                WHERE region IS NOT NULL AND region != 'any'
-                GROUP BY region
-                ORDER BY count DESC
-                LIMIT 10
-            """)
-
-            # === КАЧЕСТВО ПРОФИЛЕЙ ===
-            profile_quality = await conn.fetch("""
-                SELECT quality, COUNT(*) as count
-                FROM (
-                    SELECT
-                        CASE
-                            WHEN (
-                                CASE WHEN rating IS NOT NULL AND rating != 'any' THEN 1 ELSE 0 END +
-                                CASE WHEN positions IS NOT NULL AND jsonb_array_length(positions) > 0 AND positions != '["any"]'::jsonb THEN 1 ELSE 0 END +
-                                CASE WHEN region IS NOT NULL AND region != 'any' THEN 1 ELSE 0 END +
-                                CASE WHEN goals IS NOT NULL AND jsonb_array_length(goals) > 0 AND goals != '["any"]'::jsonb THEN 1 ELSE 0 END +
-                                CASE WHEN additional_info IS NOT NULL AND LENGTH(TRIM(additional_info)) > 0 THEN 1 ELSE 0 END +
-                                CASE WHEN profile_url IS NOT NULL AND LENGTH(TRIM(profile_url)) > 0 THEN 1 ELSE 0 END +
-                                CASE WHEN photo_id IS NOT NULL THEN 1 ELSE 0 END
-                            ) >= 5 THEN 'Отличные (5+ полей)'
-                            WHEN (
-                                CASE WHEN rating IS NOT NULL AND rating != 'any' THEN 1 ELSE 0 END +
-                                CASE WHEN positions IS NOT NULL AND jsonb_array_length(positions) > 0 AND positions != '["any"]'::jsonb THEN 1 ELSE 0 END +
-                                CASE WHEN region IS NOT NULL AND region != 'any' THEN 1 ELSE 0 END +
-                                CASE WHEN goals IS NOT NULL AND jsonb_array_length(goals) > 0 AND goals != '["any"]'::jsonb THEN 1 ELSE 0 END +
-                                CASE WHEN additional_info IS NOT NULL AND LENGTH(TRIM(additional_info)) > 0 THEN 1 ELSE 0 END +
-                                CASE WHEN profile_url IS NOT NULL AND LENGTH(TRIM(profile_url)) > 0 THEN 1 ELSE 0 END +
-                                CASE WHEN photo_id IS NOT NULL THEN 1 ELSE 0 END
-                            ) >= 3 THEN 'Средние (3-4 поля)'
-                            ELSE 'Базовые (≤2 полей)'
-                        END as quality
-                    FROM profiles
-                ) subquery
-                GROUP BY quality
-                ORDER BY
-                    CASE quality
-                        WHEN 'Отличные (5+ полей)' THEN 1
-                        WHEN 'Средние (3-4 поля)' THEN 2
-                        ELSE 3
-                    END
-            """)
+            # === ПРИРОСТ ===
+            new_users_1d = await conn.fetchval("SELECT COUNT(*) FROM users WHERE created_at > NOW() - INTERVAL '1 day'") or 0
+            new_users_7d = await conn.fetchval("SELECT COUNT(*) FROM users WHERE created_at > NOW() - INTERVAL '7 days'") or 0
+            new_users_30d = await conn.fetchval("SELECT COUNT(*) FROM users WHERE created_at > NOW() - INTERVAL '30 days'") or 0
+            new_likes_7d = await conn.fetchval("SELECT COUNT(*) FROM likes WHERE created_at > NOW() - INTERVAL '7 days'") or 0
+            new_matches_7d = await conn.fetchval("SELECT COUNT(*) FROM matches WHERE created_at > NOW() - INTERVAL '7 days'") or 0
 
             # === АКТИВНОСТЬ ПОЛЬЗОВАТЕЛЕЙ ===
             activity_stats = await conn.fetch("""
                 SELECT activity_level, COUNT(*) as count
                 FROM (
-                    SELECT
-                        CASE
-                            WHEN last_activity > NOW() - INTERVAL '3 days' THEN 'Активные (3 дня)'
-                            WHEN last_activity > NOW() - INTERVAL '7 days' THEN 'Средние (7 дней)'
-                            WHEN last_activity > NOW() - INTERVAL '30 days' THEN 'Редкие (30 дней)'
-                            ELSE 'Неактивные (>30 дней)'
-                        END as activity_level
-                    FROM users
-                    WHERE last_activity IS NOT NULL
-                ) subquery
+                    SELECT CASE
+                        WHEN last_activity > NOW() - INTERVAL '3 days'  THEN 'до 3 дней'
+                        WHEN last_activity > NOW() - INTERVAL '7 days'  THEN '3–7 дней'
+                        WHEN last_activity > NOW() - INTERVAL '30 days' THEN '7–30 дней'
+                        ELSE 'более 30 дней'
+                    END as activity_level
+                    FROM users WHERE last_activity IS NOT NULL
+                ) s
                 GROUP BY activity_level
-                ORDER BY
-                    CASE activity_level
-                        WHEN 'Активные (3 дня)' THEN 1
-                        WHEN 'Средние (7 дней)' THEN 2
-                        WHEN 'Редкие (30 дней)' THEN 3
-                        ELSE 4
-                    END
+                ORDER BY CASE activity_level
+                    WHEN '< 3 дней' THEN 1 WHEN '3–7 дней' THEN 2
+                    WHEN '7–30 дней' THEN 3 ELSE 4 END
             """)
 
+            # === RETENTION ===
+            retention_base = await conn.fetchval("""
+                SELECT COUNT(*) FROM users
+                WHERE created_at > NOW() - INTERVAL '14 days'
+                AND created_at < NOW() - INTERVAL '7 days'
+            """) or 0
+            retention_returned = await conn.fetchval("""
+                SELECT COUNT(DISTINCT u.telegram_id) FROM users u
+                WHERE u.created_at > NOW() - INTERVAL '14 days'
+                AND u.created_at < NOW() - INTERVAL '7 days'
+                AND u.last_activity > u.created_at + INTERVAL '7 days'
+            """) or 0
+            retention_rate = (retention_returned / retention_base * 100) if retention_base > 0 else 0
+
+            # === АУДИТОРИЯ: пол, роль ===
+            gender_stats = await conn.fetch("""
+                SELECT COALESCE(gender, 'не указан') as gender, COUNT(*) as count
+                FROM profiles GROUP BY gender ORDER BY count DESC
+            """)
+            role_stats = await conn.fetch("""
+                SELECT COALESCE(role, 'player') as role, COUNT(*) as count
+                FROM profiles GROUP BY role ORDER BY count DESC
+            """)
+            avg_age = await conn.fetchval(
+                "SELECT ROUND(AVG(age), 1) FROM profiles WHERE age IS NOT NULL AND age > 0"
+            ) or 0
+
+            # === АУДИТОРИЯ: игры ===
+            game_stats = await conn.fetch("""
+                SELECT game, COUNT(*) as count FROM profiles GROUP BY game ORDER BY count DESC
+            """)
+
+            # === ТОП-5 РЕГИОНОВ ===
+            top_regions = await conn.fetch("""
+                SELECT region, COUNT(*) as count FROM profiles
+                WHERE region IS NOT NULL AND region != 'any'
+                GROUP BY region ORDER BY count DESC LIMIT 5
+            """)
+
+            # === КОНВЕРСИЯ ЛАЙКОВ ===
+            total_likes = await conn.fetchval("SELECT COUNT(*) FROM likes") or 0
+            total_matches = await conn.fetchval("SELECT COUNT(*) FROM matches") or 0
+            overall_conv = (total_matches / total_likes * 100) if total_likes > 0 else 0
+            conv_by_game = await conn.fetch("""
+                SELECT l.game,
+                    COUNT(DISTINCT l.id) as likes,
+                    COUNT(DISTINCT m.id) as matches,
+                    CASE WHEN COUNT(DISTINCT l.id) > 0
+                        THEN ROUND(COUNT(DISTINCT m.id)::numeric / COUNT(DISTINCT l.id) * 100, 1)
+                        ELSE 0 END as rate
+                FROM likes l
+                LEFT JOIN matches m ON l.from_user = m.user1 AND l.to_user = m.user2 AND l.game = m.game
+                GROUP BY l.game
+            """)
+            never_liked = await conn.fetchval("""
+                SELECT COUNT(DISTINCT p.telegram_id) FROM profiles p
+                WHERE NOT EXISTS (SELECT 1 FROM likes WHERE from_user = p.telegram_id)
+            """) or 0
+
+            # === КАЧЕСТВО АНКЕТ ===
+            with_photo = await conn.fetchval("SELECT COUNT(*) FROM profiles WHERE photo_id IS NOT NULL") or 0
+            with_desc = await conn.fetchval("SELECT COUNT(*) FROM profiles WHERE additional_info IS NOT NULL AND TRIM(additional_info) != ''") or 0
+            with_url = await conn.fetchval("SELECT COUNT(*) FROM profiles WHERE profile_url IS NOT NULL AND TRIM(profile_url) != ''") or 0
+            total_profiles = await conn.fetchval("SELECT COUNT(*) FROM profiles") or 0
+            # Цель турниры, но нет ссылки
+            tournaments_no_url = await conn.fetchval("""
+                SELECT COUNT(*) FROM profiles
+                WHERE goals @> '["tournaments"]'::jsonb
+                AND (profile_url IS NULL OR TRIM(profile_url) = '')
+            """) or 0
+
+            # === МОДЕРАЦИЯ ===
+            reports_pending = await conn.fetchval("SELECT COUNT(*) FROM reports WHERE status = 'pending'") or 0
+            reports_resolved = await conn.fetchval("SELECT COUNT(*) FROM reports WHERE status = 'resolved'") or 0
+            reports_rejected = await conn.fetchval("SELECT COUNT(*) FROM reports WHERE status = 'rejected'") or 0
+            active_bans = await conn.fetchval("SELECT COUNT(*) FROM bans WHERE expires_at > NOW()") or 0
+
             # === ФОРМИРУЕМ ТЕКСТ ===
-            lines = [
-                "📊 <b>РАСШИРЕННАЯ АНАЛИТИКА</b>",
+            GAME_NAMES = {'dota': 'Dota 2', 'cs': 'CS2'}
+            ROLE_NAMES = {'player': 'Игрок', 'coach': 'Тренер', 'manager': 'Менеджер'}
+            GENDER_NAMES = {'male': 'Парень', 'female': 'Девушка', 'не указан': 'Не указан'}
+
+            lines = ["<b>РАСШИРЕННАЯ АНАЛИТИКА</b>", ""]
+
+            # Воронка
+            lines += [
+                "<b>ВОРОНКА</b>",
+                f"  Пользователей: {total_users}",
+                f"  С анкетой: {users_with_profile} ({profile_rate:.0f}%)",
+                f"  Активных анкет: {active_profiles}",
+                f"  Деактивированных: {inactive_profiles}",
                 "",
-                "<b>💹 КОНВЕРСИИ:</b>",
-                f"  Общая конверсия: {overall_conversion:.1f}%",
-                f"  (Мэтчи / Лайки: {total_matches} / {total_likes})",
             ]
 
-            if conversions_by_game:
-                lines.append("\n  По играм:")
-                for row in conversions_by_game:
-                    game_name = "Dota 2" if row['game'] == 'dota' else "CS2"
-                    lines.append(f"    • {game_name}: {row['conversion_rate']}% ({row['matches_count']}/{row['likes_count']})")
-
-            # Активность по дням
-            lines.extend([
+            # Прирост
+            lines += [
+                "<b>ПРИРОСТ</b>",
+                f"  Новых за 24ч / 7д / 30д: {new_users_1d} / {new_users_7d} / {new_users_30d}",
+                f"  Лайков за 7д: {new_likes_7d}",
+                f"  Мэтчей за 7д: {new_matches_7d}",
                 "",
-                "<b>📅 АКТИВНОСТЬ ПО ДНЯМ НЕДЕЛИ:</b>",
-                "  (лайки за последние 30 дней)"
-            ])
+            ]
 
-            if activity_by_day:
-                for row in activity_by_day:
-                    day_name = row['day_name'].strip()
-                    bars = '█' * (row['count'] // 10 + 1)
-                    lines.append(f"  {day_name}: {bars} {row['count']}")
+            # Активность
+            lines.append("<b>АКТИВНОСТЬ (последний визит)</b>")
+            for row in activity_stats:
+                lines.append(f"  {row['activity_level']}: {row['count']}")
+            lines += [f"  7д Retention: {retention_rate:.0f}% ({retention_returned}/{retention_base})", ""]
 
-            # Retention
-            lines.extend([
-                "",
-                "<b>🔄 RETENTION (возвращаемость):</b>",
-                f"  7-дневный retention: {retention_rate:.1f}%",
-                f"  ({retention_7d} из {total_new_users_14d} вернулись)"
-            ])
-
-            # Топ регионы
+            # Аудитория
+            lines.append("<b>АУДИТОРИЯ</b>")
+            gender_parts = [f"{GENDER_NAMES.get(r['gender'], r['gender'])} {r['count']}" for r in gender_stats]
+            lines.append(f"  Пол: {', '.join(gender_parts)}")
+            role_parts = [f"{ROLE_NAMES.get(r['role'], r['role'])} {r['count']}" for r in role_stats]
+            lines.append(f"  Роль: {', '.join(role_parts)}")
+            lines.append(f"  Средний возраст: {avg_age}")
+            game_parts = [f"{GAME_NAMES.get(r['game'], r['game'])} {r['count']}" for r in game_stats]
+            lines.append(f"  Игры: {', '.join(game_parts)}")
             if top_regions:
-                lines.extend([
-                    "",
-                    "<b>🌍 ТОП-10 РЕГИОНОВ:</b>"
-                ])
-                for i, row in enumerate(top_regions, 1):
-                    lines.append(f"  {i}. {row['region']}: {row['count']}")
+                region_parts = [f"{r['region']} {r['count']}" for r in top_regions]
+                lines.append(f"  Топ регионы: {', '.join(region_parts)}")
+            lines.append("")
 
-            # Качество профилей
-            if profile_quality:
-                lines.extend([
-                    "",
-                    "<b>⭐ КАЧЕСТВО ПРОФИЛЕЙ:</b>"
-                ])
-                for row in profile_quality:
-                    lines.append(f"  • {row['quality']}: {row['count']}")
+            # Конверсия
+            lines += [
+                "<b>ЛАЙКИ И МЭТЧИ</b>",
+                f"  Всего лайков / мэтчей: {total_likes} / {total_matches}",
+                f"  Конверсия: {overall_conv:.1f}%",
+            ]
+            for row in conv_by_game:
+                game_name = GAME_NAMES.get(row['game'], row['game'])
+                lines.append(f"    {game_name}: {row['rate']}% ({row['matches']}/{row['likes']})")
+            lines += [f"  Никогда не лайкали: {never_liked}", ""]
 
-            # Активность пользователей
-            if activity_stats:
-                lines.extend([
-                    "",
-                    "<b>📈 АКТИВНОСТЬ ПОЛЬЗОВАТЕЛЕЙ:</b>"
-                ])
-                for row in activity_stats:
-                    lines.append(f"  • {row['activity_level']}: {row['count']}")
+            # Качество анкет
+            if total_profiles > 0:
+                lines += [
+                    "<b>КАЧЕСТВО АНКЕТ</b>",
+                    f"  С фото: {with_photo} ({with_photo*100//total_profiles}%)",
+                    f"  С описанием: {with_desc} ({with_desc*100//total_profiles}%)",
+                    f"  Со ссылкой: {with_url} ({with_url*100//total_profiles}%)",
+                ]
+                if tournaments_no_url > 0:
+                    lines.append(f"  Турниры без ссылки: {tournaments_no_url}")
+                lines.append("")
+
+            # Модерация
+            lines += [
+                "<b>МОДЕРАЦИЯ</b>",
+                f"  Жалоб: ожидает {reports_pending} / решено {reports_resolved} / отклонено {reports_rejected}",
+                f"  Активных банов: {active_bans}",
+            ]
 
             text = "\n".join(lines)
 
     except Exception as e:
         logger.error(f"Ошибка получения аналитики: {e}")
-        text = f"❌ Ошибка получения аналитики:\n\n{str(e)}"
+        text = f"Ошибка получения аналитики:\n\n{str(e)}"
 
     await safe_edit_message(callback, text, kb.admin_stats_menu())
     await callback.answer()
@@ -2798,3 +2792,61 @@ async def _apply_ban(source, state: FSMContext, db, reason: str):
             await source.answer(error_text)
 
     await state.clear()
+
+# ==================== ОЧИСТКА ЗАБЛОКИРОВАВШИХ БОТА ====================
+
+@router.callback_query(F.data == "admin_cleanup_blocked")
+@admin_only
+async def cleanup_blocked_start(callback: CallbackQuery):
+    """Показывает экран подтверждения перед очисткой"""
+    text = (
+        "Очистка заблокировавших бота\n\n"
+        "Бот проверит всех пользователей, отправив каждому <code>chat action</code>.\n"
+        "Пользователи, которые заблокировали бота или удалили аккаунт, будут полностью удалены из базы данных.\n\n"
+        "Это действие необратимо. Продолжить?"
+    )
+    await safe_edit_message(callback, text, kb.admin_cleanup_blocked_confirm())
+    await callback.answer()
+
+
+@router.callback_query(F.data == "admin_cleanup_blocked_confirm")
+@admin_only
+async def cleanup_blocked_run(callback: CallbackQuery, db):
+    """Запускает проверку и удаление пользователей, заблокировавших бота"""
+    from aiogram.exceptions import TelegramForbiddenError, TelegramBadRequest
+
+    await safe_edit_message(callback, "Запускаю проверку, это может занять некоторое время...", kb.admin_back_menu())
+    await callback.answer()
+
+    user_ids = await db.get_all_user_ids()
+    total = len(user_ids)
+    blocked_ids = []
+
+    for user_id in user_ids:
+        try:
+            await callback.bot.send_chat_action(chat_id=user_id, action="typing")
+        except TelegramForbiddenError:
+            blocked_ids.append(user_id)
+        except TelegramBadRequest as e:
+            err = str(e).lower()
+            if "user deactivated" in err or "chat not found" in err:
+                blocked_ids.append(user_id)
+        except Exception:
+            pass
+        await asyncio.sleep(0.05)
+
+    deleted = 0
+    for user_id in blocked_ids:
+        success = await db.delete_user_completely(user_id)
+        if success:
+            deleted += 1
+
+    logger.info(f"Очистка заблокировавших: проверено {total}, удалено {deleted}")
+
+    text = (
+        f"Готово!\n\n"
+        f"Проверено пользователей: {total}\n"
+        f"Обнаружено недоступных: {len(blocked_ids)}\n"
+        f"Успешно удалено: {deleted}"
+    )
+    await safe_edit_message(callback, text, kb.admin_back_menu())

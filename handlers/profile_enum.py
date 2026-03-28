@@ -48,10 +48,10 @@ PROFILE_STEPS_ORDER = [
     ProfileStep.AGE,
     ProfileStep.ROLE,
     ProfileStep.RATING,
-    ProfileStep.PROFILE_URL,
     ProfileStep.REGION,
     ProfileStep.POSITIONS,
     ProfileStep.GOALS,
+    ProfileStep.PROFILE_URL,
     ProfileStep.INFO,
     ProfileStep.PHOTO
 ]
@@ -167,9 +167,15 @@ async def get_step_question_text(step: ProfileStep, data: dict = None, show_curr
         return "Выберите рейтинг:"
     elif step == ProfileStep.PROFILE_URL:
         game = data.get('game', 'dota') if data else 'dota'
+        goals = data.get('goals_selected', data.get('goals', [])) if data else []
+        url_required = 'tournaments' in goals
         if game == 'dota':
+            if url_required:
+                return "Введите ссылку на профиль Dotabuff:\n\nНапример: https://www.dotabuff.com/players/123456789\n\n<i>Ссылка обязательна, так как вы выбрали цель «Турниры»</i>"
             return "Введите ссылку на профиль Dotabuff или нажмите 'Пропустить':\n\nНапример: https://www.dotabuff.com/players/123456789"
         elif game == 'cs':
+            if url_required:
+                return "Введите ссылку на профиль FACEIT:\n\nНапример: https://www.faceit.com/en/players/nickname\n\n<i>Ссылка обязательна, так как вы выбрали цель «Турниры»</i>"
             return "Введите ссылку на профиль FACEIT или нажмите 'Пропустить':\n\nНапример: https://www.faceit.com/en/players/nickname"
     elif step == ProfileStep.REGION:
         return "Выберите страну:"
@@ -260,7 +266,9 @@ async def show_profile_step(callback_or_message, state: FSMContext, step: Profil
         if show_continue_button:
             keyboard = kb.profile_creation_navigation(step.value, show_continue_button)
         else:
-            keyboard = kb.skip_profile_url()
+            goals = data.get('goals_selected', data.get('goals', []))
+            url_required = 'tournaments' in goals
+            keyboard = kb.required_profile_url() if url_required else kb.skip_profile_url()
 
     elif step == ProfileStep.REGION:
         await state.set_state(ProfileForm.region)

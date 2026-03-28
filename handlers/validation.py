@@ -104,7 +104,8 @@ async def show_validation_error(message: Message, state: FSMContext, error_text:
     elif current_step == 'age':
         keyboard = kb.profile_creation_navigation("age", False)
     elif current_step == 'profile_url':
-        keyboard = kb.skip_profile_url()
+        goals = data.get('goals_selected', data.get('goals', []))
+        keyboard = kb.required_profile_url() if 'tournaments' in goals else kb.skip_profile_url()
     elif current_step == 'additional_info':
         keyboard = kb.skip_info()
     elif current_step == 'photo':
