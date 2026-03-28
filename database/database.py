@@ -1691,13 +1691,15 @@ class Database:
             return [row['telegram_id'] for row in rows]
 
     async def get_unviewed_likes_count(self, user_id: int) -> int:
-        """Получение количества непросмотренных лайков пользователя"""
+        """Получение количества непросмотренных лайков пользователя.
+        Считаем лайки, полученные после последней активности пользователя."""
         async with self._pg_pool.acquire() as conn:
-            # Считаем все входящие лайки пользователю
             count = await conn.fetchval("""
                 SELECT COUNT(*)
-                FROM likes
-                WHERE to_user = $1
+                FROM likes l
+                JOIN users u ON u.telegram_id = l.to_user
+                WHERE l.to_user = $1
+                  AND (u.last_activity IS NULL OR l.created_at > u.last_activity)
             """, user_id)
 
             return count or 0
@@ -1745,16 +1747,20 @@ class Database:
         Returns:
             True если нужно отправить, False если нет
         """
-        template_id = template['id']
+        template_type = template['type']
         min_interval_hours = template.get('min_interval_hours', 24)
 
-        # Проверяем когда последний раз отправляли
-        last_sent = await self.get_last_engagement_sent(user_id, template_id)
+        # Проверяем когда последний раз отправляли ЛЮБОЙ вариант этого типа
+        async with self._pg_pool.acquire() as conn:
+            last_sent = await conn.fetchval("""
+                SELECT MAX(eh.sent_at) FROM engagement_history eh
+                JOIN engagement_templates et ON eh.template_id = et.id
+                WHERE eh.user_id = $1 AND et.type = $2
+            """, user_id, template_type)
 
         if last_sent:
-            from datetime import datetime, timedelta
-            hours_since_last = (datetime.now() - last_sent).total_seconds() / 3600
-
+            from datetime import datetime
+            hours_since_last = (datetime.utcnow() - last_sent).total_seconds() / 3600
             if hours_since_last < min_interval_hours:
                 return False
 
@@ -1767,8 +1773,6 @@ class Database:
 
         if not conditions:
             return True
-
-        template_type = template['type']
 
         # Проверка для непросмотренных лайков
         if 'min_unviewed_likes' in conditions:
@@ -1815,14 +1819,18 @@ class Database:
         # Для уведомлений о непросмотренных лайках
         elif 'min_unviewed_likes' in conditions:
             async with self._pg_pool.acquire() as conn:
-                # Получаем всех пользователей у которых есть входящие лайки
                 rows = await conn.fetch("""
                     SELECT DISTINCT l.to_user as telegram_id
                     FROM likes l
-                    WHERE NOT EXISTS (
+                    JOIN users u ON u.telegram_id = l.to_user
+                    WHERE (u.last_activity IS NULL OR l.created_at > u.last_activity)
+                    AND NOT EXISTS (
                         SELECT 1 FROM bans b
-                        WHERE b.user_id = l.to_user
-                        AND b.expires_at > NOW()
+                        WHERE b.user_id = l.to_user AND b.expires_at > NOW()
+                    )
+                    AND EXISTS (
+                        SELECT 1 FROM profiles p
+                        WHERE p.telegram_id = l.to_user AND p.is_active = TRUE
                     )
                 """)
                 users = [row['telegram_id'] for row in rows]
@@ -1830,14 +1838,13 @@ class Database:
         # Для уведомлений о новых анкетах
         elif 'min_new_profiles' in conditions:
             async with self._pg_pool.acquire() as conn:
-                # Получаем всех пользователей с анкетами
                 rows = await conn.fetch("""
                     SELECT DISTINCT telegram_id
                     FROM profiles
-                    WHERE NOT EXISTS (
+                    WHERE is_active = TRUE
+                    AND NOT EXISTS (
                         SELECT 1 FROM bans b
-                        WHERE b.user_id = profiles.telegram_id
-                        AND b.expires_at > NOW()
+                        WHERE b.user_id = profiles.telegram_id AND b.expires_at > NOW()
                     )
                 """)
                 users = [row['telegram_id'] for row in rows]
@@ -1865,33 +1872,27 @@ class Database:
         message = template['message_text']
         template_type = template.get('type', '')
 
-        # Подсчитываем данные для плейсхолдеров
-        unviewed_likes = await self.get_unviewed_likes_count(user_id)
-        new_profiles = await self.get_new_profiles_count_for_user(user_id, 7)
-
-        # Если данных нет (0), заменяем на случайные правдоподобные числа
-        # чтобы не показывать "0 новых анкет"
-        if unviewed_likes == 0:
-            # Для лайков: от 1 до 3
-            unviewed_likes = random.randint(1, 3)
-
-        if new_profiles == 0:
-            # Для новых анкет: диапазон зависит от периода неактивности
-            if 'inactive_2h' in template_type or 'inactive_1d' in template_type:
-                new_profiles = random.randint(3, 8)  # 2 часа - 1 день
-            elif 'inactive_3d' in template_type:
-                new_profiles = random.randint(15, 35)  # 3 дня
+        # {profile_views} — количество новых регистраций за период неактивности
+        if '{profile_views}' in message:
+            if 'inactive_3d' in template_type:
+                period_days = 3
+                fallback_min, fallback_max = 15, 40
             elif 'inactive_1w' in template_type:
-                new_profiles = random.randint(30, 60)  # 1 неделя
-            elif 'inactive_1m' in template_type:
-                new_profiles = random.randint(150, 300)  # 1 месяц
+                period_days = 7
+                fallback_min, fallback_max = 30, 70
             else:
-                new_profiles = random.randint(10, 30)  # По умолчанию
+                period_days = 7
+                fallback_min, fallback_max = 10, 30
 
-        # Заменяем плейсхолдеры
-        message = message.replace('{count}', str(unviewed_likes))
-        message = message.replace('{unviewed_likes}', str(unviewed_likes))
-        message = message.replace('{new_profiles}', str(new_profiles))
+            real_count = await self.get_new_profiles_count_for_user(user_id, period_days)
+            profile_views = random.randint(fallback_min, fallback_max) if real_count == 0 else real_count
+            message = message.replace('{profile_views}', str(profile_views))
+
+        # {count} / {unviewed_likes} — только если шаблон их использует
+        if '{count}' in message or '{unviewed_likes}' in message:
+            unviewed_likes = await self.get_unviewed_likes_count(user_id)
+            message = message.replace('{count}', str(unviewed_likes))
+            message = message.replace('{unviewed_likes}', str(unviewed_likes))
 
         # Можно добавить еще плейсхолдеры по необходимости
 

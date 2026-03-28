@@ -2,7 +2,7 @@
 """
 Автоматическая отправка engagement-уведомлений пользователям
 
-Этот скрипт запускается периодически (например, каждые 30 минут через cron)
+Этот скрипт запускается раз в день через cron
 и отправляет уведомления пользователям согласно настроенным шаблонам.
 """
 import asyncio
@@ -204,6 +204,16 @@ class EngagementSender:
 
 async def main():
     """Главная функция"""
+    import fcntl
+
+    lock_file = open('/tmp/engagement_sender.lock', 'w')
+    try:
+        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        logger.warning("⚠️  Предыдущий запуск ещё не завершён, пропускаем")
+        lock_file.close()
+        return
+
     logger.info("🤖 Инициализация бота и БД...")
 
     # Инициализируем бота
@@ -216,13 +226,15 @@ async def main():
     try:
         # Создаем sender и запускаем отправку
         sender = EngagementSender(bot, db)
-        await sender.deactivate_inactive_profiles(days=30)
+        await sender.deactivate_inactive_profiles(days=31)
         await sender.send_engagement_notifications()
 
     finally:
         # Закрываем соединения
         await db.close()
         await bot.session.close()
+        fcntl.flock(lock_file, fcntl.LOCK_UN)
+        lock_file.close()
 
 
 if __name__ == "__main__":
