@@ -150,9 +150,8 @@ class EngagementSender:
                         chat_id=user_id,
                         text=(
                             "Ваша анкета была скрыта из поиска, так как вы не заходили "
-                            "в бот более 30 дней.\n\n"
-                            "Как только вы снова откроете бот, анкета автоматически "
-                            "появится в поиске."
+                            "в бота более 30 дней\n\n"
+                            "Просмотри несколько анкет и ты снова вернешься в поиск"
                         ),
                         reply_markup=keyboard,
                         parse_mode='HTML'
@@ -160,7 +159,8 @@ class EngagementSender:
                     sent += 1
                 except Exception as e:
                     error_msg = str(e).lower()
-                    if 'blocked' not in error_msg and 'bot was blocked' not in error_msg:
+                    if 'blocked' not in error_msg and 'bot was blocked' not in
+                    error_msg:
                         logger.warning(f"   ⚠️  Не удалось уведомить {user_id}: {e}")
                     failed += 1
                 await asyncio.sleep(0.05)
