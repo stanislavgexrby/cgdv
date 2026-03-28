@@ -1699,7 +1699,8 @@ class Database:
                 FROM likes l
                 JOIN users u ON u.telegram_id = l.to_user
                 WHERE l.to_user = $1
-                  AND (u.last_activity IS NULL OR l.created_at > u.last_activity)
+                  AND u.last_activity IS NOT NULL
+                  AND l.created_at > u.last_activity
             """, user_id)
 
             return count or 0
@@ -1823,7 +1824,8 @@ class Database:
                     SELECT DISTINCT l.to_user as telegram_id
                     FROM likes l
                     JOIN users u ON u.telegram_id = l.to_user
-                    WHERE (u.last_activity IS NULL OR l.created_at > u.last_activity)
+                    WHERE u.last_activity IS NOT NULL
+                    AND l.created_at > u.last_activity
                     AND NOT EXISTS (
                         SELECT 1 FROM bans b
                         WHERE b.user_id = l.to_user AND b.expires_at > NOW()
@@ -1934,7 +1936,7 @@ class Database:
                       SELECT 1 FROM bans b
                       WHERE b.user_id = profiles.telegram_id AND b.expires_at > NOW()
                   )
-                RETURNING DISTINCT telegram_id
+                RETURNING telegram_id
             """, str(days))
             user_ids = list({row['telegram_id'] for row in rows})
             if user_ids:
