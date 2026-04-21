@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 import os
 from pathlib import Path
 from aiogram import Bot, Dispatcher
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.storage.memory import MemoryStorage
 from dotenv import load_dotenv, find_dotenv
 
@@ -234,7 +235,12 @@ async def main():
         logger.info("🔑 BOT_TOKEN загружен успешно")
 
         # Создаем бота и диспетчер
-        bot = Bot(token=token)
+        socks_proxy = os.getenv("SOCKS5_PROXY")
+        if socks_proxy:
+            logger.info(f"🔀 Используем SOCKS5 прокси: {socks_proxy}")
+            bot = Bot(token=token, session=AiohttpSession(proxy=socks_proxy))
+        else:
+            bot = Bot(token=token)
         dp = Dispatcher(storage=MemoryStorage())
         logger.info("🤖 Bot и Dispatcher созданы")
 
