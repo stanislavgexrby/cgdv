@@ -78,10 +78,12 @@ class Database:
         redis_url = f"redis://{redis_host}:{redis_port}/{redis_db}"
 
         self._redis = redis.from_url(
-            redis_url, 
+            redis_url,
             decode_responses=True,
-            max_connections=20,
+            max_connections=100,
             retry_on_timeout=True,
+            socket_connect_timeout=5,
+            socket_timeout=5,
             socket_keepalive=True,
             socket_keepalive_options={}
         )
