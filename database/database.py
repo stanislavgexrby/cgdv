@@ -74,8 +74,12 @@ class Database:
         redis_host = os.getenv('REDIS_HOST', 'localhost')
         redis_port = os.getenv('REDIS_PORT', '6379')
         redis_db = os.getenv('REDIS_DB', '0')
+        redis_password = os.getenv('REDIS_PASSWORD', '')
 
-        redis_url = f"redis://{redis_host}:{redis_port}/{redis_db}"
+        if redis_password:
+            redis_url = f"redis://:{redis_password}@{redis_host}:{redis_port}/{redis_db}"
+        else:
+            redis_url = f"redis://{redis_host}:{redis_port}/{redis_db}"
 
         self._redis = redis.from_url(
             redis_url,
@@ -384,7 +388,11 @@ class Database:
     # === ОПТИМИЗИРОВАННОЕ КЭШИРОВАНИЕ ===
 
     async def _get_cache(self, key: str):
-        raw = await self._redis.get(key)
+        try:
+            raw = await self._redis.get(key)
+        except Exception as e:
+            logger.warning(f"Redis get error for {key}: {e}")
+            return None
         if raw is None:
             return None
         if isinstance(raw, bytes):
