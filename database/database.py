@@ -82,8 +82,8 @@ class Database:
             decode_responses=True,
             max_connections=100,
             retry_on_timeout=True,
-            socket_connect_timeout=5,
-            socket_timeout=5,
+            socket_connect_timeout=10,
+            socket_timeout=30,
             socket_keepalive=True,
             socket_keepalive_options={}
         )
@@ -402,29 +402,32 @@ class Database:
         except Exception as e:
             logger.warning(f"Ошибка записи в кэш {key}: {e}")
 
+    async def _delete_keys_batched(self, pattern: str):
+        cursor = 0
+        while True:
+            cursor, batch = await self._redis.scan(cursor, match=pattern, count=100)
+            if batch:
+                await self._redis.delete(*batch)
+            if cursor == 0:
+                break
+
     async def _clear_user_cache(self, user_id: int):
-        """Очистка всего кэша пользователя"""
         try:
             patterns = [
                 f"user:{user_id}*",
-                f"profile:{user_id}:*", 
+                f"profile:{user_id}:*",
                 f"search:{user_id}:*",
                 f"matches:{user_id}:*",
                 f"likes:{user_id}:*"
             ]
             for pattern in patterns:
-                keys = await self._redis.keys(pattern)
-                if keys:
-                    await self._redis.delete(*keys)
+                await self._delete_keys_batched(pattern)
         except Exception as e:
             logger.error(f"Ошибка очистки кэша пользователя {user_id}: {e}")
 
     async def _clear_pattern_cache(self, pattern: str):
-        """Очистка кэша по паттерну"""
         try:
-            keys = await self._redis.keys(pattern)
-            if keys:
-                await self._redis.delete(*keys)
+            await self._delete_keys_batched(pattern)
         except Exception as e:
             logger.warning(f"Ошибка очистки кэша по паттерну {pattern}: {e}")
 
